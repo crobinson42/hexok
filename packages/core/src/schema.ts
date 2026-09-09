@@ -1,0 +1,40 @@
+import { fail, ok, type Result } from './result.js';
+import type { StandardSchemaV1 } from './standard-schema.js';
+
+/** Output type of a Standard Schema V1 schema. */
+export type Infer<S extends StandardSchemaV1> = NonNullable<
+  S['~standard']['types']
+>['output'];
+
+/**
+ * Validate `value` with a Standard Schema. Sync only.
+ *
+ * Issues collapse to `'VALIDATION'` — the domain trust boundary is binary.
+ * Async schemas belong at the RPC boundary and throw.
+ *
+ * ```ts
+ * const parsed = validate(Incident.schema, body)
+ * if (!parsed.ok) return parsed
+ * ```
+ */
+export function validate<S extends StandardSchemaV1>(
+  schema: S,
+  value: unknown,
+): Result<Infer<S>, 'VALIDATION'> {
+  const result = schema['~standard'].validate(value);
+  if (isPromise(result)) {
+    throw new Error('plinth: async schemas belong at the RPC boundary');
+  }
+  if (result.issues) {
+    return fail('VALIDATION');
+  }
+  return ok(result.value as Infer<S>);
+}
+
+function isPromise(
+  value:
+    | StandardSchemaV1.Result<unknown>
+    | Promise<StandardSchemaV1.Result<unknown>>,
+): value is Promise<StandardSchemaV1.Result<unknown>> {
+  return typeof (value as Promise<unknown>).then === 'function';
+}

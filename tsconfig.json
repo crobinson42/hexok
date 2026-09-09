@@ -1,0 +1,13 @@
+{
+  "files": [],
+  "references": [
+    { "path": "packages/core" },
+    { "path": "packages/domain" },
+    { "path": "packages/app" },
+    { "path": "packages/runtime" },
+    { "path": "packages/infra" },
+    { "path": "packages/testing" },
+    { "path": "examples/crud-app" },
+    { "path": "examples/extend" }
+  ]
+}

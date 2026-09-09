@@ -1,0 +1,20 @@
+{
+  "$schema": "https://unpkg.com/@changesets/config@3.1.1/schema.json",
+  "changelog": "@changesets/cli/changelog",
+  "commit": false,
+  "fixed": [],
+  "linked": [
+    [
+      "@plinth/core",
+      "@plinth/domain",
+      "@plinth/app",
+      "@plinth/infra",
+      "@plinth/runtime",
+      "@plinth/testing"
+    ]
+  ],
+  "access": "public",
+  "baseBranch": "main",
+  "updateInternalDependencies": "patch",
+  "ignore": ["@plinth/crud-app", "@plinth/extend"]
+}

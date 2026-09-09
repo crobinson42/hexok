@@ -1,0 +1,22 @@
+{
+  "name": "@plinth/crud-app",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "tsc -b",
+    "test": "vitest run",
+    "type-check": "tsc --noEmit -p tsconfig.check.json",
+    "lint": "biome check .",
+    "start": "node dist/main.js",
+    "clean": "rm -rf dist *.tsbuildinfo"
+  },
+  "dependencies": {
+    "@plinth/app": "*",
+    "@plinth/core": "*",
+    "@plinth/domain": "*",
+    "@plinth/runtime": "*",
+    "@plinth/testing": "*",
+    "zod": "^4.1.5"
+  }
+}

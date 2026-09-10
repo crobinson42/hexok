@@ -7,7 +7,7 @@ import type {
   EventClass,
   EventPayload,
 } from '../domain/index.js';
-import type { ErrorFactories, ResolvedPorts } from './types.js';
+import type { ApiUseCaseCtor, ErrorFactories, ResolvedPorts } from './types.js';
 
 /**
  * `publish` **enqueues**. The runtime flushes only if `execute` returns.
@@ -28,6 +28,11 @@ type AllowedEventInstance<C> = C extends { publishes: readonly (infer Cat)[] }
 
 export type PublishFor<C> = (event: AllowedEventInstance<C>) => void;
 
+export type Run = <U extends ApiUseCaseCtor>(
+  useCase: U,
+  input: Infer<U['input']>,
+) => Promise<Infer<U['output']>>;
+
 export type ExecuteCtx<C, Ctx = unknown> = {
   input: C extends { input: infer S extends StandardSchemaV1 }
     ? Infer<S>
@@ -43,6 +48,7 @@ export type ExecuteCtx<C, Ctx = unknown> = {
   publish: C extends { publishes: readonly unknown[] }
     ? PublishFor<C>
     : Publish;
+  run: Run;
 };
 
 type EventOn<C> = C extends { on: infer E extends EventClass } ? E : EventClass;
@@ -77,6 +83,7 @@ export type EventCtx<C, Ctx = unknown> = {
   publish: C extends { publishes: readonly unknown[] }
     ? PublishFor<C>
     : Publish;
+  run: Run;
 } & (CatalogKindOf<C> extends 'broker'
   ? { attempt: number }
   : { attempt?: number });

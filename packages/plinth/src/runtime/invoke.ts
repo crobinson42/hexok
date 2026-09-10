@@ -25,6 +25,52 @@ export type InvokeDeps = {
   onFlush?: (envelope: Envelope) => void;
 };
 
+type SharedInvoke = {
+  ctx: unknown;
+  signal: AbortSignal;
+};
+
+function nestedRun(
+  deps: InvokeDeps,
+  queue: Envelope[],
+  shared: SharedInvoke,
+): (ctor: ApiUseCaseCtor, input: unknown) => Promise<unknown> {
+  const run = (ctor: ApiUseCaseCtor, input: unknown) =>
+    runNested(ctor, input, deps, queue, shared, run);
+  return run;
+}
+
+async function runNested(
+  ctor: ApiUseCaseCtor,
+  input: unknown,
+  deps: InvokeDeps,
+  queue: Envelope[],
+  shared: SharedInvoke,
+  run: (ctor: ApiUseCaseCtor, input: unknown) => Promise<unknown>,
+): Promise<unknown> {
+  const parsed = validate(ctor.input, input);
+  if (!parsed.ok) {
+    throw new CodedError({
+      code: 'VALIDATION',
+      message: 'Validation failed',
+    });
+  }
+  const publish: Publish = ((event: Parameters<Publish>[0]) => {
+    queue.push(wrapEvent(event, ctor.publishes ?? []));
+  }) as Publish;
+  const ctx = {
+    input: parsed.value as Infer<typeof ctor.input>,
+    ports: aliasPorts(ctor.ports, deps.ports),
+    ctx: shared.ctx,
+    errors: errorFactories(ctor.errors),
+    signal: shared.signal,
+    publish,
+    run,
+  };
+  const instance = constructUseCase(ctor);
+  return instance.execute(ctx as never) as Promise<unknown>;
+}
+
 export async function invokeApi(
   ctor: ApiUseCaseCtor,
   input: unknown,
@@ -39,6 +85,11 @@ export async function invokeApi(
     });
   }
   const queue: Envelope[] = [];
+  const shared: SharedInvoke = {
+    ctx: opts?.ctx ?? deps.defaultCtx,
+    signal: opts?.signal ?? new AbortController().signal,
+  };
+  const run = nestedRun(deps, queue, shared);
   const publish: Publish = ((event: Parameters<Publish>[0]) => {
     queue.push(wrapEvent(event, ctor.publishes ?? []));
   }) as Publish;
@@ -48,10 +99,11 @@ export async function invokeApi(
   const ctx = {
     input: parsed.value as Infer<typeof ctor.input>,
     ports,
-    ctx: opts?.ctx ?? deps.defaultCtx,
+    ctx: shared.ctx,
     errors,
-    signal: opts?.signal ?? new AbortController().signal,
+    signal: shared.signal,
     publish,
+    run,
   };
 
   const instance = constructUseCase(ctor);
@@ -82,6 +134,11 @@ export async function invokeEvent(
   opts?: { ctx?: unknown; signal?: AbortSignal; attempt?: number },
 ): Promise<void> {
   const queue: Envelope[] = [];
+  const shared: SharedInvoke = {
+    ctx: opts?.ctx ?? deps.defaultCtx,
+    signal: opts?.signal ?? new AbortController().signal,
+  };
+  const run = nestedRun(deps, queue, shared);
   const publish: Publish = ((event: Parameters<Publish>[0]) => {
     queue.push(wrapEvent(event, ctor.publishes ?? []));
   }) as Publish;
@@ -90,17 +147,18 @@ export async function invokeEvent(
   const ctx = {
     event: envelope,
     ports,
-    ctx: opts?.ctx ?? deps.defaultCtx,
+    ctx: shared.ctx,
     errors,
-    signal: opts?.signal ?? new AbortController().signal,
+    signal: shared.signal,
     publish,
+    run,
     ...(opts?.attempt !== undefined ? { attempt: opts.attempt } : {}),
   };
   const instance = constructUseCase(ctor);
-  let run: () => Promise<void> = () =>
+  let dispatch: () => Promise<void> = () =>
     instance.execute(ctx as never) as Promise<void>;
-  run = wrapDispatch(ctor, envelope, run, deps.interceptors);
-  let handler: Handler = async () => run();
+  dispatch = wrapDispatch(ctor, envelope, dispatch, deps.interceptors);
+  let handler: Handler = async () => dispatch();
   handler = wrapUseCase(ctor, handler, deps.interceptors);
   try {
     await handler(ctx as never);

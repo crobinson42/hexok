@@ -244,6 +244,20 @@ describe('ExecuteCtx', () => {
       ExecuteCtx<typeof StampTime>['publish']
     >().toMatchTypeOf<Publish>();
   });
+
+  it('types run as the child input and output', () => {
+    const _runTypes = async (run: ExecuteCtx<typeof CloseIncident>['run']) => {
+      const stamped = await run(StampTime, {});
+      expectTypeOf(stamped).toEqualTypeOf<{ now: Date }>();
+      const closed = await run(CloseIncident, { id: '1' });
+      expectTypeOf(closed).toEqualTypeOf<{ id: string; status: string }>();
+      // @ts-expect-error child input id is a string
+      await run(CloseIncident, { id: 1 });
+      // @ts-expect-error event handlers are not runnable
+      await run(NotifyOnClose, {});
+    };
+    void _runTypes;
+  });
 });
 
 describe('errorFactories', () => {
@@ -258,6 +272,30 @@ describe('errorFactories', () => {
   });
 });
 
+class InternalStamp extends ApiUseCase {
+  static readonly key = 'clock.internalStamp';
+  static readonly internal = true;
+  static readonly input = z.object({});
+  static readonly output = z.object({});
+  static readonly errors = {} as const;
+  static readonly ports = { clock: Clock };
+  async execute() {
+    return {};
+  }
+}
+
+class InternalClose extends ApiUseCase {
+  static readonly key = 'incident.close';
+  static readonly internal = true;
+  static readonly input = z.object({ id: z.string() });
+  static readonly output = z.object({});
+  static readonly errors = {} as const;
+  static readonly ports = { clock: Clock };
+  async execute() {
+    return {};
+  }
+}
+
 describe('deriveContract', () => {
   it('nests API use cases and skips event handlers', () => {
     const contract = deriveContract({
@@ -269,9 +307,27 @@ describe('deriveContract', () => {
     expect(contract.routes['incident.notifyOnClose']).toBeUndefined();
   });
 
+  it('skips internal api use cases', () => {
+    const contract = deriveContract({
+      close: CloseIncident,
+      stamp: InternalStamp,
+    });
+    expect(Object.keys(contract.routes)).toEqual(['incident.close']);
+    expect(contract.routes['clock.internalStamp']).toBeUndefined();
+  });
+
   it('throws on duplicate key', () => {
     expect(() =>
       deriveContract({ a: CloseIncident, b: CloseIncident }),
+    ).toThrow('plinth: duplicate use-case key "incident.close"');
+  });
+
+  it('throws on duplicate key when an internal shares a key', () => {
+    expect(() =>
+      deriveContract({ a: CloseIncident, b: InternalClose }),
+    ).toThrow('plinth: duplicate use-case key "incident.close"');
+    expect(() =>
+      deriveContract({ a: InternalClose, b: InternalClose }),
     ).toThrow('plinth: duplicate use-case key "incident.close"');
   });
 });

@@ -21,6 +21,8 @@ import type { AnyEventCatalog, PortToken } from '../domain/index.js';
  */
 export abstract class ApiUseCase {
   static readonly trigger = 'api' as const;
+  /** When true, omitted from contract, HTTP RPC, and `app.local`. Still in completeness. */
+  static readonly internal?: boolean;
   static readonly key: string;
   static readonly input: unknown;
   static readonly output: unknown;

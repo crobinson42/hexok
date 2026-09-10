@@ -8,6 +8,7 @@ export type HandlerCtx = {
   errors: Record<string, (data?: unknown) => never>;
   signal: AbortSignal;
   publish(event: unknown): void;
+  run?(useCase: unknown, input: unknown): Promise<unknown>;
   input?: unknown;
   event?: unknown;
   attempt?: number;

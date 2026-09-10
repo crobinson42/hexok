@@ -180,7 +180,7 @@ export class AppBuilder<
 
     for (const ctor of Object.values(this.#useCases) as UseCaseClass[]) {
       if (isApiUseCase(ctor)) {
-        api.set(ctor.key, ctor);
+        if (!ctor.internal) api.set(ctor.key, ctor);
         continue;
       }
       if (isEventUseCase(ctor)) {

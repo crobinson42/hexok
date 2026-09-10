@@ -5,7 +5,9 @@ sidebar:
   order: 1
 ---
 
-`ApiUseCase` is a request/response use case. Declare static `key`, `input`, `output`, `errors`, `ports`. Optional `publishes` lists catalogs you may publish to. The runtime constructs the class; do not `new` it.
+`ApiUseCase` is a request/response use case. Declare static `key`, `input`, `output`, `errors`, `ports`. Optional `publishes` lists catalogs you may publish to. The runtime constructs the class; do not `new` it. Call other use cases with [`run`](/application/execute-ctx/) — do not construct them yourself.
+
+`static readonly internal = true` keeps `trigger: 'api'` (still request/response) but omits the use case from the derived contract, HTTP RPC, and `app.local`. List it in the `App.from` bag so completeness still sees its ports and catalogs.
 
 `execute` receives [ExecuteCtx](/application/execute-ctx/). Return the output shape. Throw via `errors.CODE()`. Entity methods throw themselves — do not unwrap them.
 

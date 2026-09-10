@@ -9,6 +9,8 @@ sidebar:
 
 `publish` is typed to the catalogs in `static publishes`. You may pass a `DomainEvent` or an [Envelope](/domain/envelope/).
 
+Nested [`run`](/application/execute-ctx/) publishes onto the **outer** queue. Inner `wrapEvent` still checks the child’s `publishes`. Flush happens only if the outer `execute` returns; an outer throw drops both parent and child events.
+
 Publish flushes **after** the use-case interceptor onion, so a successful unit-of-work commit naturally yields after-commit publish.
 
 ```ts

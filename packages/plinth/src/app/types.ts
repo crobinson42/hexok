@@ -62,6 +62,7 @@ export interface ApiUseCaseCtor {
   readonly ports: Record<string, PortToken<unknown>>;
   readonly publishes?: readonly AnyEventCatalog[];
   readonly middleware?: readonly unknown[];
+  readonly internal?: boolean;
   readonly prototype: { execute(ctx: never): Promise<unknown> };
 }
 

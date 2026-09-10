@@ -5,7 +5,7 @@ sidebar:
   order: 5
 ---
 
-`app.local` is an in-process client nested by use-case `key`. `incident.close` becomes `app.local.incident.close(input)`. Event handlers are omitted.
+`app.local` is an in-process client nested by use-case `key`. `incident.close` becomes `app.local.incident.close(input)`. Event handlers and `internal: true` API use cases are omitted.
 
 Pass `{ ctx, signal }` as the second argument. Tests can rebind context with [`app.as(ctx)`](/testing/app-test/).
 

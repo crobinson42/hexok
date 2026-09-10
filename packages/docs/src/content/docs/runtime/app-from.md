@@ -7,6 +7,8 @@ sidebar:
 
 `App.from` takes the use-case bag. Chain `provide(token, impl)`, `bind(catalog, adapter)`, optional `ctx`, `use`, and `intercept`. Then `build()`.
 
+List `internal: true` use cases in the bag so completeness still requires their ports and catalogs. They are omitted from `app.local` and HTTP in both `App.from` and `App.test` — invoke them through a public parent (or `run`). There is no `app.internal` in v1.
+
 Duplicate `provide` / `bind` / interceptor keys throw. Catalog `kind` must match the adapter.
 
 ```ts

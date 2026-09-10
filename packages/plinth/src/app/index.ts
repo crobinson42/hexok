@@ -13,6 +13,7 @@ export type {
   ExecuteCtx,
   Publish,
   PublishFor,
+  Run,
 } from './execute-ctx.js';
 export {
   type ApiUseCaseCtor,

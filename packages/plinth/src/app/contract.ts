@@ -12,14 +12,16 @@ export type UseCaseContract = {
   routes: Record<string, UseCaseRoute>;
 };
 
-type ApiKey<C> = C extends { trigger: 'api'; key: infer Key extends string }
-  ? Key
-  : never;
+type ApiKey<C> = C extends { trigger: 'api'; internal: true }
+  ? never
+  : C extends { trigger: 'api'; key: infer Key extends string }
+    ? Key
+    : never;
 
 type KeysOf<Bag> = { [K in keyof Bag]: ApiKey<Bag[K]> }[keyof Bag];
 
 type UseCaseWithKey<Bag, Key> = Extract<
-  Bag[keyof Bag],
+  Exclude<Bag[keyof Bag], { trigger: 'api'; internal: true }>,
   { trigger: 'api'; key: Key }
 >;
 
@@ -63,15 +65,18 @@ export type DerivedContract<Bag> = UnionToIntersection<
 
 /**
  * Build a transport-neutral catalog from a use-case class list.
- * Duplicate `key` throws. Event use cases are skipped.
+ * Duplicate `key` throws. Event use cases and `internal: true` are skipped.
  */
 export function deriveContract(useCases: UseCaseBag): UseCaseContract {
   const routes: Record<string, UseCaseRoute> = {};
+  const seen = new Set<string>();
   for (const ctor of Object.values(useCases) as UseCaseClass[]) {
     if (!isApiUseCase(ctor)) continue;
-    if (routes[ctor.key] !== undefined) {
+    if (seen.has(ctor.key)) {
       throw new Error(`plinth: duplicate use-case key "${ctor.key}"`);
     }
+    seen.add(ctor.key);
+    if (ctor.internal) continue;
     routes[ctor.key] = {
       key: ctor.key,
       input: ctor.input,

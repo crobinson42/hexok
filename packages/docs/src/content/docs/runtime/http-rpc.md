@@ -15,7 +15,7 @@ Success: `{ ok: true, output }`. On `CodedError`, HTTP status comes from the cod
 - `UNAUTHORIZED` → 401
 - else → 409
 
-Failure: `{ ok: false, error: { code, status, message, data? } }`. Unknown routes and non-POST are `404`.
+Failure: `{ ok: false, error: { code, status, message, data? } }`. Unknown routes, `internal: true` use cases, and non-POST are `404`.
 
 ```ts
 await app.router.fetch(

@@ -28,11 +28,13 @@ type ApiCall<C, Ctx> = C extends {
  */
 export type NestedClient<Bag extends UseCaseBag, Ctx> = UnionToIntersection<
   {
-    [K in keyof Bag]: Bag[K] extends {
-      trigger: 'api';
-      key: infer Id extends string;
-    }
-      ? PathTo<Id, ApiCall<Bag[K], Ctx>>
-      : never;
+    [K in keyof Bag]: Bag[K] extends { trigger: 'api'; internal: true }
+      ? never
+      : Bag[K] extends {
+            trigger: 'api';
+            key: infer Id extends string;
+          }
+        ? PathTo<Id, ApiCall<Bag[K], Ctx>>
+        : never;
   }[keyof Bag]
 >;

@@ -22,7 +22,7 @@ import { App as TestApp, InMemoryRepository } from 'plinth/testing'
 | Import | What it is |
 | --- | --- |
 | `plinth/core` | `Result`, Standard Schema V1, `ErrorMap` |
-| `plinth/domain` | `Entity`, `Port`, `EventCatalog`, `DomainEvent` |
+| `plinth/domain` | `Entity`, `DeepReadonly`, `Port`, `EventCatalog`, `DomainEvent` |
 | `plinth/app` | `ApiUseCase`, `EventUseCase`, contract derivation |
 | `plinth/infra` | `Mapper` (entity ↔ row), `Adapter.of` |
 | `plinth/runtime` | `App.from` composition, completeness, interceptors, local client, HTTP |

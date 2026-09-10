@@ -9,7 +9,11 @@ export {
   type CatalogEvents,
   EventCatalog,
 } from './catalog.js';
-export { Entity, type EntityConstructor } from './entity.js';
+export {
+  type DeepReadonly,
+  Entity,
+  type EntityConstructor,
+} from './entity.js';
 export type {
   BrokerAdapter,
   BrokerConsumeCtx,

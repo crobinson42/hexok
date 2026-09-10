@@ -1,7 +1,7 @@
 import { describe, expect, expectTypeOf, it } from 'vitest';
 import { z } from 'zod';
 import { CodedError, type Infer } from '../core/index.js';
-import { Entity } from './entity.js';
+import { type DeepReadonly, Entity } from './entity.js';
 
 const incidentSchema = z.object({
   id: z.string(),
@@ -72,7 +72,8 @@ class Site extends Entity<SiteProps> {
       Site.error('SAME_ADDRESS');
     }
     this.set((draft) => {
-      draft.address = { ...draft.address, city, region };
+      draft.address.city = city;
+      draft.address.region = region;
     });
     return this;
   }
@@ -209,13 +210,47 @@ describe('Entity', () => {
     expect(incident.toJSON()).toEqual(incident.toProps());
   });
 
-  it('toProps() is a shallow copy', () => {
-    const incident = Incident.open('1');
-    const p = incident.toProps();
-    expect(p).not.toBe(incident.props);
-    p.status = 'closed';
-    expect(incident.status).toBe('open');
-    expect(incident.toProps().status).toBe('open');
+  it('toProps() is a deep frozen snapshot reused until set', () => {
+    const site = Site.restore(hq());
+    const first = site.toProps();
+    expect(first).not.toBe(site.props);
+    expect(first.address).not.toBe(site.props.address);
+    expect(site.toProps()).toBe(first);
+    expect(site.toJSON()).toBe(first);
+    expect(Object.isFrozen(first)).toBe(true);
+    expect(Object.isFrozen(first.address)).toBe(true);
+    expect(() => {
+      (first as SiteProps).id = 'x';
+    }).toThrow();
+    expect(() => {
+      (first as SiteProps).address.city = 'Denver';
+    }).toThrow();
+
+    site.commit();
+    expect(site.toProps()).toBe(first);
+
+    site.set(() => {});
+    expect(site.toProps()).toBe(first);
+
+    site.relocate('Denver', 'CO');
+    const afterSet = site.toProps();
+    expect(afterSet).not.toBe(first);
+    expect(afterSet.address.city).toBe('Denver');
+    expect(first.address.city).toBe('Austin');
+    expect(site.toProps()).toBe(afterSet);
+  });
+
+  it('toProps Date values are copied', () => {
+    const closedAt = new Date('2026-01-01T00:00:00Z');
+    const timed = Timed.restore({
+      id: '1',
+      items: ['a'],
+      closedAt,
+    });
+    const snap = timed.toProps();
+    expect(snap.closedAt).not.toBe(timed.props.closedAt);
+    expect(snap.closedAt.getTime()).toBe(closedAt.getTime());
+    expect(snap.items).not.toBe(timed.props.items);
   });
 
   it('undeclared error code is a type error on the class and a throw at runtime', () => {
@@ -310,7 +345,7 @@ describe('Entity', () => {
     expect(site.getChangedKeys()).toEqual(['address']);
   });
 
-  it('arrays and Date are leaves', () => {
+  it('arrays and Date are leaves; replacing them is a shallow change', () => {
     const items = ['a', 'b'];
     const closedAt = new Date('2026-01-01T00:00:00Z');
     const replaced = Timed.restore({ id: '1', items, closedAt });
@@ -323,18 +358,30 @@ describe('Entity', () => {
       'items',
       'closedAt',
     ]);
+  });
 
-    const inplace = Timed.restore({
-      id: '1',
-      items: ['a', 'b'],
-      closedAt: new Date('2026-01-01T00:00:00Z'),
-    });
+  it('array index writes copy the array and are visible to diffs', () => {
+    const items = ['a', 'b'];
+    const closedAt = new Date('2026-01-01T00:00:00Z');
+    const inplace = Timed.restore({ id: '1', items, closedAt });
     inplace.set((draft) => {
       draft.items[0] = 'z';
-      draft.closedAt.setTime(0);
     });
-    expect(inplace.getChangedKeys()).toEqual([]);
-    expect(inplace.getChangedKeys({ deep: true })).toEqual([]);
+    expect(items[0]).toBe('a');
+    expect(inplace.props.items[0]).toBe('z');
+    expect(inplace.props.items).not.toBe(items);
+    expect(inplace.getChangedKeys()).toEqual(['items']);
+    expect(inplace.getChangedKeys({ deep: true })).toEqual(['items']);
+  });
+
+  it('Date in-place mutation is a leaf; assign a new Date', () => {
+    const closedAt = new Date('2026-01-01T00:00:00Z');
+    const timed = Timed.restore({ id: '1', items: ['a'], closedAt });
+    timed.set((draft) => {
+      draft.closedAt = new Date('2026-02-01T00:00:00Z');
+    });
+    expect(closedAt.getTime()).toBe(new Date('2026-01-01T00:00:00Z').getTime());
+    expect(timed.getChangedKeys()).toEqual(['closedAt']);
   });
 
   it('deleting a nested object emits leaf paths', () => {
@@ -406,39 +453,61 @@ describe('Entity', () => {
     expect(site.getChangedKeys()).toEqual([]);
   });
 
-  it('nested in-place mutation is invisible to diffs (set is the only supported write)', () => {
-    const viaSet = Site.restore(hq());
-    viaSet.set((draft) => {
+  it('nested assignment in set copies the path and is visible to diffs', () => {
+    const input = hq();
+    const site = Site.restore(input);
+    const before = site.props;
+    site.set((draft) => {
       draft.address.city = 'Denver';
     });
-    expect(viaSet.getChangedKeys()).toEqual([]);
-    expect(viaSet.getChangedKeys({ deep: true })).toEqual([]);
-    expect(viaSet.isDirty()).toBe(false);
-
-    const viaProps = Site.restore(hq());
-    viaProps.props.address.city = 'Denver';
-    expect(viaProps.getChangedKeys()).toEqual([]);
-    expect(viaProps.getChangedKeys({ deep: true })).toEqual([]);
-    expect(viaProps.isDirty()).toBe(false);
+    expect(input.address.city).toBe('Austin');
+    expect(site.original).toBe(before);
+    expect(site.original?.address).toBe(before.address);
+    expect(site.props).not.toBe(before);
+    expect(site.props.address).not.toBe(before.address);
+    expect(site.props.address.city).toBe('Denver');
+    expect(site.original?.address.city).toBe('Austin');
+    expect(site.getChangedKeys()).toEqual(['address']);
+    expect(site.getChangedKeys({ deep: true })).toEqual(['address.city']);
+    expect(site.isDirty()).toBe(true);
   });
 
-  it('clean-path top-level props assign is invisible to diffs (unsupported write)', () => {
+  it('no-op set on a restored entity stays clean', () => {
     const site = Site.restore(hq());
-    site.props.id = 'x';
-    expect(site.getChangedKeys()).toEqual([]);
+    const before = site.props;
+    site.set(() => {});
+    expect(site.props).toBe(before);
+    expect(site.original).toBeUndefined();
     expect(site.isDirty()).toBe(false);
-    expect(site.toProps().id).toBe('x');
+    expect(site.getChangedKeys()).toEqual([]);
   });
 
-  it('with() is rejected', () => {
-    const created = Site.create(hq());
-    expectTypeOf(created.with).not.toEqualTypeOf<
-      (patch: Partial<SiteProps>) => Site
+  it('later nested set mutates the already-copied address in place', () => {
+    const site = Site.restore(hq());
+    site.relocate('Denver', 'CO');
+    const working = site.props;
+    const address = site.props.address;
+    site.set((draft) => {
+      draft.address.city = 'Boulder';
+    });
+    expect(site.props).toBe(working);
+    expect(site.props.address).toBe(address);
+    expect(site.props.address.city).toBe('Boulder');
+    expect(site.original?.address.city).toBe('Austin');
+  });
+
+  it('props is DeepReadonly; writes are a type error', () => {
+    const site = Site.restore(hq());
+    expectTypeOf(site.props).toMatchTypeOf<DeepReadonly<SiteProps>>();
+    expectTypeOf(site.original).toMatchTypeOf<
+      DeepReadonly<SiteProps> | undefined
     >();
-    expect(() =>
-      (created as unknown as { with: (p: unknown) => unknown }).with({
-        id: 'other',
-      }),
-    ).toThrow('plinth: Entity is mutable; use set()');
+    const _typeChecks = () => {
+      // @ts-expect-error props is readonly
+      site.props.id = 'x';
+      // @ts-expect-error nested props are readonly
+      site.props.address.city = 'Denver';
+    };
+    void _typeChecks;
   });
 });

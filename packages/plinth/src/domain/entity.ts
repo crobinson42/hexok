@@ -5,8 +5,17 @@ import {
   type StandardSchemaV1,
   validate,
 } from '../core/index.js';
+import { applyCowDraft, frozenSnapshot, isPlainObject } from './cow-draft.js';
 
 const EMPTY_CHANGED_KEYS: string[] = Object.freeze([]) as unknown as string[];
+
+export type DeepReadonly<T> = T extends Date
+  ? T
+  : T extends readonly (infer U)[]
+    ? ReadonlyArray<DeepReadonly<U>>
+    : T extends object
+      ? { readonly [K in keyof T]: DeepReadonly<T[K]> }
+      : T;
 
 /**
  * Aggregates mutate **this** via `set` and return `this`.
@@ -34,11 +43,13 @@ export abstract class Entity<P extends object> {
   static readonly key: string;
   #isNew = false;
   #original: P | undefined = undefined;
+  #owned: WeakSet<object> | undefined = undefined;
+  #snapshot: P | undefined = undefined;
   protected _props: P;
 
-  /** Live schema output. Not a copy — write through `set`, not this getter. */
-  get props(): P {
-    return this._props;
+  /** Live schema output. Read-only; write through `set`. */
+  get props(): DeepReadonly<P> {
+    return this._props as DeepReadonly<P>;
   }
 
   get isNew(): boolean {
@@ -49,14 +60,14 @@ export abstract class Entity<P extends object> {
    * Pre-mutation props after the first `set` on a restored entity.
    * `undefined` when same-ref (clean) or `create`d and never `commit`ted.
    */
-  get original(): P | undefined {
+  get original(): DeepReadonly<P> | undefined {
     if (
       this.#original === undefined ||
       Object.is(this._props, this.#original)
     ) {
       return undefined;
     }
-    return this.#original;
+    return this.#original as DeepReadonly<P>;
   }
 
   protected constructor(props: P) {
@@ -64,12 +75,11 @@ export abstract class Entity<P extends object> {
   }
 
   set(producer: (draft: P) => void): this {
-    producer(this.#writable());
+    const result = applyCowDraft(this._props, this.#owned, producer);
+    this._props = result.root;
+    this.#owned = result.owned;
+    if (result.wrote) this.#snapshot = undefined;
     return this;
-  }
-
-  with(..._args: [`plinth: Entity is mutable; use set()`]): never {
-    throw new Error('plinth: Entity is mutable; use set()');
   }
 
   getChangedKeys(): Array<ChangedKey<P>>;
@@ -115,16 +125,20 @@ export abstract class Entity<P extends object> {
   commit(): this {
     this.#original = this._props;
     this.#isNew = false;
+    this.#owned = undefined;
     return this;
   }
 
-  /** Shallow copy of schema output for persistence and use-case output. */
-  toProps(): P {
-    return { ...this._props };
+  /** Deep frozen snapshot for persistence and use-case output. Reused until the next `set`. */
+  toProps(): DeepReadonly<P> {
+    if (this.#snapshot === undefined) {
+      this.#snapshot = frozenSnapshot(this._props);
+    }
+    return this.#snapshot as DeepReadonly<P>;
   }
 
   /** JSON serialization is the plain props snapshot. */
-  toJSON(): P {
+  toJSON(): DeepReadonly<P> {
     return this.toProps();
   }
 
@@ -161,7 +175,7 @@ export abstract class Entity<P extends object> {
    */
   static create<T extends EntityConstructor>(
     this: T,
-    props: SchemaOutput<T>,
+    props: SchemaOutput<T> | DeepReadonly<SchemaOutput<T>>,
   ): T['prototype'] {
     const instance = instantiate(this, props) as Entity<object>;
     instance.#markNew();
@@ -174,7 +188,7 @@ export abstract class Entity<P extends object> {
    */
   static restore<T extends EntityConstructor>(
     this: T,
-    props: SchemaOutput<T>,
+    props: SchemaOutput<T> | DeepReadonly<SchemaOutput<T>>,
   ): T['prototype'] {
     const instance = instantiate(this, props) as Entity<object>;
     instance.#markRestored();
@@ -199,21 +213,16 @@ export abstract class Entity<P extends object> {
     this._props = { ...this._props };
     this.#original = undefined;
     this.#isNew = true;
+    this.#owned = new WeakSet();
+    this.#owned.add(this._props);
+    this.#snapshot = undefined;
   }
 
   #markRestored(): void {
     this.#original = this._props;
     this.#isNew = false;
-  }
-
-  #writable(): P {
-    if (
-      this.#original !== undefined &&
-      Object.is(this._props, this.#original)
-    ) {
-      this._props = { ...this._props };
-    }
-    return this._props;
+    this.#owned = undefined;
+    this.#snapshot = undefined;
   }
 }
 
@@ -245,13 +254,6 @@ function instantiate<T extends EntityConstructor>(
   }
   const CtorImpl = Ctor as unknown as new (props: unknown) => T['prototype'];
   return new CtorImpl(parsed.value);
-}
-
-function isPlainObject(value: unknown): value is Record<string, unknown> {
-  if (value === null || typeof value !== 'object') return false;
-  if (Array.isArray(value) || value instanceof Date) return false;
-  const proto = Object.getPrototypeOf(value);
-  return proto === Object.prototype || proto === null;
 }
 
 function diffDeep(

@@ -40,7 +40,8 @@ export class Site extends Entity<SiteProps> {
     }
 
     this.set((draft) => {
-      draft.address = { ...draft.address, city, region };
+      draft.address.city = city;
+      draft.address.region = region;
     });
 
     return this;

@@ -17,30 +17,27 @@ export type SiteProps = Infer<typeof siteSchema>;
  */
 export class Site extends TrackedEntity<SiteProps> {
   static readonly key = 'Site';
+
   static schema = siteSchema;
+
   static errors = {
-    SAME_ADDRESS: { status: 409, message: 'Site is already at that address' },
-  } as const;
+    SAME_ADDRESS: { message: 'Site is already at that address' },
+  };
 
-  get id() {
-    return this.props.id;
-  }
-  get address() {
-    return this.props.address;
-  }
-
-  static hq(): Site {
+  static hq() {
     return Site.restore({
       id: 'hq',
       address: { city: 'Austin', region: 'TX' },
     });
   }
 
-  relocate(city: string, region: string): this {
-    if (this.address.city === city && this.address.region === region) {
+  relocate(city: string, region: string) {
+    if (this.props.address.city === city && this.props.address.region === region) {
       this.error('SAME_ADDRESS');
     }
-    this.set('address', { ...this.address, city, region });
+
+    this.set('address', { ...this.props.address, city, region });
+
     return this;
   }
 }

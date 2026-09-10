@@ -51,8 +51,8 @@ class CloseIncident extends ApiUseCase {
   static readonly input = z.object({ id: z.string() });
   static readonly output = z.object({ id: z.string(), status: z.string() });
   static readonly errors = {
-    NOT_FOUND: { status: 404, message: 'Incident not found' },
-    ALREADY_CLOSED: { status: 409, message: 'Incident already closed' },
+    NOT_FOUND: { message: 'Incident not found' },
+    ALREADY_CLOSED: { message: 'Incident already closed' },
   } as const;
   static readonly ports = {
     incidents: IncidentRepository,
@@ -154,6 +154,18 @@ class Loose extends EventUseCase {
   async execute(): Promise<void> {}
 }
 
+describe('use-case constructors', () => {
+  it('are protected so callers go through App.from', () => {
+    const _typeChecks = () => {
+      // @ts-expect-error ApiUseCase constructor is protected
+      new CloseIncident();
+      // @ts-expect-error EventUseCase constructor is protected
+      new NotifyOnClose();
+    };
+    void _typeChecks;
+  });
+});
+
 describe('CheckUseCase', () => {
   it('names missing static ports, on, and catalog', () => {
     expectTypeOf<
@@ -235,13 +247,13 @@ describe('ExecuteCtx', () => {
 });
 
 describe('errorFactories', () => {
-  it('throws CodedError with status and message', () => {
+  it('throws CodedError with code and message', () => {
     const errors = errorFactories(CloseIncident.errors);
     expect(() => errors.NOT_FOUND()).toThrowError(/Incident not found/);
     try {
       errors.NOT_FOUND();
     } catch (error) {
-      expect(error).toMatchObject({ code: 'NOT_FOUND', status: 404 });
+      expect(error).toMatchObject({ code: 'NOT_FOUND' });
     }
   });
 });
@@ -253,7 +265,7 @@ describe('deriveContract', () => {
       notify: NotifyOnClose,
     });
     expect(Object.keys(contract.routes)).toEqual(['incident.close']);
-    expect(contract.routes['incident.close']?.path).toBe('/rpc/incident/close');
+    expect(contract.routes['incident.close']?.key).toBe('incident.close');
     expect(contract.routes['incident.notifyOnClose']).toBeUndefined();
   });
 

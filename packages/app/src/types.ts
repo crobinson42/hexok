@@ -62,7 +62,7 @@ export interface ApiUseCaseCtor {
   readonly ports: Record<string, PortToken<unknown>>;
   readonly publishes?: readonly AnyEventCatalog[];
   readonly middleware?: readonly unknown[];
-  new (): { execute(ctx: never): Promise<unknown> };
+  readonly prototype: { execute(ctx: never): Promise<unknown> };
 }
 
 export interface EventUseCaseCtor {
@@ -75,7 +75,7 @@ export interface EventUseCaseCtor {
   readonly publishes?: readonly AnyEventCatalog[];
   readonly errors?: ErrorMap;
   readonly middleware?: readonly unknown[];
-  new (): { execute(ctx: never): Promise<void> };
+  readonly prototype: { execute(ctx: never): Promise<void> };
 }
 
 export function isEventUseCase(ctor: UseCaseClass): ctor is EventUseCaseCtor {

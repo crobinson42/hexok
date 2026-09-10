@@ -26,7 +26,6 @@ export function errorFactories<M extends ErrorMap>(map: M): ErrorFactories<M> {
       }
       throw new CodedError({
         code,
-        status: def.status ?? 400,
         message: def.message ?? code,
         ...(payload !== undefined ? { data: payload } : {}),
       });

@@ -3,9 +3,8 @@ export {
   type DerivedContract,
   deriveContract,
   nestByKey,
-  type RpcContract,
-  type RpcRoute,
-  rpcPath,
+  type UseCaseContract,
+  type UseCaseRoute,
 } from './contract.js';
 export { errorFactories } from './error-factory.js';
 export { EventUseCase } from './event-use-case.js';

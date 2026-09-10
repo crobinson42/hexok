@@ -95,7 +95,7 @@ export class InMemoryRepository<E extends Entity<Record<string, unknown>>>
 }
 
 function cloneEntity<E extends Entity<Record<string, unknown>>>(entity: E): E {
-  const Ctor = entity.constructor as EntityConstructor & {
+  const Ctor = entity.constructor as unknown as EntityConstructor & {
     restore(props: unknown): E;
   };
   return Ctor.restore(entity.toProps());

@@ -22,7 +22,7 @@ export class AuthorizeInterceptor implements Interceptor {
         return next(ctx);
       }
       if (executeCtx.errors.FORBIDDEN) executeCtx.errors.FORBIDDEN();
-      throw new CodedError({ code: 'FORBIDDEN', status: 403 });
+      throw new CodedError({ code: 'FORBIDDEN' });
     };
   }
 }

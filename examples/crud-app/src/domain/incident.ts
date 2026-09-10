@@ -18,21 +18,8 @@ export class Incident extends Entity<IncidentProps> {
   static schema = incidentSchema;
 
   static errors = {
-    ALREADY_CLOSED: { status: 409, message: 'Incident already closed' },
-  }
-
-  get id() {
-    return this.props.id;
-  }
-  get title() {
-    return this.props.title;
-  }
-  get status() {
-    return this.props.status;
-  }
-  get closedAt() {
-    return this.props.closedAt;
-  }
+    ALREADY_CLOSED: { message: 'Incident already closed' },
+  };
 
   static open(id: string, title: string): Incident {
     return Incident.create({

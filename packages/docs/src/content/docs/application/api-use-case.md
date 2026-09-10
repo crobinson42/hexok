@@ -1,13 +1,13 @@
 ---
 title: ApiUseCase
-description: HTTP/RPC use case. Declare static key, input, output, errors, ports.
+description: Request/response use case. Declare static key, input, output, errors, ports.
 sidebar:
   order: 1
 ---
 
-`ApiUseCase` is an HTTP/RPC use case. Declare static `key`, `input`, `output`, `errors`, `ports`. Optional `publishes` lists catalogs you may publish to.
+`ApiUseCase` is a request/response use case. Declare static `key`, `input`, `output`, `errors`, `ports`. Optional `publishes` lists catalogs you may publish to. The runtime constructs the class; do not `new` it.
 
-`execute` receives [ExecuteCtx](/application/execute-ctx/). Return the output shape. Throw via `errors.CODE()`.
+`execute` receives [ExecuteCtx](/application/execute-ctx/). Return the output shape. Throw via `errors.CODE()`. Entity methods throw themselves — do not unwrap them.
 
 ```ts
 class CloseIncident extends ApiUseCase {
@@ -16,7 +16,7 @@ class CloseIncident extends ApiUseCase {
   static readonly output = Incident.schema
   static readonly errors = {
     ...Incident.errors,
-    NOT_FOUND: { status: 404, message: 'Incident not found' },
+    NOT_FOUND: { message: 'Incident not found' },
   }
   static readonly ports = { incidents: IncidentRepository, clock: Clock }
   static readonly publishes = [DomainEvents] as const
@@ -25,10 +25,9 @@ class CloseIncident extends ApiUseCase {
     const incident = await ports.incidents.get(input.id)
     if (!incident) throw errors.NOT_FOUND()
     const closed = incident.close(ports.clock.now())
-    if (!closed.ok) throw errors[closed.code]()
-    await ports.incidents.save(closed.value)
-    publish(new IncidentClosed({ id: closed.value.id, closedAt: closed.value.closedAt }))
-    return closed.value.toProps()
+    await ports.incidents.save(closed)
+    publish(new IncidentClosed({ id: closed.id, closedAt: closed.closedAt }))
+    return closed.toProps()
   }
 }
 ```

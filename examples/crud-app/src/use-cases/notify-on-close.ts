@@ -3,9 +3,12 @@ import { DomainEvents, IncidentClosed } from '../domain/events.js';
 import { Notifier } from '../ports.js';
 
 export class NotifyOnClose extends EventUseCase {
-  static key = 'incident.notifyOnClose' as const;
+  static readonly key = 'incident.notifyOnClose';
+
   static on = IncidentClosed;
+
   static catalog = DomainEvents;
+
   static ports = { notifier: Notifier };
 
   async execute({ event, ports }: EventCtx<typeof NotifyOnClose>) {

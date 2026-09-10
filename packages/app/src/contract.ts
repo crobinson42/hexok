@@ -1,17 +1,15 @@
 import type { ErrorMap, StandardSchemaV1 } from '@plinth/core';
 import { isApiUseCase, type UseCaseBag, type UseCaseClass } from './types.js';
 
-export type RpcRoute = {
+export type UseCaseRoute = {
   key: string;
-  method: 'POST';
-  path: string;
   input: StandardSchemaV1;
   output: StandardSchemaV1;
   errors: ErrorMap;
 };
 
-export type RpcContract = {
-  routes: Record<string, RpcRoute>;
+export type UseCaseContract = {
+  routes: Record<string, UseCaseRoute>;
 };
 
 type ApiKey<C> = C extends { trigger: 'api'; key: infer Key extends string }
@@ -45,7 +43,6 @@ type RouteView<C> = C extends {
 }
   ? {
       readonly key: Key;
-      readonly method: 'POST';
       readonly input: Input;
       readonly output: Output;
       readonly errors: Errors;
@@ -64,16 +61,12 @@ export type DerivedContract<Bag> = UnionToIntersection<
     : never
 >;
 
-export function rpcPath(key: string): string {
-  return `/rpc/${key.split('.').join('/')}`;
-}
-
 /**
- * Build the RPC contract from a use-case class list.
+ * Build a transport-neutral catalog from a use-case class list.
  * Duplicate `key` throws. Event use cases are skipped.
  */
-export function deriveContract(useCases: UseCaseBag): RpcContract {
-  const routes: Record<string, RpcRoute> = {};
+export function deriveContract(useCases: UseCaseBag): UseCaseContract {
+  const routes: Record<string, UseCaseRoute> = {};
   for (const ctor of Object.values(useCases) as UseCaseClass[]) {
     if (!isApiUseCase(ctor)) continue;
     if (routes[ctor.key] !== undefined) {
@@ -81,8 +74,6 @@ export function deriveContract(useCases: UseCaseBag): RpcContract {
     }
     routes[ctor.key] = {
       key: ctor.key,
-      method: 'POST',
-      path: rpcPath(ctor.key),
       input: ctor.input,
       output: ctor.output,
       errors: ctor.errors,

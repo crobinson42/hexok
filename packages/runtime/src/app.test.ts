@@ -8,11 +8,12 @@ import type { BrokerAdapter, BusAdapter } from '@plinth/domain';
 import { DomainEvent, type Envelope, EventCatalog, Port } from '@plinth/domain';
 import { describe, expect, expectTypeOf, it } from 'vitest';
 import { z } from 'zod';
-import { App } from './app.js';
+import { App, AppBuilder } from './app.js';
 import type {
   DuplicateCatalogError,
   DuplicatePortError,
 } from './completeness.js';
+import { rpcPath } from './rpc.js';
 
 interface IncidentRepository {
   get(id: string): Promise<{ id: string; status: string } | null>;
@@ -42,8 +43,8 @@ class CloseIncident extends ApiUseCase {
   static readonly input = z.object({ id: z.string() });
   static readonly output = z.object({ id: z.string(), status: z.string() });
   static readonly errors = {
-    NOT_FOUND: { status: 404, message: 'Incident not found' },
-    FAIL: { status: 409, message: 'fail' },
+    NOT_FOUND: { message: 'Incident not found' },
+    FAIL: { message: 'fail' },
   } as const;
   static readonly ports = {
     incidents: IncidentRepository,
@@ -112,6 +113,16 @@ class StampTime extends ApiUseCase {
     return { now: ports.clock.now() };
   }
 }
+
+describe('AppBuilder', () => {
+  it('constructor is private; App.from is the factory', () => {
+    const _typeChecks = () => {
+      // @ts-expect-error AppBuilder constructor is private
+      new AppBuilder({ close: CloseIncident });
+    };
+    void _typeChecks;
+  });
+});
 
 describe('App completeness', () => {
   it('types build as a missing-port message when Clock is omitted', () => {
@@ -226,6 +237,54 @@ describe('App invoke', () => {
     });
   });
 
+  it('maps NOT_FOUND to HTTP 404', async () => {
+    const app = App.from({ close: CloseIncident })
+      .provide(IncidentRepository, repo([]))
+      .provide(Clock, clock)
+      .bind(DomainEvents, memoryBus())
+      .build();
+
+    const response = await app.router.fetch(
+      new Request('http://app/rpc/incident/close', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ input: { id: 'missing' } }),
+      }),
+    );
+    expect(response.status).toBe(404);
+    const body = (await response.json()) as {
+      ok: boolean;
+      error: { code: string; status: number };
+    };
+    expect(body.ok).toBe(false);
+    expect(body.error.code).toBe('NOT_FOUND');
+    expect(body.error.status).toBe(404);
+  });
+
+  it('maps unknown error codes to HTTP 409', async () => {
+    const app = App.from({ close: CloseIncident })
+      .provide(IncidentRepository, repo([{ id: 'boom', status: 'open' }]))
+      .provide(Clock, clock)
+      .bind(DomainEvents, memoryBus())
+      .build();
+
+    const response = await app.router.fetch(
+      new Request('http://app/rpc/incident/close', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ input: { id: 'boom' } }),
+      }),
+    );
+    expect(response.status).toBe(409);
+    const body = (await response.json()) as {
+      ok: boolean;
+      error: { code: string; status: number };
+    };
+    expect(body.ok).toBe(false);
+    expect(body.error.code).toBe('FAIL');
+    expect(body.error.status).toBe(409);
+  });
+
   it('drops events when aroundPublish swallows next()', async () => {
     const bus = memoryBus();
     const app = App.from({ close: CloseIncident })
@@ -310,5 +369,11 @@ describe('App type constraints', () => {
     const app = builder.build();
     expectTypeOf(app.local.incident.close).toBeFunction();
     expectTypeOf(app.local.incident).not.toHaveProperty('notifyOnClose');
+  });
+});
+
+describe('rpcPath', () => {
+  it('turns dotted keys into /rpc paths', () => {
+    expect(rpcPath('incident.close')).toBe('/rpc/incident/close');
   });
 });

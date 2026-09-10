@@ -25,7 +25,7 @@ class CloseIncident extends ApiUseCase {
   static readonly output = Incident.schema
   static readonly errors = {
     ...Incident.errors,
-    NOT_FOUND: { status: 404, message: 'Incident not found' },
+    NOT_FOUND: { message: 'Incident not found' },
   } as const
   static readonly ports = { incidents: IncidentRepository, clock: Clock }
   static readonly publishes = [DomainEvents] as const

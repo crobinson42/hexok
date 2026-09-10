@@ -14,7 +14,7 @@ class Incident extends Entity<IncidentProps> {
   static readonly key = 'Incident';
   static readonly schema = incidentSchema;
   static readonly errors = {
-    ALREADY_CLOSED: { status: 409, message: 'Incident already closed' },
+    ALREADY_CLOSED: { message: 'Incident already closed' },
   } as const;
 
   get id() {
@@ -42,6 +42,23 @@ class Incident extends Entity<IncidentProps> {
 }
 
 describe('Entity', () => {
+  it('constructor is protected; factories return the subclass', () => {
+    expectTypeOf(
+      Incident.create({ id: '1', status: 'open', closedAt: null }),
+    ).toEqualTypeOf<Incident>();
+    expectTypeOf(
+      Incident.restore({ id: '1', status: 'open', closedAt: null }),
+    ).toEqualTypeOf<Incident>();
+    expectTypeOf(
+      Incident.parse({ id: '1', status: 'open', closedAt: null }),
+    ).toEqualTypeOf<Incident>();
+    const _typeChecks = () => {
+      // @ts-expect-error Entity constructor is protected
+      new Incident({ id: '1', status: 'open', closedAt: null });
+    };
+    void _typeChecks;
+  });
+
   it('create / restore / parse validate via the schema', () => {
     const created = Incident.create({
       id: '1',
@@ -68,7 +85,6 @@ describe('Entity', () => {
       expect(error).toBeInstanceOf(CodedError);
       expect(error).toMatchObject({
         code: 'VALIDATION',
-        status: 400,
         message: 'plinth: Incident validation failed',
       });
     }
@@ -100,7 +116,6 @@ describe('Entity', () => {
       expect(error).toBeInstanceOf(CodedError);
       expect(error).toMatchObject({
         code: 'ALREADY_CLOSED',
-        status: 409,
         message: 'Incident already closed',
       });
     }

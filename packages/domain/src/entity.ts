@@ -17,7 +17,7 @@ import {
  * class Incident extends Entity<IncidentProps> {
  *   static readonly key = 'Incident'
  *   static readonly schema = z.object({ id: z.string(), status: z.enum(['open', 'closed']) })
- *   static readonly errors = { ALREADY_CLOSED: { status: 409 } } as const
+ *   static readonly errors = { ALREADY_CLOSED: { message: 'Incident already closed' } } as const
  *   close(): Incident {
  *     if (this.props.status === 'closed') this.error('ALREADY_CLOSED')
  *     return this.with({ status: 'closed' })
@@ -37,7 +37,7 @@ export abstract class Entity<P> {
     return this._props;
   }
 
-  constructor(props: P) {
+  protected constructor(props: P) {
     this._props = props;
   }
 
@@ -49,7 +49,7 @@ export abstract class Entity<P> {
     return new Ctor({ ...this.props, ...patch });
   }
 
-  /** Plain schema output for persistence and RPC. */
+  /** Plain schema output for persistence and use-case output. */
   toProps(): P {
     return this.props;
   }
@@ -94,7 +94,7 @@ export abstract class Entity<P> {
   static create<T extends EntityConstructor>(
     this: T,
     props: SchemaOutput<T>,
-  ): InstanceType<T> {
+  ): T['prototype'] {
     return instantiate(this, props);
   }
 
@@ -106,7 +106,7 @@ export abstract class Entity<P> {
   static restore<T extends EntityConstructor>(
     this: T,
     props: SchemaOutput<T>,
-  ): InstanceType<T> {
+  ): T['prototype'] {
     return instantiate(this, props);
   }
 
@@ -117,7 +117,7 @@ export abstract class Entity<P> {
   static parse<T extends EntityConstructor>(
     this: T,
     value: unknown,
-  ): InstanceType<T> {
+  ): T['prototype'] {
     return instantiate(this, value);
   }
 }
@@ -126,25 +126,23 @@ export type EntityConstructor = {
   readonly key: string;
   readonly schema: StandardSchemaV1;
   readonly errors: ErrorMap;
-} & (new (
-  props: never,
-) => Entity<unknown>);
+  readonly prototype: Entity<unknown>;
+};
 
 type SchemaOutput<T extends EntityConstructor> = Infer<T['schema']>;
 
 export function instantiate<T extends EntityConstructor>(
   Ctor: T,
   value: unknown,
-): InstanceType<T> {
+): T['prototype'] {
   const parsed = validate(Ctor.schema, value);
   if (!parsed.ok) {
     throw new CodedError({
       code: 'VALIDATION',
-      status: 400,
       message: `plinth: ${Ctor.key} validation failed`,
     });
   }
-  const CtorImpl = Ctor as unknown as new (props: unknown) => InstanceType<T>;
+  const CtorImpl = Ctor as unknown as new (props: unknown) => T['prototype'];
   return new CtorImpl(parsed.value);
 }
 
@@ -159,7 +157,6 @@ function throwEntityError(
   }
   throw new CodedError({
     code,
-    status: def.status ?? 400,
     message: def.message ?? code,
     ...(data !== undefined ? { data } : {}),
   });

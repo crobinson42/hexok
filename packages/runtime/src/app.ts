@@ -8,9 +8,9 @@ import {
   isApiUseCase,
   isEventUseCase,
   nestByKey,
-  type RpcContract,
   type UseCaseBag,
   type UseCaseClass,
+  type UseCaseContract,
 } from '@plinth/app';
 import type {
   AnyEventCatalog,
@@ -34,6 +34,7 @@ import { createFetchHandler } from './http.js';
 import type { Interceptor } from './interceptor.js';
 import { type InvokeDeps, invokeApi, publishNow } from './invoke.js';
 import type { RpcMiddleware } from './middleware.js';
+import { deriveRpc, type RpcContract } from './rpc.js';
 
 export type AppInstance<Bag extends UseCaseBag, Ctx = unknown> = {
   contract: DerivedContract<Bag>;
@@ -52,27 +53,6 @@ export type AdapterFor<K extends CatalogKind> = K extends 'bus'
     ? BrokerAdapter
     : EventAdapter;
 
-/**
- * Composition root. `build()` is only callable when every required port
- * and event catalog is provided.
- *
- * ```ts
- * const app = App.from({ close: CloseIncident })
- *   .provide(IncidentRepository, repo)
- *   .provide(Clock, clock)
- *   .bind(DomainEvents, bus)
- *   .build()
- * await app.local.incident.close({ id: '1' })
- * ```
- */
-export const App = {
-  from<Bag extends { [K in keyof Bag]: CheckUseCase<Bag[K]> }>(
-    useCases: Bag,
-  ): AppBuilder<AsUseCaseBag<Bag>, never, never, unknown> {
-    return new AppBuilder(useCases as AsUseCaseBag<Bag>);
-  },
-};
-
 export class AppBuilder<
   Bag extends UseCaseBag,
   Provided = never,
@@ -86,8 +66,14 @@ export class AppBuilder<
   readonly #middleware: RpcMiddleware[] = [];
   #defaultCtx: unknown;
 
-  constructor(useCases: Bag) {
+  private constructor(useCases: Bag) {
     this.#useCases = useCases;
+  }
+
+  static from<Bag extends { [K in keyof Bag]: CheckUseCase<Bag[K]> }>(
+    useCases: Bag,
+  ): AppBuilder<AsUseCaseBag<Bag>, never, never, unknown> {
+    return new AppBuilder(useCases as AsUseCaseBag<Bag>);
   }
 
   provide<I>(
@@ -210,7 +196,8 @@ export class AppBuilder<
       }
     }
 
-    const rpc = deriveContract(this.#useCases);
+    const catalog = deriveContract(this.#useCases);
+    const rpc = deriveRpc(catalog);
     const deps = (): InvokeDeps => ({
       ports: adapted,
       catalogs: this.#bound,
@@ -230,7 +217,7 @@ export class AppBuilder<
     let started = false;
 
     const instance: AppInstance<Bag, Ctx> = {
-      contract: nestedContract(rpc) as DerivedContract<Bag>,
+      contract: nestedContract(catalog) as DerivedContract<Bag>,
       rpc,
       router: { fetch: createFetchHandler(api, deps()) },
       local,
@@ -298,6 +285,23 @@ export class AppBuilder<
   }
 }
 
-function nestedContract(rpc: RpcContract): Record<string, unknown> {
-  return nestByKey(Object.entries(rpc.routes));
+/**
+ * Composition root. `build()` is only callable when every required port
+ * and event catalog is provided.
+ *
+ * ```ts
+ * const app = App.from({ close: CloseIncident })
+ *   .provide(IncidentRepository, repo)
+ *   .provide(Clock, clock)
+ *   .bind(DomainEvents, bus)
+ *   .build()
+ * await app.local.incident.close({ id: '1' })
+ * ```
+ */
+export const App = {
+  from: AppBuilder.from,
+};
+
+function nestedContract(catalog: UseCaseContract): Record<string, unknown> {
+  return nestByKey(Object.entries(catalog.routes));
 }

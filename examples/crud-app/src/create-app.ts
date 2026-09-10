@@ -26,7 +26,9 @@ export function createApp(options?: {
   notifier?: ReturnType<typeof recordingNotifier>;
 }) {
   const notifier = options?.notifier ?? recordingNotifier();
+
   const now = options?.now ?? new Date('2026-01-01T00:00:00Z');
+
   const app = App.test(useCases)
     .provide(
       IncidentRepository,
@@ -47,5 +49,6 @@ export function createApp(options?: {
     .bind(DomainEvents, InMemoryBus.create())
     .ctx<AppContext>(defaultContext)
     .build();
+
   return { app, notifier };
 }

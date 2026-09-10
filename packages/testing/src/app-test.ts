@@ -27,22 +27,24 @@ export type TestAppInstance<
   as: (ctx: Ctx) => NestedClient<Bag, Ctx>;
 };
 
-/**
- * Same completeness as `App.from`, plus `published` capture (after
- * `aroundPublish`) and `as(ctx)` to rebind request context.
- *
- * ```ts
- * const app = App.test({ close: CloseIncident })
- *   .provide(IncidentRepository, InMemoryRepository.of(...))
- *   .bind(DomainEvents, InMemoryBus.create())
- *   .build()
- * await app.local.incident.close({ id: '1' })
- * expect(app.published).toHaveLength(1)
- * ```
- */
-export const App = {
-  from: RuntimeApp.from,
-  test<Bag extends { [K in keyof Bag]: CheckUseCase<Bag[K]> }>(
+export class TestAppBuilder<
+  Bag extends UseCaseBag,
+  Provided = never,
+  Bound = never,
+  Ctx = unknown,
+> {
+  readonly #inner: AppBuilder<Bag, Provided, Bound, Ctx>;
+  readonly #published: Envelope[];
+
+  private constructor(
+    inner: AppBuilder<Bag, Provided, Bound, Ctx>,
+    published: Envelope[],
+  ) {
+    this.#inner = inner;
+    this.#published = published;
+  }
+
+  static test<Bag extends { [K in keyof Bag]: CheckUseCase<Bag[K]> }>(
     useCases: Bag,
   ): TestAppBuilder<AsUseCaseBag<Bag>> {
     const published: Envelope[] = [];
@@ -54,24 +56,6 @@ export const App = {
       },
     });
     return new TestAppBuilder(inner, published);
-  },
-};
-
-export class TestAppBuilder<
-  Bag extends UseCaseBag,
-  Provided = never,
-  Bound = never,
-  Ctx = unknown,
-> {
-  readonly #inner: AppBuilder<Bag, Provided, Bound, Ctx>;
-  readonly #published: Envelope[];
-
-  constructor(
-    inner: AppBuilder<Bag, Provided, Bound, Ctx>,
-    published: Envelope[],
-  ) {
-    this.#inner = inner;
-    this.#published = published;
   }
 
   provide<I>(
@@ -148,6 +132,24 @@ export class TestAppBuilder<
       : MissingMessages<Bag, Provided, Bound>;
   }
 }
+
+/**
+ * Same completeness as `App.from`, plus `published` capture (after
+ * `aroundPublish`) and `as(ctx)` to rebind request context.
+ *
+ * ```ts
+ * const app = App.test({ close: CloseIncident })
+ *   .provide(IncidentRepository, InMemoryRepository.of(...))
+ *   .bind(DomainEvents, InMemoryBus.create())
+ *   .build()
+ * await app.local.incident.close({ id: '1' })
+ * expect(app.published).toHaveLength(1)
+ * ```
+ */
+export const App = {
+  from: RuntimeApp.from,
+  test: TestAppBuilder.test,
+};
 
 function rebindLocal(value: unknown, ctx: unknown): unknown {
   if (typeof value === 'function') {

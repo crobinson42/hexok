@@ -52,7 +52,6 @@ describe('extend stack', () => {
     await expect(app.local.ledger.charge({ amount: 10 })).rejects.toMatchObject(
       {
         code: 'FORBIDDEN',
-        status: 403,
       },
     );
     expect(ledger.balance).toBe(100);

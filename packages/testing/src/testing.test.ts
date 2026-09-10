@@ -1,6 +1,6 @@
 import { Entity, Port } from '@plinth/domain';
 import { describe, expect, expectTypeOf, it } from 'vitest';
-import type { TestAppInstance } from './app-test.js';
+import { TestAppBuilder, type TestAppInstance } from './app-test.js';
 import { InMemoryRepository } from './in-memory-repository.js';
 
 interface Clock {
@@ -72,6 +72,16 @@ describe('InMemoryRepository', () => {
     expectTypeOf(InMemoryRepository.of<ThingRepository>)
       .parameter(1)
       .toEqualTypeOf<{ keyBy: 'id'; seed?: Thing[] }>();
+  });
+});
+
+describe('TestAppBuilder', () => {
+  it('constructor is private; App.test is the factory', () => {
+    const _typeChecks = () => {
+      // @ts-expect-error TestAppBuilder constructor is private
+      new TestAppBuilder(null as never, []);
+    };
+    void _typeChecks;
   });
 });
 

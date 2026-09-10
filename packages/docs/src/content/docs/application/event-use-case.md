@@ -5,7 +5,7 @@ sidebar:
   order: 2
 ---
 
-`EventUseCase` is an event handler. It is mutually exclusive with `ApiUseCase`. Declare `on` (the event class) and `catalog`. Broker catalogs require `static group`.
+`EventUseCase` is an event handler. It is mutually exclusive with `ApiUseCase`. Declare `on` (the event class) and `catalog`. Broker catalogs require `static group`. The runtime constructs the class; do not `new` it.
 
 Handlers do **not** run until [`app.start()`](/runtime/start-stop/).
 

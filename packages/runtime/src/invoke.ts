@@ -35,7 +35,6 @@ export async function invokeApi(
   if (!parsed.ok) {
     throw new CodedError({
       code: 'VALIDATION',
-      status: 400,
       message: 'Validation failed',
     });
   }
@@ -55,7 +54,7 @@ export async function invokeApi(
     publish,
   };
 
-  const instance = new ctor();
+  const instance = constructUseCase(ctor);
   let handler: Handler = (executeCtx) =>
     instance.execute(executeCtx as never) as Promise<unknown>;
   handler = wrapUseCase(ctor, handler, deps.interceptors);
@@ -97,7 +96,7 @@ export async function invokeEvent(
     publish,
     ...(opts?.attempt !== undefined ? { attempt: opts.attempt } : {}),
   };
-  const instance = new ctor();
+  const instance = constructUseCase(ctor);
   let run: () => Promise<void> = () =>
     instance.execute(ctx as never) as Promise<void>;
   run = wrapDispatch(ctor, envelope, run, deps.interceptors);
@@ -110,6 +109,10 @@ export async function invokeEvent(
     queue.length = 0;
     throw error;
   }
+}
+
+function constructUseCase<T>(ctor: { prototype: T }): T {
+  return new (ctor as unknown as new () => T)();
 }
 
 function aliasPorts(

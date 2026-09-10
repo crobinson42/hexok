@@ -1,5 +1,6 @@
-import { type ApiUseCaseCtor, rpcPath } from '@plinth/app';
+import type { ApiUseCaseCtor } from '@plinth/app';
 import { CodedError } from '@plinth/core';
+import { httpStatus } from './http-status.js';
 import { type InvokeDeps, invokeApi } from './invoke.js';
 
 export function createFetchHandler(
@@ -41,26 +42,23 @@ export function createFetchHandler(
       return json({ ok: true, output });
     } catch (error) {
       if (error instanceof CodedError) {
+        const status = httpStatus(error.code);
         return json(
           {
             ok: false,
             error: {
               code: error.code,
-              status: error.status,
+              status,
               message: error.message,
               ...(error.data !== undefined ? { data: error.data } : {}),
             },
           },
-          error.status,
+          status,
         );
       }
       throw error;
     }
   };
-}
-
-export function routePath(key: string): string {
-  return rpcPath(key);
 }
 
 function json(body: unknown, status = 200): Response {

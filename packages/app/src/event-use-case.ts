@@ -26,6 +26,8 @@ export abstract class EventUseCase {
   static readonly errors: ErrorMap = {};
   static readonly middleware?: readonly unknown[];
 
+  protected constructor() {}
+
   /** Typed `never` so subclasses may take `EventCtx` (tighter `publish`). */
   abstract execute(ctx: never): Promise<void>;
 
@@ -33,7 +35,6 @@ export abstract class EventUseCase {
     const def = (this.constructor as { errors?: ErrorMap }).errors?.[code];
     throw new CodedError({
       code,
-      status: def?.status ?? 400,
       message: def?.message ?? code,
       ...(data !== undefined ? { data } : {}),
     });

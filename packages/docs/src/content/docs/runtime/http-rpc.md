@@ -5,9 +5,17 @@ sidebar:
   order: 6
 ---
 
-`app.router.fetch` is a `fetch`-compatible handler. `POST /rpc/<key>` with `{ input }` (optional `ctx`). Dots in the key become slashes: `incident.close` → `/rpc/incident/close`.
+`app.router.fetch` is a `fetch`-compatible handler. `incident.close` is `POST /rpc/incident/close`. Body is `{ input }` (optional `ctx`).
 
-Success: `{ ok: true, output }`. `CodedError`: `{ ok: false, error: { code, status, message, data? } }` with that HTTP status. Unknown routes and non-POST are `404`.
+Success: `{ ok: true, output }`. On `CodedError`, HTTP status comes from the code:
+
+- `NOT_FOUND` → 404
+- `VALIDATION` → 400
+- `FORBIDDEN` → 403
+- `UNAUTHORIZED` → 401
+- else → 409
+
+Failure: `{ ok: false, error: { code, status, message, data? } }`. Unknown routes and non-POST are `404`.
 
 ```ts
 await app.router.fetch(
@@ -18,4 +26,4 @@ await app.router.fetch(
 )
 ```
 
-See also: [Derived RPC contract](/application/derived-rpc-contract/).
+See also: [Derived contract](/application/derived-contract/).

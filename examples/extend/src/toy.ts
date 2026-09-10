@@ -34,8 +34,8 @@ export class Charge extends ApiUseCase {
   static readonly input = z.object({ amount: z.number() });
   static readonly output = z.object({ balance: z.number(), id: z.string() });
   static readonly errors = {
-    FORBIDDEN: { status: 403, message: 'Forbidden' },
-    INSUFFICIENT: { status: 409, message: 'Insufficient funds' },
+    FORBIDDEN: { message: 'Forbidden' },
+    INSUFFICIENT: { message: 'Insufficient funds' },
   } as const;
   static readonly ports = { ledger: Ledger, ids: RequestIds };
   static readonly publishes = [LedgerEvents] as const;

@@ -11,7 +11,6 @@ If an `ErrorDef` has a `data` schema, the factory takes that payload.
 
 ```ts
 if (!incident) throw errors.NOT_FOUND()
-if (!closed.ok) throw errors[closed.code]()
 ```
 
 See also: [Error map](/core/error-map/), [unwrap](/application/unwrap/).

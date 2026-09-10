@@ -16,7 +16,7 @@ class Site extends TrackedEntity<SiteProps> {
   static readonly key = 'Site';
   static readonly schema = siteSchema;
   static readonly errors = {
-    SAME_ADDRESS: { status: 409, message: 'Site is already at that address' },
+    SAME_ADDRESS: { message: 'Site is already at that address' },
   } as const;
 
   get id() {
@@ -36,6 +36,20 @@ class Site extends TrackedEntity<SiteProps> {
 }
 
 describe('TrackedEntity', () => {
+  it('constructor is protected; factories return the subclass', () => {
+    const props = {
+      id: 'hq',
+      address: { city: 'Austin', region: 'TX' },
+    };
+    expectTypeOf(Site.create(props)).toEqualTypeOf<Site>();
+    expectTypeOf(Site.restore(props)).toEqualTypeOf<Site>();
+    const _typeChecks = () => {
+      // @ts-expect-error TrackedEntity constructor is protected
+      new Site(props);
+    };
+    void _typeChecks;
+  });
+
   it('create marks isNew with no original', () => {
     const created = Site.create({
       id: 'hq',
@@ -85,7 +99,7 @@ describe('TrackedEntity', () => {
       expect(error).toBeInstanceOf(CodedError);
       expect(error).toMatchObject({
         code: 'SAME_ADDRESS',
-        status: 409,
+        message: 'Site is already at that address',
       });
     }
     expect(site.isDirty()).toBe(false);

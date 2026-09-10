@@ -1,4 +1,3 @@
-import type { CodedError } from '@plinth/core';
 import { describe, expect, it } from 'vitest';
 import { createApp } from './create-app.js';
 
@@ -22,23 +21,18 @@ describe('crud-app', () => {
     expect(closed.status).toBe('closed');
   });
 
-  it('ALREADY_CLOSED is 409 and NOT_FOUND is 404', async () => {
+  it('ALREADY_CLOSED / NOT_FOUND / DUPLICATE codes', async () => {
     const { app } = createApp();
     await app.local.incident.close({ id: '1' });
     await expect(app.local.incident.close({ id: '1' })).rejects.toMatchObject({
       code: 'ALREADY_CLOSED',
-      status: 409,
-    } satisfies Partial<CodedError>);
+    });
     await expect(
       app.local.incident.get({ id: 'missing' }),
-    ).rejects.toMatchObject({ code: 'NOT_FOUND', status: 404 });
-  });
-
-  it('duplicate create is 409', async () => {
-    const { app } = createApp();
+    ).rejects.toMatchObject({ code: 'NOT_FOUND' });
     await expect(
       app.local.incident.create({ id: '1', title: 'dup' }),
-    ).rejects.toMatchObject({ code: 'DUPLICATE', status: 409 });
+    ).rejects.toMatchObject({ code: 'DUPLICATE' });
   });
 
   it('close publishes; second close does not', async () => {

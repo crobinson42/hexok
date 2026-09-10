@@ -5,11 +5,10 @@ sidebar:
   order: 5
 ---
 
-`unwrap` is the same one-liner as `if (!result.ok) throw this.error(result.code)`. Domain methods return [Result](/core/result/). Use cases unwrap.
+`unwrap` is the same one-liner as `if (!result.ok) throw this.error(result.code)`. Use it for [Result](/core/result/) from `validate` or custom flows. Entity methods throw [CodedError](/core/coded-error/) themselves — do not unwrap them.
 
 ```ts
-const closed = this.unwrap(incident.close(now))
-await ports.incidents.save(closed)
+const parsed = this.unwrap(validate(schema, raw))
 ```
 
 See also: [ApiUseCase](/application/api-use-case/), [Error factories](/application/error-factories/).

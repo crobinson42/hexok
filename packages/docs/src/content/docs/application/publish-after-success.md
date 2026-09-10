@@ -12,8 +12,8 @@ sidebar:
 Publish flushes **after** the use-case interceptor onion, so a successful unit-of-work commit naturally yields after-commit publish.
 
 ```ts
-publish(new IncidentClosed({ id: closed.value.id, closedAt: closed.value.closedAt }))
-return closed.value.toProps()
+publish(new IncidentClosed({ id: closed.id, closedAt: closed.closedAt }))
+return closed.toProps()
 ```
 
 See also: [Interceptor](/runtime/interceptor/), [EventUseCase](/application/event-use-case/).

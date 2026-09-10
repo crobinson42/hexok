@@ -6,6 +6,7 @@ export type {
   MissingMessages,
 } from './completeness.js';
 export { wrapEvent } from './envelope.js';
+export { httpStatus } from './http-status.js';
 export {
   type Handler,
   type HandlerCtx,
@@ -13,3 +14,9 @@ export {
   requireCapability,
 } from './interceptor.js';
 export type { RpcMiddleware } from './middleware.js';
+export {
+  deriveRpc,
+  type RpcContract,
+  type RpcRoute,
+  rpcPath,
+} from './rpc.js';

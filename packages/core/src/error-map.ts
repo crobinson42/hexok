@@ -1,16 +1,15 @@
 import type { StandardSchemaV1 } from './standard-schema.js';
 
 /**
- * Wire metadata for one error code. Keys of an `ErrorMap` **are** the error union.
+ * Declared metadata for one error code. Keys of an `ErrorMap` **are** the error union.
  *
  * ```ts
  * const errors = {
- *   NOT_FOUND: { status: 404, message: 'Incident not found' },
+ *   NOT_FOUND: { message: 'Incident not found' },
  * }
  * ```
  */
 export interface ErrorDef {
-  status?: number;
   message?: string;
   data?: StandardSchemaV1;
 }

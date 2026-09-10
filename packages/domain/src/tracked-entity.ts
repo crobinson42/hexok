@@ -19,7 +19,7 @@ export abstract class TrackedEntity<P extends object> extends Entity<P> {
   #isNew = false;
   #original: P | undefined;
 
-  constructor(props: P) {
+  protected constructor(props: P) {
     super({ ...props });
     this.#isNew = false;
     this.#original = { ...props };
@@ -109,7 +109,7 @@ export abstract class TrackedEntity<P extends object> extends Entity<P> {
   static override create<T extends EntityConstructor>(
     this: T,
     props: Infer<T['schema']>,
-  ): InstanceType<T> {
+  ): T['prototype'] {
     const instance = instantiate(this, props);
     const tracked = instance as TrackedEntity<object>;
     tracked.markNew();
@@ -123,14 +123,14 @@ export abstract class TrackedEntity<P extends object> extends Entity<P> {
   static override restore<T extends EntityConstructor>(
     this: T,
     props: Infer<T['schema']>,
-  ): InstanceType<T> {
+  ): T['prototype'] {
     return instantiate(this, props);
   }
 
   static override parse<T extends EntityConstructor>(
     this: T,
     value: unknown,
-  ): InstanceType<T> {
+  ): T['prototype'] {
     return instantiate(this, value);
   }
 }

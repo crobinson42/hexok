@@ -16,12 +16,12 @@ const TRUST = 'plinth: model.from() failed entity.parse (trust boundary)';
  * ```
  */
 export class Mapper<E extends EntityConstructor, Row> {
-  #toFn: (entity: InstanceType<E>) => Row;
-  #fromFn: (row: Row) => InstanceType<E>;
+  #toFn: (entity: E['prototype']) => Row;
+  #fromFn: (row: Row) => E['prototype'];
 
   private constructor(
-    toFn: (entity: InstanceType<E>) => Row,
-    fromFn: (row: Row) => InstanceType<E>,
+    toFn: (entity: E['prototype']) => Row,
+    fromFn: (row: Row) => E['prototype'],
   ) {
     this.#toFn = toFn;
     this.#fromFn = fromFn;
@@ -29,21 +29,19 @@ export class Mapper<E extends EntityConstructor, Row> {
 
   static for<E extends EntityConstructor>(_entity: E): MapperTo<E> {
     return {
-      to: <Row>(
-        toFn: (entity: InstanceType<E>) => Row,
-      ): MapperFrom<E, Row> => ({
+      to: <Row>(toFn: (entity: E['prototype']) => Row): MapperFrom<E, Row> => ({
         from: (fromFn) => new Mapper(toFn, fromFn),
       }),
     };
   }
 
   /** Outbound. No parse. */
-  to(entity: InstanceType<E>): Row {
+  to(entity: E['prototype']): Row {
     return this.#toFn(entity);
   }
 
   /** Inbound trust boundary. Throws if entity.parse/restore fails. */
-  from(row: Row): InstanceType<E> {
+  from(row: Row): E['prototype'] {
     try {
       return this.#fromFn(row);
     } catch (error) {
@@ -57,7 +55,7 @@ export class Mapper<E extends EntityConstructor, Row> {
    */
   unsafe(): {
     to: Mapper<E, Row>['to'];
-    from: (row: Row) => Result<InstanceType<E>, 'VALIDATION'>;
+    from: (row: Row) => Result<E['prototype'], 'VALIDATION'>;
   } {
     return {
       to: (entity) => this.to(entity),
@@ -74,11 +72,11 @@ export class Mapper<E extends EntityConstructor, Row> {
 }
 
 export type MapperTo<E extends EntityConstructor> = {
-  to<Row>(toFn: (entity: InstanceType<E>) => Row): MapperFrom<E, Row>;
+  to<Row>(toFn: (entity: E['prototype']) => Row): MapperFrom<E, Row>;
 };
 
 export type MapperFrom<E extends EntityConstructor, Row> = {
-  from(fromFn: (row: Row) => InstanceType<E>): Mapper<E, Row>;
+  from(fromFn: (row: Row) => E['prototype']): Mapper<E, Row>;
 };
 
 function isValidation(error: unknown): boolean {

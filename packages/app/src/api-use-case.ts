@@ -2,14 +2,14 @@ import { CodedError, type ErrorMap, type Result } from '@plinth/core';
 import type { AnyEventCatalog, PortToken } from '@plinth/domain';
 
 /**
- * HTTP/RPC use case. Declare static `key`, `input`, `output`, `errors`, `ports`.
+ * Request/response application use case. Declare static `key`, `input`, `output`, `errors`, `ports`.
  *
  * ```ts
  * class CloseIncident extends ApiUseCase {
  *   static readonly key = 'incident.close'
  *   static readonly input = z.object({ id: z.string() })
  *   static readonly output = Incident.schema
- *   static readonly errors = { NOT_FOUND: { status: 404 } } as const
+ *   static readonly errors = { NOT_FOUND: { message: 'Incident not found' } } as const
  *   static readonly ports = { incidents: IncidentRepository }
  *   async execute({ input, ports, errors }: ExecuteCtx<typeof CloseIncident>) {
  *     const incident = await ports.incidents.get(input.id)
@@ -30,6 +30,8 @@ export abstract class ApiUseCase {
   static readonly publishes?: readonly AnyEventCatalog[];
   static readonly middleware?: readonly unknown[];
 
+  protected constructor() {}
+
   /** Typed `never` so subclasses may take `ExecuteCtx` (tighter `publish`). */
   abstract execute(ctx: never): Promise<unknown>;
 
@@ -40,7 +42,6 @@ export abstract class ApiUseCase {
     const def = (this.constructor as { errors?: ErrorMap }).errors?.[code];
     throw new CodedError({
       code,
-      status: def?.status ?? 400,
       message: def?.message ?? code,
       ...(data !== undefined ? { data } : {}),
     });

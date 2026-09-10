@@ -31,11 +31,12 @@ export class RelocateSite extends ApiUseCase {
 
     site.relocate(input.city, input.region);
 
+    const changedKeys = site.getChangedKeys();
     await ports.sites.save(site);
 
     return {
       site: site.toProps(),
-      changedKeys: site.getChangedKeys(),
+      changedKeys,
     };
   }
 }

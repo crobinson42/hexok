@@ -72,6 +72,7 @@ export class InMemoryRepository<E extends Entity<Record<string, unknown>>>
 
   async save(entity: E): Promise<void> {
     this.#store.set(this.keyOf(entity), cloneEntity(entity));
+    entity.commit();
   }
 
   async list(): Promise<E[]> {

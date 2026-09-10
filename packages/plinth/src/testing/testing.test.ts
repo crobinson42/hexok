@@ -61,6 +61,30 @@ describe('InMemoryRepository', () => {
     expect(await repo.get('1')).toBeNull();
   });
 
+  it('save commits the working entity', async () => {
+    const created = Thing.create({ id: '1' });
+    const repo = InMemoryRepository.of(ThingRepository, { keyBy: 'id' });
+    await repo.save(created);
+    expect(created.isNew).toBe(false);
+    expect(created.isDirty()).toBe(false);
+    expect(created.getChangedKeys()).toEqual([]);
+  });
+
+  it('save does not skip a clean restore', async () => {
+    const repo = InMemoryRepository.of(ThingRepository, { keyBy: 'id' });
+    await repo.save(Thing.restore({ id: '1' }));
+    expect(await repo.get('1')).not.toBeNull();
+  });
+
+  it('seed does not commit the caller', () => {
+    const created = Thing.create({ id: '1' });
+    InMemoryRepository.of(ThingRepository, {
+      keyBy: 'id',
+      seed: [created],
+    });
+    expect(created.isNew).toBe(true);
+  });
+
   it('rejects non-CRUD ports at the type level', () => {
     expectTypeOf<
       Parameters<typeof InMemoryRepository.of<Clock>>[0]

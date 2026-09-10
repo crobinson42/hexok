@@ -4,17 +4,31 @@ A TypeScript kit for writing a clean-architecture backend as **ordinary classes*
 
 A new hire should open a use-case file and understand the business flow without a glossary of hidden methods, phantom fields, or `meta` bags.
 
-## Packages
+## Install
 
-| Package | What it is |
+```bash
+npm i plinth
+```
+
+Import from a layer. There is no root barrel — that keeps the public API aligned with the architecture.
+
+```ts
+import { Entity } from 'plinth/domain'
+import { ApiUseCase } from 'plinth/app'
+import { App } from 'plinth/runtime'
+import { App as TestApp, InMemoryRepository } from 'plinth/testing'
+```
+
+| Import | What it is |
 | --- | --- |
-| `@plinth/core` | `Result`, Standard Schema V1, `ErrorMap` |
-| `@plinth/domain` | `Entity`, `TrackedEntity`, `Port`, `EventCatalog`, `DomainEvent` |
-| `@plinth/app` | `ApiUseCase`, `EventUseCase`, contract derivation |
-| `@plinth/infra` | `Mapper` (entity ↔ row), `Adapter.of` |
-| `@plinth/runtime` | `App.from` composition, completeness, interceptors, local client, HTTP |
-| `@plinth/testing` | `App.test`, in-memory repo/bus/broker, `published` |
-| `@plinth/docs` | Concept docs (`npm run dev -w @plinth/docs`) |
+| `plinth/core` | `Result`, Standard Schema V1, `ErrorMap` |
+| `plinth/domain` | `Entity`, `TrackedEntity`, `Port`, `EventCatalog`, `DomainEvent` |
+| `plinth/app` | `ApiUseCase`, `EventUseCase`, contract derivation |
+| `plinth/infra` | `Mapper` (entity ↔ row), `Adapter.of` |
+| `plinth/runtime` | `App.from` composition, completeness, interceptors, local client, HTTP |
+| `plinth/testing` | Test-only: `App.test`, in-memory repo/bus/broker, `published` |
+
+Concept docs: `npm run dev -w @plinth/docs`.
 
 ## Write a use case
 
@@ -86,3 +100,4 @@ Subclass + typed statics + interceptors. See `examples/extend`: authorize, reque
 
 - [`examples/crud-app`](examples/crud-app) — golden path. Read `CloseIncident`.
 - [`examples/extend`](examples/extend) — copy-paste interceptors.
+- [`examples/app-template`](examples/app-template) — Astro client + empty plinth backend.

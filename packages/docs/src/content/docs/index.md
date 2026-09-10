@@ -5,6 +5,8 @@ description: A TypeScript kit for writing a clean-architecture backend as ordina
 
 Plinth is a TypeScript kit for a clean-architecture backend as **ordinary classes**: Entity, Port, Adapter, UseCase, Event, Interceptor.
 
+Install one package and import a layer: `plinth/core`, `plinth/domain`, `plinth/app`, `plinth/infra`, `plinth/runtime`, `plinth/testing`.
+
 A new hire should open a use-case file and understand the business flow without a glossary of hidden methods, phantom fields, or `meta` bags.
 
 The entity owns the rule (`incident.close(now)`). The use case orchestrates.

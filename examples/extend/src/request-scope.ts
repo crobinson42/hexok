@@ -1,10 +1,10 @@
-import type { UseCaseClass } from '@plinth/app';
-import type { PortToken } from '@plinth/domain';
+import type { UseCaseClass } from 'plinth/app';
+import type { PortToken } from 'plinth/domain';
 import {
   type Handler,
   type Interceptor,
   requireCapability,
-} from '@plinth/runtime';
+} from 'plinth/runtime';
 
 /**
  * Ports that `implements RequestScoped` are `fork()`ed per call.

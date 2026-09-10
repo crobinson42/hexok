@@ -1,4 +1,4 @@
-import { ApiUseCase, type ExecuteCtx } from '@plinth/app';
+import { ApiUseCase, type ExecuteCtx } from 'plinth/app';
 import { z } from 'zod';
 import { incidentSchema } from '../domain/incident.js';
 import { IncidentRepository } from '../ports.js';
@@ -6,13 +6,13 @@ import { IncidentRepository } from '../ports.js';
 export class ListIncidents extends ApiUseCase {
   static readonly key = 'incident.list';
 
-  static  input = z.object({});
+  static input = z.object({});
 
-  static  output = z.array(incidentSchema);
+  static output = z.array(incidentSchema);
 
-  static  errors = {};
+  static errors = {};
 
-  static  ports = { incidents: IncidentRepository };
+  static ports = { incidents: IncidentRepository };
 
   async execute({ ports }: ExecuteCtx<typeof ListIncidents>) {
     const incidents = await ports.incidents.list();

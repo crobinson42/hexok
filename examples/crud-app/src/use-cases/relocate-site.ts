@@ -1,10 +1,10 @@
-import { ApiUseCase, type ExecuteCtx } from "@plinth/app";
-import { z } from "zod";
-import { Site, siteSchema } from "../domain/site.js";
-import { SiteRepository } from "../ports.js";
+import { ApiUseCase, type ExecuteCtx } from 'plinth/app';
+import { z } from 'zod';
+import { Site, siteSchema } from '../domain/site.js';
+import { SiteRepository } from '../ports.js';
 
 export class RelocateSite extends ApiUseCase {
-  static readonly key = "site.relocate";
+  static readonly key = 'site.relocate';
 
   static input = z.object({
     id: z.string(),
@@ -19,7 +19,7 @@ export class RelocateSite extends ApiUseCase {
 
   static errors = {
     ...Site.errors,
-    NOT_FOUND: { message: "Site not found" },
+    NOT_FOUND: { message: 'Site not found' },
   };
 
   static ports = { sites: SiteRepository };

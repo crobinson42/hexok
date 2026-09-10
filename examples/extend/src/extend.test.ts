@@ -1,4 +1,4 @@
-import { App, InMemoryBus } from '@plinth/testing';
+import { App, InMemoryBus } from 'plinth/testing';
 import { describe, expect, it } from 'vitest';
 import { AuthorizeInterceptor } from './authorize.js';
 import type { AppContext } from './context.js';

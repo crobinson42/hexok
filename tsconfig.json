@@ -1,13 +1,9 @@
 {
   "files": [],
   "references": [
-    { "path": "packages/core" },
-    { "path": "packages/domain" },
-    { "path": "packages/app" },
-    { "path": "packages/runtime" },
-    { "path": "packages/infra" },
-    { "path": "packages/testing" },
+    { "path": "packages/plinth" },
     { "path": "examples/crud-app" },
-    { "path": "examples/extend" }
+    { "path": "examples/extend" },
+    { "path": "examples/app-template/backend" }
   ]
 }

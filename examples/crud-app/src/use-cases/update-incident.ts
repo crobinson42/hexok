@@ -1,17 +1,17 @@
-import { ApiUseCase, type ExecuteCtx } from "@plinth/app";
-import { z } from "zod";
-import { incidentSchema } from "../domain/incident.js";
-import { IncidentRepository } from "../ports.js";
+import { ApiUseCase, type ExecuteCtx } from 'plinth/app';
+import { z } from 'zod';
+import { incidentSchema } from '../domain/incident.js';
+import { IncidentRepository } from '../ports.js';
 
 export class UpdateIncident extends ApiUseCase {
-  static readonly key = "incident.update";
+  static readonly key = 'incident.update';
 
   static input = z.object({ id: z.string(), title: z.string() });
 
   static output = incidentSchema;
 
   static errors = {
-    NOT_FOUND: { message: "Incident not found" },
+    NOT_FOUND: { message: 'Incident not found' },
   };
 
   static ports = { incidents: IncidentRepository };

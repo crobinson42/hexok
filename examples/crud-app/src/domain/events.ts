@@ -1,9 +1,9 @@
-import type { Infer } from "@plinth/core";
-import { DomainEvent, EventCatalog } from "@plinth/domain";
-import { z } from "zod";
+import type { Infer } from 'plinth/core';
+import { DomainEvent, EventCatalog } from 'plinth/domain';
+import { z } from 'zod';
 
 export class IncidentClosed extends DomainEvent {
-  static readonly key = "incident.closed";
+  static readonly key = 'incident.closed';
 
   static schema = z.object({
     id: z.string(),
@@ -16,7 +16,7 @@ export class IncidentClosed extends DomainEvent {
 }
 
 export class IncidentOpened extends DomainEvent {
-  static readonly key = "incident.opened";
+  static readonly key = 'incident.opened';
 
   static schema = z.object({
     id: z.string(),
@@ -29,6 +29,6 @@ export class IncidentOpened extends DomainEvent {
   }
 }
 
-export const DomainEvents = new EventCatalog("domain", { kind: "bus" })
+export const DomainEvents = new EventCatalog('domain', { kind: 'bus' })
   .event(IncidentClosed)
   .event(IncidentOpened);

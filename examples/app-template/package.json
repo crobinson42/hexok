@@ -1,0 +1,21 @@
+{
+  "name": "@plinth/app-template",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "astro dev",
+    "build": "tsc -b backend && astro build",
+    "preview": "astro preview",
+    "type-check": "tsc --noEmit -p backend/tsconfig.check.json && astro check",
+    "lint": "biome check .",
+    "clean": "rm -rf dist backend/dist .astro backend/*.tsbuildinfo"
+  },
+  "dependencies": {
+    "astro": "^7.3.2",
+    "plinth": "*"
+  },
+  "devDependencies": {
+    "@astrojs/check": "^0.9.10"
+  }
+}

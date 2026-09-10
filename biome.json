@@ -39,5 +39,187 @@
       "!**/coverage",
       "!**/*.tsbuildinfo"
     ]
-  }
+  },
+  "overrides": [
+    {
+      "includes": ["packages/plinth/src/core/**"],
+      "linter": {
+        "rules": {
+          "style": {
+            "noRestrictedImports": {
+              "level": "error",
+              "options": {
+                "patterns": [
+                  {
+                    "group": [
+                      "../domain",
+                      "../domain/**",
+                      "../app",
+                      "../app/**",
+                      "../infra",
+                      "../infra/**",
+                      "../runtime",
+                      "../runtime/**",
+                      "../testing",
+                      "../testing/**",
+                      "plinth/domain",
+                      "plinth/app",
+                      "plinth/infra",
+                      "plinth/runtime",
+                      "plinth/testing"
+                    ],
+                    "message": "core cannot import other layers"
+                  }
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "includes": ["packages/plinth/src/domain/**"],
+      "linter": {
+        "rules": {
+          "style": {
+            "noRestrictedImports": {
+              "level": "error",
+              "options": {
+                "patterns": [
+                  {
+                    "group": [
+                      "../app",
+                      "../app/**",
+                      "../infra",
+                      "../infra/**",
+                      "../runtime",
+                      "../runtime/**",
+                      "../testing",
+                      "../testing/**",
+                      "plinth/app",
+                      "plinth/infra",
+                      "plinth/runtime",
+                      "plinth/testing"
+                    ],
+                    "message": "domain can only import core"
+                  }
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "includes": ["packages/plinth/src/app/**"],
+      "linter": {
+        "rules": {
+          "style": {
+            "noRestrictedImports": {
+              "level": "error",
+              "options": {
+                "patterns": [
+                  {
+                    "group": [
+                      "../infra",
+                      "../infra/**",
+                      "../runtime",
+                      "../runtime/**",
+                      "../testing",
+                      "../testing/**",
+                      "plinth/infra",
+                      "plinth/runtime",
+                      "plinth/testing"
+                    ],
+                    "message": "app can only import core and domain"
+                  }
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "includes": ["packages/plinth/src/infra/**"],
+      "linter": {
+        "rules": {
+          "style": {
+            "noRestrictedImports": {
+              "level": "error",
+              "options": {
+                "patterns": [
+                  {
+                    "group": [
+                      "../app",
+                      "../app/**",
+                      "../runtime",
+                      "../runtime/**",
+                      "../testing",
+                      "../testing/**",
+                      "plinth/app",
+                      "plinth/runtime",
+                      "plinth/testing"
+                    ],
+                    "message": "infra can only import core and domain"
+                  }
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "includes": ["packages/plinth/src/runtime/**"],
+      "linter": {
+        "rules": {
+          "style": {
+            "noRestrictedImports": {
+              "level": "error",
+              "options": {
+                "patterns": [
+                  {
+                    "group": [
+                      "../infra",
+                      "../infra/**",
+                      "../testing",
+                      "../testing/**",
+                      "plinth/infra",
+                      "plinth/testing"
+                    ],
+                    "message": "runtime can only import core, domain, and app"
+                  }
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "includes": ["packages/plinth/src/testing/**"],
+      "linter": {
+        "rules": {
+          "style": {
+            "noRestrictedImports": {
+              "level": "error",
+              "options": {
+                "patterns": [
+                  {
+                    "group": [
+                      "../infra",
+                      "../infra/**",
+                      "plinth/infra"
+                    ],
+                    "message": "testing can import core, domain, app, and runtime — not infra"
+                  }
+                ]
+              }
+            }
+          }
+        }
+      }
+    }
+  ]
 }

@@ -5,7 +5,7 @@ sidebar:
   order: 0
 ---
 
-`@plinth/domain` is where business types live. Entities never I/O, never publish, never hold ports. Ports are TypeScript interfaces plus a token. Events are classes registered on a catalog.
+`plinth/domain` is where business types live. Entities never I/O, never publish, never hold ports. Ports are TypeScript interfaces plus a token. Events are classes registered on a catalog.
 
 - [Entity](/domain/entity/) — immutable value
 - [TrackedEntity](/domain/tracked-entity/) — opt-in dirty tracking

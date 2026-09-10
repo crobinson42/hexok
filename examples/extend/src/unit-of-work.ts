@@ -1,10 +1,10 @@
-import type { UseCaseClass } from '@plinth/app';
-import type { Envelope, PortToken, UnitOfWork } from '@plinth/domain';
+import type { UseCaseClass } from 'plinth/app';
+import type { Envelope, PortToken, UnitOfWork } from 'plinth/domain';
 import {
   type Handler,
   type Interceptor,
   requireCapability,
-} from '@plinth/runtime';
+} from 'plinth/runtime';
 
 /**
  * Opens `{ onCommit, onRollback }`, `bindTo(uow)` on transactional ports,

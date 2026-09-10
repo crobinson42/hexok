@@ -1,7 +1,7 @@
-import { ApiUseCase, type ExecuteCtx } from '@plinth/app';
-import type { Infer } from '@plinth/core';
-import type { RequestScoped, Transactional, UnitOfWork } from '@plinth/domain';
-import { DomainEvent, EventCatalog, Port } from '@plinth/domain';
+import { ApiUseCase, type ExecuteCtx } from 'plinth/app';
+import type { Infer } from 'plinth/core';
+import type { RequestScoped, Transactional, UnitOfWork } from 'plinth/domain';
+import { DomainEvent, EventCatalog, Port } from 'plinth/domain';
 import { z } from 'zod';
 
 export class LedgerCharged extends DomainEvent {

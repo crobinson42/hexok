@@ -1,5 +1,5 @@
-import type { Infer } from '@plinth/core';
-import { TrackedEntity } from '@plinth/domain';
+import type { Infer } from 'plinth/core';
+import { TrackedEntity } from 'plinth/domain';
 import { z } from 'zod';
 
 export const siteSchema = z.object({
@@ -32,7 +32,10 @@ export class Site extends TrackedEntity<SiteProps> {
   }
 
   relocate(city: string, region: string) {
-    if (this.props.address.city === city && this.props.address.region === region) {
+    if (
+      this.props.address.city === city &&
+      this.props.address.region === region
+    ) {
       this.error('SAME_ADDRESS');
     }
 

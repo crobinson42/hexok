@@ -1,4 +1,4 @@
-import { type EventCtx, EventUseCase } from '@plinth/app';
+import { type EventCtx, EventUseCase } from 'plinth/app';
 import { DomainEvents, IncidentClosed } from '../domain/events.js';
 import { Notifier } from '../ports.js';
 

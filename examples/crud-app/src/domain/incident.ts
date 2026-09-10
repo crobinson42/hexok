@@ -1,5 +1,5 @@
-import type { Infer } from '@plinth/core';
-import { Entity } from '@plinth/domain';
+import type { Infer } from 'plinth/core';
+import { Entity } from 'plinth/domain';
 import { z } from 'zod';
 
 export const incidentSchema = z.object({

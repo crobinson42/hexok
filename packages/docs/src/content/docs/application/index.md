@@ -5,7 +5,7 @@ sidebar:
   order: 0
 ---
 
-`@plinth/app` is the use-case layer. An `ApiUseCase` is a request/response use case. An `EventUseCase` handles a catalog event. Both are ordinary classes with typed statics.
+`plinth/app` is the use-case layer. An `ApiUseCase` is a request/response use case. An `EventUseCase` handles a catalog event. Both are ordinary classes with typed statics.
 
 The entity owns the rule. The use case loads, calls the entity, saves, publishes, and returns.
 

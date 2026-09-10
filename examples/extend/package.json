@@ -11,11 +11,7 @@
     "clean": "rm -rf dist *.tsbuildinfo"
   },
   "dependencies": {
-    "@plinth/app": "*",
-    "@plinth/core": "*",
-    "@plinth/domain": "*",
-    "@plinth/runtime": "*",
-    "@plinth/testing": "*",
+    "plinth": "*",
     "zod": "^4.1.5"
   }
 }

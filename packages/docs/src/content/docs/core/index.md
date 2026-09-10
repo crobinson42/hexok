@@ -1,11 +1,11 @@
 ---
 title: Core
-description: Result, error maps, and Standard Schema — the primitives every other package uses.
+description: Result, error maps, and Standard Schema — the primitives every other layer uses.
 sidebar:
   order: 0
 ---
 
-`@plinth/core` is small on purpose. Entities throw a `CodedError`. `validate` returns a `Result`. Use cases throw a `CodedError` whose keys come from an `ErrorMap`. Schemas follow Standard Schema V1.
+`plinth/core` is small on purpose. Entities throw a `CodedError`. `validate` returns a `Result`. Use cases throw a `CodedError` whose keys come from an `ErrorMap`. Schemas follow Standard Schema V1.
 
 - [Result](/core/result/) — success-or-code from `validate` / custom flows
 - [CodedError](/core/coded-error/) — thrown by entities and use cases

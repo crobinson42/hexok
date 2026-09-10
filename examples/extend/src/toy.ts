@@ -19,12 +19,12 @@ export const LedgerEvents = new EventCatalog('ledger', { kind: 'bus' }).event(
 export interface Ledger {
   charge(amount: number): Promise<number>;
 }
-export const Ledger = Port.token<Ledger & Transactional<Ledger>>()('Ledger');
+export const Ledger = Port.token<Ledger & Transactional<Ledger>>('Ledger');
 
 export interface RequestIds {
   next(): string;
 }
-export const RequestIds = Port.token<RequestIds & RequestScoped<RequestIds>>()(
+export const RequestIds = Port.token<RequestIds & RequestScoped<RequestIds>>(
   'RequestIds',
 );
 

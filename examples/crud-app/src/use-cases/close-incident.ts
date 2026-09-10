@@ -31,15 +31,13 @@ export class CloseIncident extends ApiUseCase {
     if (!incident) throw errors.NOT_FOUND();
 
     const closed = incident.close(ports.clock.now());
-    if (!closed.ok) throw errors[closed.code]();
-
-    await ports.incidents.save(closed.value);
+    await ports.incidents.save(closed);
     publish(
       new IncidentClosed({
-        id: closed.value.id,
-        closedAt: closed.value.closedAt as Date,
+        id: closed.id,
+        closedAt: closed.closedAt as Date,
       }),
     );
-    return closed.value.toProps();
+    return closed.toProps();
   }
 }

@@ -1,4 +1,4 @@
-import { fail, type Infer, ok, type Result } from '@plinth/core';
+import type { Infer } from '@plinth/core';
 import { Entity } from '@plinth/domain';
 import { z } from 'zod';
 
@@ -15,11 +15,11 @@ export type IncidentProps = Infer<typeof incidentSchema>;
  * Untracked value object. `close` returns a **new** instance.
  */
 export class Incident extends Entity<IncidentProps> {
-  static readonly key = 'Incident';
-  static  schema = incidentSchema;
-  static  errors = {
+  static schema = incidentSchema;
+
+  static errors = {
     ALREADY_CLOSED: { status: 409, message: 'Incident already closed' },
-  } ;
+  }
 
   get id() {
     return this.props.id;
@@ -35,22 +35,20 @@ export class Incident extends Entity<IncidentProps> {
   }
 
   static open(id: string, title: string): Incident {
-    const created = Incident.create({
+    return Incident.create({
       id,
       title,
       status: 'open',
       closedAt: null,
     });
-    if (!created.ok) throw new Error('plinth: Incident.open failed validation');
-    return created.value;
   }
 
   rename(title: string): Incident {
     return this.with({ title });
   }
 
-  close(now: Date): Result<Incident, 'ALREADY_CLOSED'> {
-    if (this.props.status === 'closed') return fail('ALREADY_CLOSED');
-    return ok(this.with({ status: 'closed', closedAt: now }));
+  close(now: Date): Incident {
+    if (this.props.status === 'closed') this.error('ALREADY_CLOSED');
+    return this.with({ status: 'closed', closedAt: now });
   }
 }

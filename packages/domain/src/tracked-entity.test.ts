@@ -1,4 +1,4 @@
-import { fail, type Infer, ok, type Result } from '@plinth/core';
+import { CodedError, type Infer } from '@plinth/core';
 import { describe, expect, expectTypeOf, it } from 'vitest';
 import { z } from 'zod';
 import { TrackedEntity } from './tracked-entity.js';
@@ -26,12 +26,12 @@ class Site extends TrackedEntity<SiteProps> {
     return this.props.address;
   }
 
-  relocate(city: string, region: string): Result<this, 'SAME_ADDRESS'> {
+  relocate(city: string, region: string): this {
     if (this.address.city === city && this.address.region === region) {
-      return fail('SAME_ADDRESS');
+      Site.error('SAME_ADDRESS');
     }
     this.set('address', { ...this.address, city, region });
-    return ok(this);
+    return this;
   }
 }
 
@@ -41,12 +41,10 @@ describe('TrackedEntity', () => {
       id: 'hq',
       address: { city: 'Austin', region: 'TX' },
     });
-    expect(created.ok).toBe(true);
-    if (!created.ok) return;
-    expect(created.value.isNew).toBe(true);
-    expect(created.value.original).toBeUndefined();
-    expect(created.value.isDirty()).toBe(true);
-    expect(created.value.getChangedKeys().sort()).toEqual(['address', 'id']);
+    expect(created.isNew).toBe(true);
+    expect(created.original).toBeUndefined();
+    expect(created.isDirty()).toBe(true);
+    expect(created.getChangedKeys().sort()).toEqual(['address', 'id']);
   });
 
   it('restore snapshots original and is clean', () => {
@@ -54,44 +52,43 @@ describe('TrackedEntity', () => {
       id: 'hq',
       address: { city: 'Austin', region: 'TX' },
     });
-    expect(restored.ok).toBe(true);
-    if (!restored.ok) return;
-    expect(restored.value.isNew).toBe(false);
-    expect(restored.value.original).toEqual({
+    expect(restored.isNew).toBe(false);
+    expect(restored.original).toEqual({
       id: 'hq',
       address: { city: 'Austin', region: 'TX' },
     });
-    expect(restored.value.isDirty()).toBe(false);
-    expect(restored.value.getChangedKeys()).toEqual([]);
+    expect(restored.isDirty()).toBe(false);
+    expect(restored.getChangedKeys()).toEqual([]);
   });
 
   it('relocate mutates this and dirties the parent key', () => {
-    const restored = Site.restore({
+    const site = Site.restore({
       id: 'hq',
       address: { city: 'Austin', region: 'TX' },
     });
-    expect(restored.ok).toBe(true);
-    if (!restored.ok) return;
-    const site = restored.value;
-    const result = site.relocate('Denver', 'CO');
-    expect(result.ok).toBe(true);
-    if (!result.ok) return;
-    expect(result.value).toBe(site);
+    const moved = site.relocate('Denver', 'CO');
+    expect(moved).toBe(site);
     expect(site.address).toEqual({ city: 'Denver', region: 'CO' });
     expect(site.getChangedKeys()).toEqual(['address']);
     expect(site.isDirty()).toBe(true);
   });
 
-  it('same address fails SAME_ADDRESS and stays clean', () => {
-    const restored = Site.restore({
+  it('same address throws SAME_ADDRESS and stays clean', () => {
+    const site = Site.restore({
       id: 'hq',
       address: { city: 'Austin', region: 'TX' },
     });
-    expect(restored.ok).toBe(true);
-    if (!restored.ok) return;
-    const result = restored.value.relocate('Austin', 'TX');
-    expect(result).toEqual({ ok: false, code: 'SAME_ADDRESS' });
-    expect(restored.value.isDirty()).toBe(false);
+    try {
+      site.relocate('Austin', 'TX');
+      expect.unreachable();
+    } catch (error) {
+      expect(error).toBeInstanceOf(CodedError);
+      expect(error).toMatchObject({
+        code: 'SAME_ADDRESS',
+        status: 409,
+      });
+    }
+    expect(site.isDirty()).toBe(false);
   });
 
   it('commit clears dirty and isNew', () => {
@@ -99,12 +96,10 @@ describe('TrackedEntity', () => {
       id: 'hq',
       address: { city: 'Austin', region: 'TX' },
     });
-    expect(created.ok).toBe(true);
-    if (!created.ok) return;
-    created.value.commit();
-    expect(created.value.isNew).toBe(false);
-    expect(created.value.isDirty()).toBe(false);
-    expect(created.value.original).toEqual(created.value.toProps());
+    created.commit();
+    expect(created.isNew).toBe(false);
+    expect(created.isDirty()).toBe(false);
+    expect(created.original).toEqual(created.toProps());
   });
 
   it('with() is rejected', () => {
@@ -112,18 +107,13 @@ describe('TrackedEntity', () => {
       id: 'hq',
       address: { city: 'Austin', region: 'TX' },
     });
-    expect(created.ok).toBe(true);
-    if (!created.ok) return;
-    const site = created.value;
-    expectTypeOf(site.with).not.toEqualTypeOf<
+    expectTypeOf(created.with).not.toEqualTypeOf<
       (patch: Partial<SiteProps>) => Site
     >();
     expect(() =>
-      (created.value as unknown as { with: (p: unknown) => unknown }).with({
+      (created as unknown as { with: (p: unknown) => unknown }).with({
         id: 'other',
       }),
-    ).toThrow(
-      'plinth: TrackedEntity is mutable; use set() and return ok(this)',
-    );
+    ).toThrow('plinth: TrackedEntity is mutable; use set()');
   });
 });

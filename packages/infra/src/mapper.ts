@@ -1,4 +1,4 @@
-import type { Result } from '@plinth/core';
+import { CodedError, fail, ok, type Result } from '@plinth/core';
 import type { EntityConstructor } from '@plinth/domain';
 
 const TRUST = 'plinth: model.from() failed entity.parse (trust boundary)';
@@ -17,15 +17,11 @@ const TRUST = 'plinth: model.from() failed entity.parse (trust boundary)';
  */
 export class Mapper<E extends EntityConstructor, Row> {
   #toFn: (entity: InstanceType<E>) => Row;
-  #fromFn: (
-    row: Row,
-  ) => Result<InstanceType<E>, 'VALIDATION'> | InstanceType<E>;
+  #fromFn: (row: Row) => InstanceType<E>;
 
   private constructor(
     toFn: (entity: InstanceType<E>) => Row,
-    fromFn: (
-      row: Row,
-    ) => Result<InstanceType<E>, 'VALIDATION'> | InstanceType<E>,
+    fromFn: (row: Row) => InstanceType<E>,
   ) {
     this.#toFn = toFn;
     this.#fromFn = fromFn;
@@ -48,9 +44,12 @@ export class Mapper<E extends EntityConstructor, Row> {
 
   /** Inbound trust boundary. Throws if entity.parse/restore fails. */
   from(row: Row): InstanceType<E> {
-    const result = this.read(row);
-    if (!result.ok) throw new Error(TRUST);
-    return result.value;
+    try {
+      return this.#fromFn(row);
+    } catch (error) {
+      if (isValidation(error)) throw new Error(TRUST);
+      throw error;
+    }
   }
 
   /**
@@ -62,14 +61,15 @@ export class Mapper<E extends EntityConstructor, Row> {
   } {
     return {
       to: (entity) => this.to(entity),
-      from: (row) => this.read(row),
+      from: (row) => {
+        try {
+          return ok(this.#fromFn(row));
+        } catch (error) {
+          if (isValidation(error)) return fail('VALIDATION');
+          throw error;
+        }
+      },
     };
-  }
-
-  private read(row: Row): Result<InstanceType<E>, 'VALIDATION'> {
-    const result = this.#fromFn(row);
-    if (isResult(result)) return result;
-    return { ok: true, value: result };
   }
 }
 
@@ -78,20 +78,9 @@ export type MapperTo<E extends EntityConstructor> = {
 };
 
 export type MapperFrom<E extends EntityConstructor, Row> = {
-  from(
-    fromFn: (
-      row: Row,
-    ) => Result<InstanceType<E>, 'VALIDATION'> | InstanceType<E>,
-  ): Mapper<E, Row>;
+  from(fromFn: (row: Row) => InstanceType<E>): Mapper<E, Row>;
 };
 
-function isResult<T>(
-  value: Result<T, 'VALIDATION'> | T,
-): value is Result<T, 'VALIDATION'> {
-  return (
-    typeof value === 'object' &&
-    value !== null &&
-    'ok' in value &&
-    typeof (value as Result<T, 'VALIDATION'>).ok === 'boolean'
-  );
+function isValidation(error: unknown): boolean {
+  return error instanceof CodedError && error.code === 'VALIDATION';
 }

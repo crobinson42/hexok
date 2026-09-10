@@ -14,6 +14,7 @@ A new hire should open a use-case file and understand the business flow without 
 | `@plinth/infra` | `Mapper` (entity ↔ row), `Adapter.of` |
 | `@plinth/runtime` | `App.from` composition, completeness, interceptors, local client, HTTP |
 | `@plinth/testing` | `App.test`, in-memory repo/bus/broker, `published` |
+| `@plinth/docs` | Concept docs (`npm run dev -w @plinth/docs`) |
 
 ## Write a use case
 
@@ -33,10 +34,9 @@ class CloseIncident extends ApiUseCase {
     const incident = await ports.incidents.get(input.id)
     if (!incident) throw errors.NOT_FOUND()
     const closed = incident.close(ports.clock.now())
-    if (!closed.ok) throw errors[closed.code]()
-    await ports.incidents.save(closed.value)
-    publish(new IncidentClosed({ id: closed.value.id, closedAt: closed.value.closedAt }))
-    return closed.value.toProps()
+    await ports.incidents.save(closed)
+    publish(new IncidentClosed({ id: closed.id, closedAt: closed.closedAt }))
+    return closed.toProps()
   }
 }
 ```

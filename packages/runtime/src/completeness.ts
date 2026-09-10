@@ -1,5 +1,5 @@
 import type { UseCaseBag } from '@plinth/app';
-import type { EventCatalog, PortToken } from '@plinth/domain';
+import type { EventCatalog } from '@plinth/domain';
 
 export type RequiredPorts<Bag extends UseCaseBag> = {
   [K in keyof Bag]: Bag[K] extends { ports: infer P } ? P[keyof P] : never;
@@ -38,13 +38,6 @@ type UsedByCatalog<Bag extends UseCaseBag, Cat> = {
     : never;
 }[keyof Bag];
 
-type LiteralPortKey<T> =
-  T extends PortToken<unknown, infer Key extends string>
-    ? string extends Key
-      ? never
-      : Key
-    : never;
-
 type PortAlias<Bag extends UseCaseBag, Token> = {
   [K in keyof Bag]: Bag[K] extends { ports: infer P }
     ? {
@@ -57,12 +50,9 @@ type PortAlias<Bag extends UseCaseBag, Token> = {
     : never;
 }[keyof Bag];
 
-type PortDisplayName<Bag extends UseCaseBag, Token> =
-  LiteralPortKey<Token> extends infer N
-    ? [N] extends [never]
-      ? JoinUnion<PortAlias<Bag, Token>>
-      : N & string
-    : JoinUnion<PortAlias<Bag, Token>>;
+type PortDisplayName<Bag extends UseCaseBag, Token> = JoinUnion<
+  PortAlias<Bag, Token>
+>;
 
 type CatalogKeyOf<T> =
   T extends EventCatalog<infer Key extends string, infer _Kind, infer _Events>
@@ -95,17 +85,10 @@ type JoinUnion<U extends string> = [U] extends [never]
       : L
     : never;
 
-type ProvideHint<T> =
-  LiteralPortKey<T> extends infer N
-    ? [N] extends [never]
-      ? 'Call .provide(token, impl) before .build()'
-      : `Call .provide(${N & string}, impl) before .build()`
-    : 'Call .provide(token, impl) before .build()';
-
 type MissingPortMessages<Bag extends UseCaseBag, Provided> =
   Exclude<RequiredPorts<Bag>, Provided> extends infer T
     ? T extends unknown
-      ? `plinth: unprovided port "${PortDisplayName<Bag, T>}" (used by ${JoinUnion<UsedByPort<Bag, T>>}). ${ProvideHint<T>}`
+      ? `plinth: unprovided port "${PortDisplayName<Bag, T>}" (used by ${JoinUnion<UsedByPort<Bag, T>>}). Call .provide(token, impl) before .build()`
       : never
     : never;
 
@@ -120,9 +103,7 @@ export type MissingMessages<Bag extends UseCaseBag, Provided, Bound> =
   | MissingPortMessages<Bag, Provided>
   | MissingCatalogMessages<Bag, Bound>;
 
-export type DuplicatePortError<N extends string = string> = string extends N
-  ? `plinth: port already provided`
-  : `plinth: port "${N}" already provided`;
+export type DuplicatePortError = `plinth: port already provided`;
 
 export type DuplicateCatalogError<N extends string = string> = string extends N
   ? `plinth: catalog already bound`

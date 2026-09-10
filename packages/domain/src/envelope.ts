@@ -19,6 +19,7 @@ export type Envelope<
   meta: Record<string, unknown>;
 };
 
+/** Fire-and-forget pub/sub. No ack, no consumer group, no persistence in the contract. */
 export interface BusAdapter {
   kind: 'bus';
   publish(envelope: Envelope): Promise<void>;

@@ -90,13 +90,13 @@ export class AppBuilder<
     this.#useCases = useCases;
   }
 
-  provide<I, N extends string>(
-    token: [PortToken<I, N>] extends [Provided]
-      ? DuplicatePortError<N>
-      : PortToken<I, N>,
+  provide<I>(
+    token: [PortToken<I>] extends [Provided]
+      ? DuplicatePortError
+      : PortToken<I>,
     impl: I,
-  ): AppBuilder<Bag, Provided | PortToken<I, N>, Bound, Ctx> {
-    const port = token as PortToken<I, N>;
+  ): AppBuilder<Bag, Provided | PortToken<I>, Bound, Ctx> {
+    const port = token as PortToken<I>;
     if (this.#provided.has(port as PortToken<unknown>)) {
       throw new Error(`plinth: port "${port.key}" already provided`);
     }
@@ -108,7 +108,7 @@ export class AppBuilder<
     this.#provided.set(port as PortToken<unknown>, impl);
     return this as unknown as AppBuilder<
       Bag,
-      Provided | PortToken<I, N>,
+      Provided | PortToken<I>,
       Bound,
       Ctx
     >;

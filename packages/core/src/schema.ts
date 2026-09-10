@@ -9,8 +9,8 @@ export type Infer<S extends StandardSchemaV1> = NonNullable<
 /**
  * Validate `value` with a Standard Schema. Sync only.
  *
- * Issues collapse to `'VALIDATION'` — the domain trust boundary is binary.
- * Async schemas belong at the RPC boundary and throw.
+ * Issues collapse to `'VALIDATION'`. Entity `create` / `restore` / `parse`
+ * throw that as `CodedError`. Async schemas belong at the RPC boundary and throw.
  *
  * ```ts
  * const parsed = validate(Incident.schema, body)

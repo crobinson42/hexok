@@ -74,15 +74,15 @@ export class TestAppBuilder<
     this.#published = published;
   }
 
-  provide<I, N extends string>(
-    token: [PortToken<I, N>] extends [Provided]
-      ? DuplicatePortError<N>
-      : PortToken<I, N>,
+  provide<I>(
+    token: [PortToken<I>] extends [Provided]
+      ? DuplicatePortError
+      : PortToken<I>,
     impl: I,
-  ): TestAppBuilder<Bag, Provided | PortToken<I, N>, Bound, Ctx> {
+  ): TestAppBuilder<Bag, Provided | PortToken<I>, Bound, Ctx> {
     const next = this.#inner.provide(token as never, impl);
     return new TestAppBuilder(
-      next as AppBuilder<Bag, Provided | PortToken<I, N>, Bound, Ctx>,
+      next as AppBuilder<Bag, Provided | PortToken<I>, Bound, Ctx>,
       this.#published,
     );
   }

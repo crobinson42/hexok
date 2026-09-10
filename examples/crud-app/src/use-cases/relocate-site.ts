@@ -23,12 +23,11 @@ export class RelocateSite extends ApiUseCase {
   async execute({ input, ports, errors }: ExecuteCtx<typeof RelocateSite>) {
     const site = await ports.sites.get(input.id);
     if (!site) throw errors.NOT_FOUND();
-    const moved = site.relocate(input.city, input.region);
-    if (!moved.ok) throw errors[moved.code]();
-    await ports.sites.save(moved.value);
+    site.relocate(input.city, input.region);
+    await ports.sites.save(site);
     return {
-      site: moved.value.toProps(),
-      changedKeys: moved.value.getChangedKeys(),
+      site: site.toProps(),
+      changedKeys: site.getChangedKeys(),
     };
   }
 }

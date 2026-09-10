@@ -1,4 +1,4 @@
-import { fail, type Infer, ok, type Result } from '@plinth/core';
+import { CodedError, type Infer } from '@plinth/core';
 import { describe, expect, expectTypeOf, it } from 'vitest';
 import { z } from 'zod';
 import { Entity } from './entity.js';
@@ -28,23 +28,16 @@ class Incident extends Entity<IncidentProps> {
   }
 
   static open(id: string): Incident {
-    const created = Incident.create({
+    return Incident.create({
       id,
       status: 'open',
       closedAt: null,
     });
-    if (!created.ok) throw new Error('plinth: Incident.open failed validation');
-    return created.value;
   }
 
-  close(now: Date): Result<Incident, 'ALREADY_CLOSED'> {
-    if (this.props.status === 'closed') return fail('ALREADY_CLOSED');
-    return ok(this.with({ status: 'closed', closedAt: now }));
-  }
-
-  undeclaredFail(): Result<Incident, 'ALREADY_CLOSED'> {
-    // @ts-expect-error NOPE is not a declared incident error
-    return fail('NOPE');
+  close(now: Date): Incident {
+    if (this.props.status === 'closed') Incident.error('ALREADY_CLOSED');
+    return this.with({ status: 'closed', closedAt: now });
   }
 }
 
@@ -55,23 +48,30 @@ describe('Entity', () => {
       status: 'open',
       closedAt: null,
     });
-    expect(created.ok).toBe(true);
-    if (!created.ok) return;
-    expect(created.value).toBeInstanceOf(Incident);
-    expect(created.value.id).toBe('1');
+    expect(created).toBeInstanceOf(Incident);
+    expect(created.id).toBe('1');
 
-    const restored = Incident.restore(created.value.toProps());
-    expect(restored.ok).toBe(true);
+    const restored = Incident.restore(created.toProps());
+    expect(restored).toBeInstanceOf(Incident);
 
     const parsed = Incident.parse({
       id: '2',
       status: 'open',
       closedAt: null,
     });
-    expect(parsed.ok).toBe(true);
+    expect(parsed).toBeInstanceOf(Incident);
 
-    const invalid = Incident.parse({ id: 1 });
-    expect(invalid).toEqual({ ok: false, code: 'VALIDATION' });
+    try {
+      Incident.parse({ id: 1 });
+      expect.unreachable();
+    } catch (error) {
+      expect(error).toBeInstanceOf(CodedError);
+      expect(error).toMatchObject({
+        code: 'VALIDATION',
+        status: 400,
+        message: 'plinth: Incident validation failed',
+      });
+    }
   });
 
   it('close returns a new instance and leaves the original open', () => {
@@ -79,28 +79,31 @@ describe('Entity', () => {
     const now = new Date('2026-01-01T00:00:00Z');
     const closed = incident.close(now);
 
-    expectTypeOf(incident.close).returns.toEqualTypeOf<
-      Result<Incident, 'ALREADY_CLOSED'>
-    >();
+    expectTypeOf(incident.close).returns.toEqualTypeOf<Incident>();
 
-    expect(closed.ok).toBe(true);
-    if (!closed.ok) return;
-    expect(closed.value).not.toBe(incident);
-    expect(closed.value).toBeInstanceOf(Incident);
-    expect(closed.value.status).toBe('closed');
-    expect(closed.value.closedAt).toEqual(now);
+    expect(closed).not.toBe(incident);
+    expect(closed).toBeInstanceOf(Incident);
+    expect(closed.status).toBe('closed');
+    expect(closed.closedAt).toEqual(now);
     expect(incident.status).toBe('open');
     expect(incident.closedAt).toBeNull();
   });
 
-  it('close fails with ALREADY_CLOSED', () => {
+  it('close throws ALREADY_CLOSED', () => {
     const now = new Date('2026-01-01T00:00:00Z');
     const incident = Incident.open('1');
     const closed = incident.close(now);
-    expect(closed.ok).toBe(true);
-    if (!closed.ok) return;
-    const again = closed.value.close(now);
-    expect(again).toEqual({ ok: false, code: 'ALREADY_CLOSED' });
+    try {
+      closed.close(now);
+      expect.unreachable();
+    } catch (error) {
+      expect(error).toBeInstanceOf(CodedError);
+      expect(error).toMatchObject({
+        code: 'ALREADY_CLOSED',
+        status: 409,
+        message: 'Incident already closed',
+      });
+    }
   });
 
   it('toJSON / toProps return plain schema output', () => {
@@ -113,8 +116,15 @@ describe('Entity', () => {
     expect(incident.toJSON()).toEqual(incident.toProps());
   });
 
-  it('keeps undeclared fail codes as a type error (runtime still returns the code)', () => {
-    const result = Incident.open('1').undeclaredFail();
-    expect(result).toEqual({ ok: false, code: 'NOPE' });
+  it('undeclared error code is a type error on the class and a throw at runtime', () => {
+    const _declared: () => never = () => Incident.error('ALREADY_CLOSED');
+    void _declared;
+    expect(() =>
+      // @ts-expect-error NOPE is not a declared incident error
+      Incident.error('NOPE'),
+    ).toThrow('plinth: undeclared error "NOPE" on Incident');
+    expect(() => Incident.open('1').error('NOPE')).toThrow(
+      'plinth: undeclared error "NOPE" on Incident',
+    );
   });
 });

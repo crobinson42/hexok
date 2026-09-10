@@ -1,9 +1,10 @@
 /**
- * Success-or-code result. Domain methods return this; use cases unwrap it.
+ * Success-or-code result. `validate` returns this; use cases may `unwrap` it.
+ * Entity methods throw `CodedError` instead of returning a Result.
  *
  * ```ts
- * const closed = status === 'closed' ? fail('ALREADY_CLOSED') : ok(next)
- * // Result<Next, 'ALREADY_CLOSED'>
+ * const parsed = validate(schema, value)
+ * // Result<Output, 'VALIDATION'>
  * ```
  */
 export type Result<T, E extends string = string> =

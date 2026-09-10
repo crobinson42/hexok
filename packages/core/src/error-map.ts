@@ -6,7 +6,7 @@ import type { StandardSchemaV1 } from './standard-schema.js';
  * ```ts
  * const errors = {
  *   NOT_FOUND: { status: 404, message: 'Incident not found' },
- * } as const satisfies ErrorMap
+ * }
  * ```
  */
 export interface ErrorDef {

@@ -48,6 +48,7 @@ export abstract class ApiUseCase {
 
   /**
    * Same one-liner as `if (!result.ok) throw this.error(result.code)`.
+   * For `validate` / custom Results. Entity methods throw themselves.
    */
   unwrap<T, E extends string>(result: Result<T, E>): T {
     if (!result.ok) this.error(result.code);

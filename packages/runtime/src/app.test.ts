@@ -143,42 +143,6 @@ describe('App completeness', () => {
     >();
   });
 
-  it('uses the token key when Port.token is given a literal Name', () => {
-    const NamedClock = Port.token<Clock, 'Clock'>('Clock');
-    class Tick extends ApiUseCase {
-      static readonly key = 'clock.tick';
-      static readonly input = z.object({});
-      static readonly output = z.object({ now: z.date() });
-      static readonly errors = {} as const;
-      static readonly ports = { clock: NamedClock };
-      async execute({ ports }: ExecuteCtx<typeof Tick>) {
-        return { now: ports.clock.now() };
-      }
-    }
-    const builder = App.from({ tick: Tick });
-    expectTypeOf(
-      builder.build,
-    ).toEqualTypeOf<`plinth: unprovided port "Clock" (used by clock.tick). Call .provide(Clock, impl) before .build()`>();
-  });
-
-  it('uses the token key when Port.token is curried', () => {
-    const CurriedClock = Port.token<Clock>()('Clock');
-    class Tick extends ApiUseCase {
-      static readonly key = 'clock.tick';
-      static readonly input = z.object({});
-      static readonly output = z.object({ now: z.date() });
-      static readonly errors = {} as const;
-      static readonly ports = { clock: CurriedClock };
-      async execute({ ports }: ExecuteCtx<typeof Tick>) {
-        return { now: ports.clock.now() };
-      }
-    }
-    const builder = App.from({ tick: Tick });
-    expectTypeOf(
-      builder.build,
-    ).toEqualTypeOf<`plinth: unprovided port "Clock" (used by clock.tick). Call .provide(Clock, impl) before .build()`>();
-  });
-
   it('types build as a missing-catalog message when DomainEvents is unbound', () => {
     const builder = App.from({ close: CloseIncident })
       .provide(IncidentRepository, repo([{ id: '1', status: 'open' }]))
@@ -197,13 +161,8 @@ describe('App completeness', () => {
     ).toThrow('plinth: unprovided port "Clock" (used by incident.close)');
   });
 
-  it('names duplicate provide/bind when the token/catalog name is a literal', () => {
-    expectTypeOf<
-      DuplicatePortError<'Clock'>
-    >().toEqualTypeOf<`plinth: port "Clock" already provided`>();
-    expectTypeOf<
-      DuplicatePortError<string>
-    >().toEqualTypeOf<`plinth: port already provided`>();
+  it('names duplicate provide/bind', () => {
+    expectTypeOf<DuplicatePortError>().toEqualTypeOf<`plinth: port already provided`>();
     expectTypeOf<
       DuplicateCatalogError<'domain'>
     >().toEqualTypeOf<`plinth: catalog "domain" already bound`>();

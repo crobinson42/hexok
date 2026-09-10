@@ -48,11 +48,9 @@ class Thing extends Entity<{ id: string }> {
 describe('InMemoryRepository', () => {
   it('clones on get and save', async () => {
     const created = Thing.create({ id: '1' });
-    expect(created.ok).toBe(true);
-    if (!created.ok) return;
     const repo = InMemoryRepository.of(ThingRepository, {
       keyBy: 'id',
-      seed: [created.value],
+      seed: [created],
     });
     const a = await repo.get('1');
     const b = await repo.get('1');

@@ -33,6 +33,7 @@
     "includes": [
       "**",
       "!**/dist",
+      "!**/.astro",
       "!**/node_modules",
       "!**/.turbo",
       "!**/coverage",

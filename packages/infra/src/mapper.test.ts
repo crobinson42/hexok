@@ -37,9 +37,7 @@ const IncidentMapper = Mapper.for(Incident)
 describe('Mapper', () => {
   it('round-trips to/from rows', () => {
     const created = Incident.create({ id: '1', closedAt: null });
-    expect(created.ok).toBe(true);
-    if (!created.ok) return;
-    const row = IncidentMapper.to(created.value);
+    const row = IncidentMapper.to(created);
     expect(row).toEqual({ id: '1', closed_at: null });
     const back = IncidentMapper.from(row);
     expect(back.id).toBe('1');

@@ -1,16 +1,16 @@
-import { type Infer, ok, type Result } from '@plinth/core';
+import type { Infer } from '@plinth/core';
 import { Entity, type EntityConstructor, instantiate } from './entity.js';
 
 /**
- * Opt-in dirty tracking. Methods **mutate this** and return `ok(this)`.
+ * Opt-in dirty tracking. Methods **mutate this** and return `this`.
  * Nested writes dirty the parent key (`address`, not `address.city`).
  *
  * ```ts
  * class Site extends TrackedEntity<SiteProps> {
- *   relocate(city: string, region: string): Result<this, 'SAME_ADDRESS'> {
- *     if (this.address.city === city) return fail('SAME_ADDRESS')
+ *   relocate(city: string, region: string): this {
+ *     if (this.address.city === city) this.error('SAME_ADDRESS')
  *     this.set('address', { ...this.address, city, region })
- *     return ok(this)
+ *     return this
  *   }
  * }
  * ```
@@ -39,13 +39,9 @@ export abstract class TrackedEntity<P extends object> extends Entity<P> {
    */
   // @ts-expect-error poison the call; not a legal override of Entity.with(Partial)
   override with(
-    ..._args: [
-      `plinth: TrackedEntity is mutable; use set() and return ok(this)`,
-    ]
+    ..._args: [`plinth: TrackedEntity is mutable; use set()`]
   ): never {
-    throw new Error(
-      'plinth: TrackedEntity is mutable; use set() and return ok(this)',
-    );
+    throw new Error('plinth: TrackedEntity is mutable; use set()');
   }
 
   set<K extends keyof P>(key: K, value: P[K]): this;
@@ -108,32 +104,33 @@ export abstract class TrackedEntity<P extends object> extends Entity<P> {
 
   /**
    * Validate and construct a **new** tracked instance (`isNew: true`, no original).
+   * Throws `CodedError` `VALIDATION` if the schema rejects the props.
    */
   static override create<T extends EntityConstructor>(
     this: T,
     props: Infer<T['schema']>,
-  ): Result<InstanceType<T>, 'VALIDATION'> {
-    const result = instantiate(this, props);
-    if (!result.ok) return result;
-    const instance = result.value as TrackedEntity<object>;
-    instance.markNew();
-    return ok(result.value);
+  ): InstanceType<T> {
+    const instance = instantiate(this, props);
+    const tracked = instance as TrackedEntity<object>;
+    tracked.markNew();
+    return instance;
   }
 
   /**
    * Validate and reconstruct from persistence (`isNew: false`, original snapshot).
+   * Throws `CodedError` `VALIDATION` if the schema rejects the props.
    */
   static override restore<T extends EntityConstructor>(
     this: T,
     props: Infer<T['schema']>,
-  ): Result<InstanceType<T>, 'VALIDATION'> {
+  ): InstanceType<T> {
     return instantiate(this, props);
   }
 
   static override parse<T extends EntityConstructor>(
     this: T,
     value: unknown,
-  ): Result<InstanceType<T>, 'VALIDATION'> {
+  ): InstanceType<T> {
     return instantiate(this, value);
   }
 }

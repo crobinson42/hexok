@@ -5,7 +5,7 @@ sidebar:
   order: 2
 ---
 
-`Mapper` is one entity, two functions. Outbound `to` is a plain map — no parse. Inbound `from` is the **trust boundary**: it throws if `entity.parse` / `restore` fails.
+`Mapper` is one entity, two functions. Outbound `to` is a plain map — no parse. Inbound `from` is the **trust boundary**: it throws if `entity.parse` / `restore` fails. `restore` no longer eagerly snapshots; tracking is lazy until the first `set`.
 
 `unsafe().from` returns a `Result` instead of throwing.
 

@@ -35,10 +35,84 @@ class Incident extends Entity<IncidentProps> {
     });
   }
 
-  close(now: Date): Incident {
+  close(now: Date): this {
     if (this.props.status === 'closed') Incident.error('ALREADY_CLOSED');
-    return this.with({ status: 'closed', closedAt: now });
+    return this.set((draft) => {
+      draft.status = 'closed';
+      draft.closedAt = now;
+    });
   }
+}
+
+const siteSchema = z.object({
+  id: z.string(),
+  address: z.object({
+    city: z.string(),
+    region: z.string(),
+  }),
+});
+type SiteProps = Infer<typeof siteSchema>;
+
+class Site extends Entity<SiteProps> {
+  static readonly key = 'Site';
+  static readonly schema = siteSchema;
+  static readonly errors = {
+    SAME_ADDRESS: { message: 'Site is already at that address' },
+  } as const;
+
+  get id() {
+    return this.props.id;
+  }
+  get address() {
+    return this.props.address;
+  }
+
+  relocate(city: string, region: string): this {
+    if (this.address.city === city && this.address.region === region) {
+      Site.error('SAME_ADDRESS');
+    }
+    this.set((draft) => {
+      draft.address = { ...draft.address, city, region };
+    });
+    return this;
+  }
+}
+
+const timedSchema = z.object({
+  id: z.string(),
+  items: z.array(z.string()),
+  closedAt: z.date(),
+});
+type TimedProps = Infer<typeof timedSchema>;
+
+class Timed extends Entity<TimedProps> {
+  static readonly key = 'Timed';
+  static readonly schema = timedSchema;
+  static readonly errors = {};
+}
+
+const placeSchema = z.object({
+  id: z.string(),
+  address: z
+    .object({
+      city: z.string(),
+      region: z.string(),
+    })
+    .optional(),
+});
+type PlaceProps = Infer<typeof placeSchema>;
+
+class Place extends Entity<PlaceProps> {
+  static readonly key = 'Place';
+  static readonly schema = placeSchema;
+  static readonly errors = {};
+}
+
+function hq(): SiteProps {
+  return {
+    id: 'hq',
+    address: { city: 'Austin', region: 'TX' },
+  };
 }
 
 describe('Entity', () => {
@@ -52,9 +126,13 @@ describe('Entity', () => {
     expectTypeOf(
       Incident.parse({ id: '1', status: 'open', closedAt: null }),
     ).toEqualTypeOf<Incident>();
+    expectTypeOf(Site.create(hq())).toEqualTypeOf<Site>();
+    expectTypeOf(Site.restore(hq())).toEqualTypeOf<Site>();
     const _typeChecks = () => {
       // @ts-expect-error Entity constructor is protected
       new Incident({ id: '1', status: 'open', closedAt: null });
+      // @ts-expect-error Entity constructor is protected
+      new Site(hq());
     };
     void _typeChecks;
   });
@@ -90,19 +168,19 @@ describe('Entity', () => {
     }
   });
 
-  it('close returns a new instance and leaves the original open', () => {
+  it('close mutates this; the original incident is closed', () => {
     const incident = Incident.open('1');
     const now = new Date('2026-01-01T00:00:00Z');
     const closed = incident.close(now);
 
     expectTypeOf(incident.close).returns.toEqualTypeOf<Incident>();
 
-    expect(closed).not.toBe(incident);
+    expect(closed).toBe(incident);
     expect(closed).toBeInstanceOf(Incident);
     expect(closed.status).toBe('closed');
     expect(closed.closedAt).toEqual(now);
-    expect(incident.status).toBe('open');
-    expect(incident.closedAt).toBeNull();
+    expect(incident.status).toBe('closed');
+    expect(incident.closedAt).toEqual(now);
   });
 
   it('close throws ALREADY_CLOSED', () => {
@@ -131,6 +209,15 @@ describe('Entity', () => {
     expect(incident.toJSON()).toEqual(incident.toProps());
   });
 
+  it('toProps() is a shallow copy', () => {
+    const incident = Incident.open('1');
+    const p = incident.toProps();
+    expect(p).not.toBe(incident.props);
+    p.status = 'closed';
+    expect(incident.status).toBe('open');
+    expect(incident.toProps().status).toBe('open');
+  });
+
   it('undeclared error code is a type error on the class and a throw at runtime', () => {
     const _declared: () => never = () => Incident.error('ALREADY_CLOSED');
     void _declared;
@@ -141,5 +228,217 @@ describe('Entity', () => {
     expect(() => Incident.open('1').error('NOPE')).toThrow(
       'plinth: undeclared error "NOPE" on Incident',
     );
+  });
+
+  it('restore does not snapshot; original is undefined while clean', () => {
+    const restored = Site.restore(hq());
+    expect(restored.isNew).toBe(false);
+    expect(restored.original).toBeUndefined();
+    expect(restored.isDirty()).toBe(false);
+    const keys = restored.getChangedKeys();
+    expect(keys).toEqual([]);
+    expect(Object.isFrozen(keys)).toBe(true);
+  });
+
+  it('parse uses restore tracking; first set snapshots original', () => {
+    const parsed = Incident.parse({
+      id: '1',
+      status: 'open',
+      closedAt: null,
+    });
+    expect(parsed.isNew).toBe(false);
+    expect(parsed.original).toBeUndefined();
+    const keys = parsed.getChangedKeys();
+    expect(keys).toEqual([]);
+    expect(Object.isFrozen(keys)).toBe(true);
+
+    parsed.set((draft) => {
+      draft.status = 'closed';
+    });
+    expect(parsed.original).toBeDefined();
+    expect(parsed.original).not.toBe(parsed.props);
+    expect(parsed.getChangedKeys()).toEqual(['status']);
+  });
+
+  it('first set allocates a working copy and keeps original as the prior object', () => {
+    const site = Site.restore(hq());
+    expect(site.original).toBeUndefined();
+    const before = site.props;
+    site.relocate('Denver', 'CO');
+    expect(site.props).not.toBe(before);
+    expect(site.original).toBe(before);
+    expect(site.original).toEqual({
+      id: 'hq',
+      address: { city: 'Austin', region: 'TX' },
+    });
+    expect(site.original?.address).not.toBe(site.props.address);
+  });
+
+  it('later set mutates the working copy in place', () => {
+    const site = Site.restore(hq());
+    site.relocate('Denver', 'CO');
+    const working = site.props;
+    site.set((draft) => {
+      draft.id = 'hq-2';
+    });
+    expect(site.props).toBe(working);
+    expect(site.getChangedKeys().sort()).toEqual(['address', 'id']);
+  });
+
+  it('getChangedKeys is empty when clean', () => {
+    const restored = Site.restore(hq());
+    expect(restored.getChangedKeys()).toEqual([]);
+    expect(restored.getChangedKeys({ deep: true })).toEqual([]);
+    expect(restored.getChangedKeys()).toBe(
+      restored.getChangedKeys({ deep: true }),
+    );
+  });
+
+  it('getChangedKeys({ deep: true }) after relocate is leaf paths in Object.keys order', () => {
+    const site = Site.restore(hq());
+    site.relocate('Denver', 'CO');
+    expect(site.getChangedKeys({ deep: true })).toEqual([
+      'address.city',
+      'address.region',
+    ]);
+  });
+
+  it('{ deep: false } is shallow', () => {
+    const site = Site.restore(hq());
+    site.relocate('Denver', 'CO');
+    expect(site.getChangedKeys({ deep: false })).toEqual(['address']);
+    expect(site.getChangedKeys()).toEqual(['address']);
+  });
+
+  it('arrays and Date are leaves', () => {
+    const items = ['a', 'b'];
+    const closedAt = new Date('2026-01-01T00:00:00Z');
+    const replaced = Timed.restore({ id: '1', items, closedAt });
+    replaced.set((draft) => {
+      draft.items = ['a', 'c'];
+      draft.closedAt = new Date('2026-02-01T00:00:00Z');
+    });
+    expect(replaced.getChangedKeys()).toEqual(['items', 'closedAt']);
+    expect(replaced.getChangedKeys({ deep: true })).toEqual([
+      'items',
+      'closedAt',
+    ]);
+
+    const inplace = Timed.restore({
+      id: '1',
+      items: ['a', 'b'],
+      closedAt: new Date('2026-01-01T00:00:00Z'),
+    });
+    inplace.set((draft) => {
+      draft.items[0] = 'z';
+      draft.closedAt.setTime(0);
+    });
+    expect(inplace.getChangedKeys()).toEqual([]);
+    expect(inplace.getChangedKeys({ deep: true })).toEqual([]);
+  });
+
+  it('deleting a nested object emits leaf paths', () => {
+    const place = Place.restore({
+      id: '1',
+      address: { city: 'Austin', region: 'TX' },
+    });
+    place.set((draft) => {
+      delete draft.address;
+    });
+    expect(place.getChangedKeys({ deep: true })).toEqual([
+      'address.city',
+      'address.region',
+    ]);
+  });
+
+  it('same address throws SAME_ADDRESS and stays clean', () => {
+    const site = Site.restore(hq());
+    try {
+      site.relocate('Austin', 'TX');
+      expect.unreachable();
+    } catch (error) {
+      expect(error).toBeInstanceOf(CodedError);
+      expect(error).toMatchObject({
+        code: 'SAME_ADDRESS',
+        message: 'Site is already at that address',
+      });
+    }
+    expect(site.isDirty()).toBe(false);
+    expect(site.original).toBeUndefined();
+    expect(site.getChangedKeys()).toEqual([]);
+  });
+
+  it('create() isNew with every current key dirty', () => {
+    const created = Site.create(hq());
+    expect(created.isNew).toBe(true);
+    expect(created.original).toBeUndefined();
+    expect(created.isDirty()).toBe(true);
+    expect(created.getChangedKeys().sort()).toEqual(['address', 'id']);
+  });
+
+  it('create + deep: true emits current leaf paths', () => {
+    const created = Site.create(hq());
+    expect(created.getChangedKeys({ deep: true })).toEqual([
+      'id',
+      'address.city',
+      'address.region',
+    ]);
+  });
+
+  it('commit() aliases _props as original without copying', () => {
+    const created = Site.create(hq());
+    const createdWorking = created.props;
+    created.commit();
+    expect(created.isNew).toBe(false);
+    expect(created.isDirty()).toBe(false);
+    expect(created.original).toBeUndefined();
+    expect(created.props).toBe(createdWorking);
+    expect(created.getChangedKeys()).toEqual([]);
+
+    const site = Site.restore(hq());
+    site.relocate('Denver', 'CO');
+    const working = site.props;
+    site.commit();
+    expect(site.isNew).toBe(false);
+    expect(site.isDirty()).toBe(false);
+    expect(site.original).toBeUndefined();
+    expect(site.props).toBe(working);
+    expect(site.getChangedKeys()).toEqual([]);
+  });
+
+  it('nested in-place mutation is invisible to diffs (set is the only supported write)', () => {
+    const viaSet = Site.restore(hq());
+    viaSet.set((draft) => {
+      draft.address.city = 'Denver';
+    });
+    expect(viaSet.getChangedKeys()).toEqual([]);
+    expect(viaSet.getChangedKeys({ deep: true })).toEqual([]);
+    expect(viaSet.isDirty()).toBe(false);
+
+    const viaProps = Site.restore(hq());
+    viaProps.props.address.city = 'Denver';
+    expect(viaProps.getChangedKeys()).toEqual([]);
+    expect(viaProps.getChangedKeys({ deep: true })).toEqual([]);
+    expect(viaProps.isDirty()).toBe(false);
+  });
+
+  it('clean-path top-level props assign is invisible to diffs (unsupported write)', () => {
+    const site = Site.restore(hq());
+    site.props.id = 'x';
+    expect(site.getChangedKeys()).toEqual([]);
+    expect(site.isDirty()).toBe(false);
+    expect(site.toProps().id).toBe('x');
+  });
+
+  it('with() is rejected', () => {
+    const created = Site.create(hq());
+    expectTypeOf(created.with).not.toEqualTypeOf<
+      (patch: Partial<SiteProps>) => Site
+    >();
+    expect(() =>
+      (created as unknown as { with: (p: unknown) => unknown }).with({
+        id: 'other',
+      }),
+    ).toThrow('plinth: Entity is mutable; use set()');
   });
 });

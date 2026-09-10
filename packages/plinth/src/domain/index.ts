@@ -20,4 +20,3 @@ export type {
 } from './envelope.js';
 export { DomainEvent, type EventClass, type EventPayload } from './event.js';
 export { Port, PortToken, type PortType } from './port.js';
-export { TrackedEntity } from './tracked-entity.js';

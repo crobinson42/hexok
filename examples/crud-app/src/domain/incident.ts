@@ -12,7 +12,7 @@ export const incidentSchema = z.object({
 export type IncidentProps = Infer<typeof incidentSchema>;
 
 /**
- * Untracked value object. `close` returns a **new** instance.
+ * `rename` / `close` mutate **this** and return `this`.
  */
 export class Incident extends Entity<IncidentProps> {
   static schema = incidentSchema;
@@ -30,12 +30,17 @@ export class Incident extends Entity<IncidentProps> {
     });
   }
 
-  rename(title: string): Incident {
-    return this.with({ title });
+  rename(title: string): this {
+    return this.set((draft) => {
+      draft.title = title;
+    });
   }
 
-  close(now: Date): Incident {
+  close(now: Date): this {
     if (this.props.status === 'closed') this.error('ALREADY_CLOSED');
-    return this.with({ status: 'closed', closedAt: now });
+    return this.set((draft) => {
+      draft.status = 'closed';
+      draft.closedAt = now;
+    });
   }
 }

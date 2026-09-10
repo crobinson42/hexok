@@ -1,5 +1,5 @@
 import type { Infer } from 'plinth/core';
-import { TrackedEntity } from 'plinth/domain';
+import { Entity } from 'plinth/domain';
 import { z } from 'zod';
 
 export const siteSchema = z.object({
@@ -13,9 +13,9 @@ export const siteSchema = z.object({
 export type SiteProps = Infer<typeof siteSchema>;
 
 /**
- * Tracked aggregate. `relocate` mutates **this** and returns `this`.
+ * `relocate` mutates **this** and returns `this`.
  */
-export class Site extends TrackedEntity<SiteProps> {
+export class Site extends Entity<SiteProps> {
   static readonly key = 'Site';
 
   static schema = siteSchema;
@@ -39,7 +39,9 @@ export class Site extends TrackedEntity<SiteProps> {
       this.error('SAME_ADDRESS');
     }
 
-    this.set('address', { ...this.props.address, city, region });
+    this.set((draft) => {
+      draft.address = { ...draft.address, city, region };
+    });
 
     return this;
   }

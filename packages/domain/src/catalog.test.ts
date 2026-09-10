@@ -1,16 +1,30 @@
 import type { Infer } from '@plinth/core';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, expectTypeOf, it } from 'vitest';
 import { z } from 'zod';
-import { EventCatalog } from './catalog.js';
+import {
+  type AnyEventCatalog,
+  type CatalogEvents,
+  EventCatalog,
+} from './catalog.js';
 import { DomainEvent } from './event.js';
 
 class IncidentClosed extends DomainEvent {
-  static readonly name = 'incident.closed';
+  static readonly key = 'incident.closed';
   static readonly schema = z.object({
     id: z.string(),
     closedAt: z.date(),
   });
   constructor(public readonly payload: Infer<typeof IncidentClosed.schema>) {
+    super();
+  }
+}
+
+class IncidentOpened extends DomainEvent {
+  static readonly key = 'incident.opened';
+  static readonly schema = z.object({
+    id: z.string(),
+  });
+  constructor(public readonly payload: Infer<typeof IncidentOpened.schema>) {
     super();
   }
 }
@@ -47,5 +61,28 @@ describe('EventCatalog', () => {
     expect(() => catalog.event(IncidentClosed)).toThrow(
       'plinth: catalog "domain" is frozen',
     );
+  });
+
+  it('accumulates event classes on the Events generic', () => {
+    const empty = new EventCatalog('domain', { kind: 'bus' });
+    expectTypeOf<CatalogEvents<typeof empty>>().toEqualTypeOf<never>();
+
+    const one = empty.event(IncidentClosed);
+    expectTypeOf<CatalogEvents<typeof one>>().toEqualTypeOf<
+      typeof IncidentClosed
+    >();
+
+    const two = one.event(IncidentOpened);
+    expectTypeOf<CatalogEvents<typeof two>>().toEqualTypeOf<
+      typeof IncidentClosed | typeof IncidentOpened
+    >();
+
+    const frozen = one.freeze();
+    expectTypeOf<CatalogEvents<typeof frozen>>().toEqualTypeOf<
+      typeof IncidentClosed
+    >();
+
+    expectTypeOf(two).toMatchTypeOf<AnyEventCatalog>();
+    expectTypeOf<typeof two>().not.toMatchTypeOf<EventCatalog>();
   });
 });

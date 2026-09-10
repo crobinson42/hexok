@@ -4,7 +4,7 @@ import { Site, siteSchema } from '../domain/site.js';
 import { SiteRepository } from '../ports.js';
 
 export class RelocateSite extends ApiUseCase {
-  static readonly id = 'site.relocate';
+  static readonly key = 'site.relocate';
   static readonly input = z.object({
     id: z.string(),
     city: z.string(),

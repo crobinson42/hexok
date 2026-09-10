@@ -1,22 +1,26 @@
 import {
   type ApiUseCaseCtor,
+  type AsUseCaseBag,
+  type CheckUseCase,
   type DerivedContract,
   deriveContract,
   type EventUseCaseCtor,
   isApiUseCase,
   isEventUseCase,
-  nestById,
+  nestByKey,
   type RpcContract,
   type UseCaseBag,
   type UseCaseClass,
 } from '@plinth/app';
 import type {
+  AnyEventCatalog,
   BrokerAdapter,
   BusAdapter,
   CatalogKind,
   Envelope,
   EventAdapter,
   EventCatalog,
+  EventClass,
   PortToken,
 } from '@plinth/domain';
 import type { NestedClient } from './client.js';
@@ -42,7 +46,7 @@ export type AppInstance<Bag extends UseCaseBag, Ctx = unknown> = {
   readonly rpc: RpcContract;
 };
 
-type AdapterFor<K extends CatalogKind> = K extends 'bus'
+export type AdapterFor<K extends CatalogKind> = K extends 'bus'
   ? BusAdapter
   : K extends 'broker'
     ? BrokerAdapter
@@ -62,10 +66,10 @@ type AdapterFor<K extends CatalogKind> = K extends 'bus'
  * ```
  */
 export const App = {
-  from<Bag extends UseCaseBag>(
+  from<Bag extends { [K in keyof Bag]: CheckUseCase<Bag[K]> }>(
     useCases: Bag,
-  ): AppBuilder<Bag, never, never, unknown> {
-    return new AppBuilder(useCases);
+  ): AppBuilder<AsUseCaseBag<Bag>, never, never, unknown> {
+    return new AppBuilder(useCases as AsUseCaseBag<Bag>);
   },
 };
 
@@ -77,7 +81,7 @@ export class AppBuilder<
 > {
   readonly #useCases: Bag;
   readonly #provided = new Map<PortToken<unknown>, unknown>();
-  readonly #bound = new Map<EventCatalog, EventAdapter>();
+  readonly #bound = new Map<AnyEventCatalog, EventAdapter>();
   readonly #interceptors: Interceptor[] = [];
   readonly #middleware: RpcMiddleware[] = [];
   #defaultCtx: unknown;
@@ -86,51 +90,55 @@ export class AppBuilder<
     this.#useCases = useCases;
   }
 
-  provide<I>(
-    token: [PortToken<I>] extends [Provided]
-      ? DuplicatePortError
-      : PortToken<I>,
+  provide<I, N extends string>(
+    token: [PortToken<I, N>] extends [Provided]
+      ? DuplicatePortError<N>
+      : PortToken<I, N>,
     impl: I,
-  ): AppBuilder<Bag, Provided | PortToken<I>, Bound, Ctx> {
-    const port = token as PortToken<I>;
+  ): AppBuilder<Bag, Provided | PortToken<I, N>, Bound, Ctx> {
+    const port = token as PortToken<I, N>;
     if (this.#provided.has(port as PortToken<unknown>)) {
-      throw new Error(`plinth: port "${port.name}" already provided`);
+      throw new Error(`plinth: port "${port.key}" already provided`);
     }
     for (const existing of this.#provided.keys()) {
-      if (existing.name === port.name && existing !== port) {
-        throw new Error(`plinth: two tokens share the name "${port.name}"`);
+      if (existing.key === port.key && existing !== port) {
+        throw new Error(`plinth: two tokens share the key "${port.key}"`);
       }
     }
     this.#provided.set(port as PortToken<unknown>, impl);
     return this as unknown as AppBuilder<
       Bag,
-      Provided | PortToken<I>,
+      Provided | PortToken<I, N>,
       Bound,
       Ctx
     >;
   }
 
-  bind<Name extends string, Kind extends CatalogKind>(
-    catalog: [EventCatalog<Name, Kind>] extends [Bound]
-      ? DuplicateCatalogError
-      : EventCatalog<Name, Kind>,
+  bind<
+    Key extends string,
+    Kind extends CatalogKind,
+    Events extends EventClass = never,
+  >(
+    catalog: [EventCatalog<Key, Kind, Events>] extends [Bound]
+      ? DuplicateCatalogError<Key>
+      : EventCatalog<Key, Kind, Events>,
     adapter: AdapterFor<Kind>,
-  ): AppBuilder<Bag, Provided, Bound | EventCatalog<Name, Kind>, Ctx> {
-    const cat = catalog as EventCatalog<Name, Kind>;
-    if (this.#bound.has(cat as EventCatalog)) {
-      throw new Error(`plinth: catalog "${cat.name}" already bound`);
+  ): AppBuilder<Bag, Provided, Bound | EventCatalog<Key, Kind, Events>, Ctx> {
+    const cat = catalog as EventCatalog<Key, Kind, Events>;
+    if (this.#bound.has(cat as AnyEventCatalog)) {
+      throw new Error(`plinth: catalog "${cat.key}" already bound`);
     }
     if (adapter.kind !== cat.kind) {
       throw new Error(
-        `plinth: catalog "${cat.name}" is kind "${cat.kind}" but the adapter is "${adapter.kind}"`,
+        `plinth: catalog "${cat.key}" is kind "${cat.kind}" but the adapter is "${adapter.kind}"`,
       );
     }
     cat.freeze();
-    this.#bound.set(cat as EventCatalog, adapter);
+    this.#bound.set(cat as AnyEventCatalog, adapter);
     return this as unknown as AppBuilder<
       Bag,
       Provided,
-      Bound | EventCatalog<Name, Kind>,
+      Bound | EventCatalog<Key, Kind, Events>,
       Ctx
     >;
   }
@@ -146,10 +154,8 @@ export class AppBuilder<
   }
 
   intercept(interceptor: Interceptor): this {
-    if (this.#interceptors.some((item) => item.name === interceptor.name)) {
-      throw new Error(
-        `plinth: duplicate interceptor name "${interceptor.name}"`,
-      );
+    if (this.#interceptors.some((item) => item.key === interceptor.key)) {
+      throw new Error(`plinth: duplicate interceptor key "${interceptor.key}"`);
     }
     this.#interceptors.push(interceptor);
     return this;
@@ -157,7 +163,7 @@ export class AppBuilder<
 
   /**
    * Complete the graph. Incomplete builders expose `build` as the missing
-   * message string (not callable). Runtime still throws the same sentences.
+   * port/catalog message (not callable). Runtime throws the same sentences.
    */
   get build(): [MissingMessages<Bag, Provided, Bound>] extends [never]
     ? () => AppInstance<Bag, Ctx>
@@ -188,19 +194,19 @@ export class AppBuilder<
 
     for (const ctor of Object.values(this.#useCases) as UseCaseClass[]) {
       if (isApiUseCase(ctor)) {
-        api.set(ctor.id, ctor);
+        api.set(ctor.key, ctor);
         continue;
       }
       if (isEventUseCase(ctor)) {
-        const key = `${ctor.catalog.name}:${ctor.on.name}`;
-        const list = eventHandlers.get(key) ?? [];
+        const handlerKey = `${ctor.catalog.key}:${ctor.on.key}`;
+        const list = eventHandlers.get(handlerKey) ?? [];
         list.push(ctor);
-        eventHandlers.set(key, list);
-        const byCatalog = handlersView[ctor.catalog.name] ?? {};
-        const byEvent = byCatalog[ctor.on.name] ?? [];
+        eventHandlers.set(handlerKey, list);
+        const byCatalog = handlersView[ctor.catalog.key] ?? {};
+        const byEvent = byCatalog[ctor.on.key] ?? [];
         byEvent.push(ctor);
-        byCatalog[ctor.on.name] = byEvent;
-        handlersView[ctor.catalog.name] = byCatalog;
+        byCatalog[ctor.on.key] = byEvent;
+        handlersView[ctor.catalog.key] = byCatalog;
       }
     }
 
@@ -213,9 +219,9 @@ export class AppBuilder<
       defaultCtx: this.#defaultCtx,
     });
 
-    const local = nestById(
-      [...api.entries()].map(([id, ctor]) => [
-        id,
+    const local = nestByKey(
+      [...api.entries()].map(([key, ctor]) => [
+        key,
         (input: unknown, opts?: { ctx?: Ctx; signal?: AbortSignal }) =>
           invokeApi(ctor, input, deps(), opts),
       ]),
@@ -251,41 +257,41 @@ export class AppBuilder<
     >();
     const requiredCatalogs = new Map<
       string,
-      { catalog: EventCatalog; usedBy: string[] }
+      { catalog: AnyEventCatalog; usedBy: string[] }
     >();
 
     for (const ctor of Object.values(this.#useCases) as UseCaseClass[]) {
       const ports = (ctor.ports ?? {}) as Record<string, PortToken<unknown>>;
       for (const token of Object.values(ports)) {
-        const rec = requiredPorts.get(token.name) ?? { token, usedBy: [] };
-        rec.usedBy.push(ctor.id);
-        requiredPorts.set(token.name, rec);
+        const rec = requiredPorts.get(token.key) ?? { token, usedBy: [] };
+        rec.usedBy.push(ctor.key);
+        requiredPorts.set(token.key, rec);
       }
-      const catalogs: EventCatalog[] = [
-        ...((ctor.publishes ?? []) as EventCatalog[]),
+      const catalogs: AnyEventCatalog[] = [
+        ...((ctor.publishes ?? []) as AnyEventCatalog[]),
         ...('catalog' in ctor && ctor.catalog ? [ctor.catalog] : []),
       ];
       for (const catalog of catalogs) {
-        const rec = requiredCatalogs.get(catalog.name) ?? {
+        const rec = requiredCatalogs.get(catalog.key) ?? {
           catalog,
           usedBy: [],
         };
-        rec.usedBy.push(ctor.id);
-        requiredCatalogs.set(catalog.name, rec);
+        rec.usedBy.push(ctor.key);
+        requiredCatalogs.set(catalog.key, rec);
       }
     }
 
     for (const { token, usedBy } of requiredPorts.values()) {
       if (!this.#provided.has(token)) {
         throw new Error(
-          `plinth: unprovided port "${token.name}" (used by ${usedBy.join(', ')})`,
+          `plinth: unprovided port "${token.key}" (used by ${usedBy.join(', ')})`,
         );
       }
     }
     for (const { catalog, usedBy } of requiredCatalogs.values()) {
       if (!this.#bound.has(catalog)) {
         throw new Error(
-          `plinth: unbound catalog "${catalog.name}" (used by ${usedBy.join(', ')})`,
+          `plinth: unbound catalog "${catalog.key}" (used by ${usedBy.join(', ')})`,
         );
       }
     }
@@ -293,5 +299,5 @@ export class AppBuilder<
 }
 
 function nestedContract(rpc: RpcContract): Record<string, unknown> {
-  return nestById(Object.entries(rpc.routes));
+  return nestByKey(Object.entries(rpc.routes));
 }

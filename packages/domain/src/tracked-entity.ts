@@ -35,10 +35,14 @@ export abstract class TrackedEntity<P extends object> extends Entity<P> {
   }
 
   /**
-   * `with` copies an untracked value. Tracked aggregates mutate via `set`.
+   * Tracked aggregates mutate via `set`. Calling `with` is a type error.
    */
-  override with(patch: Partial<P>): this {
-    void patch;
+  // @ts-expect-error poison the call; not a legal override of Entity.with(Partial)
+  override with(
+    ..._args: [
+      `plinth: TrackedEntity is mutable; use set() and return ok(this)`,
+    ]
+  ): never {
     throw new Error(
       'plinth: TrackedEntity is mutable; use set() and return ok(this)',
     );

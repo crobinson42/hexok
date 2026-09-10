@@ -2,7 +2,7 @@ import type { ErrorMap, StandardSchemaV1 } from '@plinth/core';
 import { isApiUseCase, type UseCaseBag, type UseCaseClass } from './types.js';
 
 export type RpcRoute = {
-  id: string;
+  key: string;
   method: 'POST';
   path: string;
   input: StandardSchemaV1;
@@ -14,15 +14,15 @@ export type RpcContract = {
   routes: Record<string, RpcRoute>;
 };
 
-type ApiId<C> = C extends { trigger: 'api'; id: infer Id extends string }
-  ? Id
+type ApiKey<C> = C extends { trigger: 'api'; key: infer Key extends string }
+  ? Key
   : never;
 
-type IdsOf<Bag> = { [K in keyof Bag]: ApiId<Bag[K]> }[keyof Bag];
+type KeysOf<Bag> = { [K in keyof Bag]: ApiKey<Bag[K]> }[keyof Bag];
 
-type UseCaseWithId<Bag, Id> = Extract<
+type UseCaseWithKey<Bag, Key> = Extract<
   Bag[keyof Bag],
-  { trigger: 'api'; id: Id }
+  { trigger: 'api'; key: Key }
 >;
 
 type PathTo<Path extends string, V> = Path extends `${infer Head}.${infer Rest}`
@@ -38,13 +38,13 @@ type UnionToIntersection<U> = (
   : never;
 
 type RouteView<C> = C extends {
-  id: infer Id extends string;
+  key: infer Key extends string;
   input: infer Input;
   output: infer Output;
   errors: infer Errors;
 }
   ? {
-      readonly id: Id;
+      readonly key: Key;
       readonly method: 'POST';
       readonly input: Input;
       readonly output: Output;
@@ -53,36 +53,36 @@ type RouteView<C> = C extends {
   : never;
 
 /**
- * Nested by use-case `id` (`incident.close` → `{ incident: { close } }`).
+ * Nested by use-case `key` (`incident.close` → `{ incident: { close } }`).
  * Event use cases are omitted.
  */
 export type DerivedContract<Bag> = UnionToIntersection<
-  IdsOf<Bag> extends infer Id
-    ? Id extends string
-      ? PathTo<Id, RouteView<UseCaseWithId<Bag, Id>>>
+  KeysOf<Bag> extends infer Key
+    ? Key extends string
+      ? PathTo<Key, RouteView<UseCaseWithKey<Bag, Key>>>
       : never
     : never
 >;
 
-export function rpcPath(id: string): string {
-  return `/rpc/${id.split('.').join('/')}`;
+export function rpcPath(key: string): string {
+  return `/rpc/${key.split('.').join('/')}`;
 }
 
 /**
  * Build the RPC contract from a use-case class list.
- * Duplicate `id` throws. Event use cases are skipped.
+ * Duplicate `key` throws. Event use cases are skipped.
  */
 export function deriveContract(useCases: UseCaseBag): RpcContract {
   const routes: Record<string, RpcRoute> = {};
   for (const ctor of Object.values(useCases) as UseCaseClass[]) {
     if (!isApiUseCase(ctor)) continue;
-    if (routes[ctor.id] !== undefined) {
-      throw new Error(`plinth: duplicate use-case id "${ctor.id}"`);
+    if (routes[ctor.key] !== undefined) {
+      throw new Error(`plinth: duplicate use-case key "${ctor.key}"`);
     }
-    routes[ctor.id] = {
-      id: ctor.id,
+    routes[ctor.key] = {
+      key: ctor.key,
       method: 'POST',
-      path: rpcPath(ctor.id),
+      path: rpcPath(ctor.key),
       input: ctor.input,
       output: ctor.output,
       errors: ctor.errors,
@@ -91,20 +91,20 @@ export function deriveContract(useCases: UseCaseBag): RpcContract {
   return { routes };
 }
 
-export function nestById<V>(
+export function nestByKey<V>(
   entries: Iterable<[string, V]>,
 ): Record<string, unknown> {
   const root: Record<string, unknown> = Object.create(null);
-  for (const [id, value] of entries) {
-    const parts = id.split('.');
+  for (const [key, value] of entries) {
+    const parts = key.split('.');
     let cursor = root;
     for (let i = 0; i < parts.length - 1; i++) {
-      const key = parts[i];
-      if (key === undefined) continue;
-      const existing = cursor[key];
+      const part = parts[i];
+      if (part === undefined) continue;
+      const existing = cursor[part];
       if (existing === undefined || typeof existing !== 'object') {
         const next: Record<string, unknown> = Object.create(null);
-        cursor[key] = next;
+        cursor[part] = next;
         cursor = next;
       } else {
         cursor = existing as Record<string, unknown>;

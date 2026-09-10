@@ -17,18 +17,15 @@ export class InMemoryBus implements BusAdapter {
 
   async publish(envelope: Envelope): Promise<void> {
     this.published.push(envelope);
-    for (const handler of this.#subscribers.get(envelope.name) ?? []) {
+    for (const handler of this.#subscribers.get(envelope.key) ?? []) {
       await handler(envelope);
     }
   }
 
-  subscribe(
-    name: string,
-    handler: (envelope: Envelope) => Promise<void>,
-  ): void {
-    const list = this.#subscribers.get(name) ?? [];
+  subscribe(key: string, handler: (envelope: Envelope) => Promise<void>): void {
+    const list = this.#subscribers.get(key) ?? [];
     list.push(handler);
-    this.#subscribers.set(name, list);
+    this.#subscribers.set(key, list);
   }
 
   async stop(): Promise<void> {

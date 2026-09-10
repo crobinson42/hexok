@@ -1,19 +1,19 @@
 import type { EventUseCaseCtor } from '@plinth/app';
-import type { EventAdapter, EventCatalog } from '@plinth/domain';
+import type { AnyEventCatalog, EventAdapter } from '@plinth/domain';
 import { type InvokeDeps, invokeEvent } from './invoke.js';
 
 export async function startHandlers(
-  bound: Map<EventCatalog, EventAdapter>,
+  bound: Map<AnyEventCatalog, EventAdapter>,
   handlers: Map<string, EventUseCaseCtor[]>,
   deps: InvokeDeps,
 ): Promise<void> {
   for (const [catalog, adapter] of bound) {
     for (const eventClass of catalog.list()) {
-      const key = `${catalog.name}:${eventClass.name}`;
-      const list = handlers.get(key) ?? [];
+      const handlerKey = `${catalog.key}:${eventClass.key}`;
+      const list = handlers.get(handlerKey) ?? [];
       if (list.length === 0) continue;
       if (adapter.kind === 'bus') {
-        adapter.subscribe(eventClass.name, async (envelope) => {
+        adapter.subscribe(eventClass.key, async (envelope) => {
           for (const ctor of list) {
             await invokeEvent(ctor, envelope, deps);
           }
@@ -24,7 +24,7 @@ export async function startHandlers(
       for (const ctor of list) {
         if (ctor.group === undefined) {
           throw new Error(
-            `plinth: broker handler "${ctor.id}" requires static group`,
+            `plinth: broker handler "${ctor.key}" requires static group`,
           );
         }
         const group = groups.get(ctor.group) ?? [];
@@ -33,7 +33,7 @@ export async function startHandlers(
       }
       for (const [group, ctors] of groups) {
         adapter.consume(
-          eventClass.name,
+          eventClass.key,
           group,
           async (envelope, { attempt, ack, nack }) => {
             try {
@@ -53,7 +53,7 @@ export async function startHandlers(
 }
 
 export async function stopAdapters(
-  bound: Map<EventCatalog, EventAdapter>,
+  bound: Map<AnyEventCatalog, EventAdapter>,
 ): Promise<void> {
   for (const adapter of bound.values()) {
     await adapter.stop?.();

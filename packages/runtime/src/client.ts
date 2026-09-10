@@ -24,13 +24,13 @@ type ApiCall<C, Ctx> = C extends {
   : never;
 
 /**
- * In-process client nested by use-case id. Event handlers are omitted.
+ * In-process client nested by use-case key. Event handlers are omitted.
  */
 export type NestedClient<Bag extends UseCaseBag, Ctx> = UnionToIntersection<
   {
     [K in keyof Bag]: Bag[K] extends {
       trigger: 'api';
-      id: infer Id extends string;
+      key: infer Id extends string;
     }
       ? PathTo<Id, ApiCall<Bag[K], Ctx>>
       : never;

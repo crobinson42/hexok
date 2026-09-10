@@ -1,13 +1,12 @@
 import { CodedError, type ErrorMap, type Result } from '@plinth/core';
-import type { EventCatalog } from '@plinth/domain';
-import type { Publish } from './execute-ctx.js';
+import type { AnyEventCatalog, PortToken } from '@plinth/domain';
 
 /**
- * HTTP/RPC use case. Declare static `id`, `input`, `output`, `errors`, `ports`.
+ * HTTP/RPC use case. Declare static `key`, `input`, `output`, `errors`, `ports`.
  *
  * ```ts
  * class CloseIncident extends ApiUseCase {
- *   static readonly id = 'incident.close'
+ *   static readonly key = 'incident.close'
  *   static readonly input = z.object({ id: z.string() })
  *   static readonly output = Incident.schema
  *   static readonly errors = { NOT_FOUND: { status: 404 } } as const
@@ -22,21 +21,17 @@ import type { Publish } from './execute-ctx.js';
  */
 export abstract class ApiUseCase {
   static readonly trigger = 'api' as const;
-  static readonly id: string;
+  static readonly key: string;
   static readonly input: unknown;
   static readonly output: unknown;
   static readonly errors: ErrorMap = {};
-  static readonly publishes?: readonly EventCatalog[];
+  static readonly ports?: Record<string, PortToken<unknown>>;
+  /** `static publishes = [DomainEvents] as const` — without `as const`, Events widens to EventClass. */
+  static readonly publishes?: readonly AnyEventCatalog[];
   static readonly middleware?: readonly unknown[];
 
-  abstract execute(ctx: {
-    input: unknown;
-    ports: Record<string, unknown>;
-    ctx: unknown;
-    errors: Record<string, (data?: unknown) => never>;
-    signal: AbortSignal;
-    publish: Publish;
-  }): Promise<unknown>;
+  /** Typed `never` so subclasses may take `ExecuteCtx` (tighter `publish`). */
+  abstract execute(ctx: never): Promise<unknown>;
 
   /**
    * Typed factory: keys are the declared error map. Return type is `never`.

@@ -17,7 +17,7 @@ import {
  * opens a transaction.
  */
 export class UnitOfWorkInterceptor implements Interceptor {
-  readonly name = 'unit-of-work';
+  readonly key = 'unit-of-work';
 
   aroundAdapter(port: PortToken<unknown>, impl: unknown): unknown {
     if (hasBindTo(impl)) {
@@ -28,14 +28,13 @@ export class UnitOfWorkInterceptor implements Interceptor {
 
   aroundUseCase(_uc: UseCaseClass, next: Handler): Handler {
     return async (ctx) => {
-      const executeCtx = ctx as { ports: Record<string, unknown> };
       const uow = new MemoryUnitOfWork();
       const ports: Record<string, unknown> = {};
-      for (const [alias, impl] of Object.entries(executeCtx.ports)) {
+      for (const [alias, impl] of Object.entries(ctx.ports)) {
         ports[alias] = hasBindTo(impl) ? impl.bindTo(uow) : impl;
       }
       try {
-        const result = await next({ ...executeCtx, ports } as never);
+        const result = await next({ ...ctx, ports });
         await uow.commit();
         return result;
       } catch (error) {

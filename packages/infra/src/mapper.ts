@@ -1,5 +1,5 @@
 import type { Result } from '@plinth/core';
-import type { Entity, EntityConstructor } from '@plinth/domain';
+import type { EntityConstructor } from '@plinth/domain';
 
 const TRUST = 'plinth: model.from() failed entity.parse (trust boundary)';
 
@@ -42,8 +42,8 @@ export class Mapper<E extends EntityConstructor, Row> {
   }
 
   /** Outbound. No parse. */
-  to(entity: InstanceType<E> | Entity<unknown>): Row {
-    return this.#toFn(entity as InstanceType<E>);
+  to(entity: InstanceType<E>): Row {
+    return this.#toFn(entity);
   }
 
   /** Inbound trust boundary. Throws if entity.parse/restore fails. */

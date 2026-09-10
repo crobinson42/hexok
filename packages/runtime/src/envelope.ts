@@ -1,7 +1,7 @@
 import type {
+  AnyEventCatalog,
   DomainEvent,
   Envelope,
-  EventCatalog,
   EventClass,
 } from '@plinth/domain';
 
@@ -9,7 +9,7 @@ export function isEnvelope(value: unknown): value is Envelope {
   return (
     typeof value === 'object' &&
     value !== null &&
-    'name' in value &&
+    'key' in value &&
     'payload' in value &&
     'catalog' in value &&
     'kind' in value &&
@@ -19,22 +19,22 @@ export function isEnvelope(value: unknown): value is Envelope {
 
 export function wrapEvent(
   event: DomainEvent | Envelope,
-  catalogs: readonly EventCatalog[],
+  catalogs: readonly AnyEventCatalog[],
 ): Envelope {
   if (isEnvelope(event)) return event;
   const Ctor = event.constructor as EventClass;
   const catalog = catalogs.find((item) =>
-    item.list().some((registered) => registered.name === Ctor.name),
+    item.list().some((registered) => registered.key === Ctor.key),
   );
   if (!catalog) {
     throw new Error(
-      `plinth: event "${Ctor.name}" is not in a bound catalog declared by publishes`,
+      `plinth: event "${Ctor.key}" is not in a bound catalog declared by publishes`,
     );
   }
   return {
-    name: Ctor.name,
+    key: Ctor.key,
     payload: event.payload,
-    catalog: catalog.name,
+    catalog: catalog.key,
     kind: catalog.kind,
     occurredAt: new Date(),
     meta: {},

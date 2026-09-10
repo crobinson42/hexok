@@ -5,14 +5,14 @@ import {Clock, IncidentRepository} from '../ports.js';
 import {DomainEvents, IncidentOpened} from "../domain/events.js";
 
 export class CreateIncident extends ApiUseCase {
-  static id = 'incident.create';
+  static readonly key = 'incident.create';
   static input = z.object({ id: z.string(), title: z.string() });
   static output = incidentSchema;
   static errors = {
     DUPLICATE: { status: 409, message: 'Incident already exists' },
   };
   static ports = { incidents: IncidentRepository,clock: Clock, };
-  static publishes = [DomainEvents]
+  static publishes = [DomainEvents] as const
 
   async execute({ input, ports, errors, publish }: ExecuteCtx<typeof CreateIncident>) {
     const existing = await ports.incidents.get(input.id);

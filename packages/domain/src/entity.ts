@@ -13,7 +13,7 @@ import {
  *
  * ```ts
  * class Incident extends Entity<IncidentProps> {
- *   static readonly type = 'Incident'
+ *   static readonly key = 'Incident'
  *   static readonly schema = z.object({ id: z.string(), status: z.enum(['open', 'closed']) })
  *   static readonly errors = { ALREADY_CLOSED: { status: 409 } } as const
  *   close(): Result<Incident, 'ALREADY_CLOSED'> {
@@ -24,6 +24,7 @@ import {
  * ```
  */
 export abstract class Entity<P> {
+  static readonly key: string;
   protected _props: P;
 
   /**
@@ -98,7 +99,7 @@ export abstract class Entity<P> {
 }
 
 export type EntityConstructor = {
-  readonly type: string;
+  readonly key: string;
   readonly schema: StandardSchemaV1;
   readonly errors: object;
 } & (new (

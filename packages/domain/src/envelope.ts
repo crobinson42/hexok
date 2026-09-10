@@ -4,12 +4,12 @@ export type CatalogKind = 'bus' | 'broker';
  * Runtime value on the wire. `kind` is copied from the catalog.
  */
 export type Envelope<
-  N extends string = string,
+  K extends string = string,
   P = unknown,
   Cat extends string = string,
   Kind extends CatalogKind = CatalogKind,
 > = {
-  name: N;
+  key: K;
   payload: P;
   catalog: Cat;
   kind: Kind;
@@ -22,7 +22,7 @@ export type Envelope<
 export interface BusAdapter {
   kind: 'bus';
   publish(envelope: Envelope): Promise<void>;
-  subscribe(name: string, handler: (envelope: Envelope) => Promise<void>): void;
+  subscribe(key: string, handler: (envelope: Envelope) => Promise<void>): void;
   stop?(): Promise<void>;
 }
 
@@ -36,7 +36,7 @@ export interface BrokerAdapter {
   kind: 'broker';
   publish(envelope: Envelope): Promise<void>;
   consume(
-    name: string,
+    key: string,
     group: string,
     handler: (envelope: Envelope, ctx: BrokerConsumeCtx) => Promise<void>,
   ): void;

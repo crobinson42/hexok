@@ -8,18 +8,18 @@ import { Clock, IncidentRepository } from '../ports.js';
  * load → decide (entity) → save → publish → return
  */
 export class CloseIncident extends ApiUseCase {
-  static readonly id = 'incident.close';
-  static readonly input = z.object({ id: z.string() });
-  static readonly output = incidentSchema;
-  static readonly errors = {
+  static readonly key = 'incident.close';
+  static input = z.object({ id: z.string() });
+  static output = incidentSchema;
+  static errors = {
     ...Incident.errors,
     NOT_FOUND: { status: 404, message: 'Incident not found' },
   } as const;
-  static readonly ports = {
+  static ports = {
     incidents: IncidentRepository,
     clock: Clock,
   };
-  static readonly publishes = [DomainEvents] as const;
+  static publishes = [DomainEvents] as const;
 
   async execute({
     input,

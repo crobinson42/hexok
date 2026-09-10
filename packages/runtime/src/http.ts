@@ -14,11 +14,11 @@ export function createFetchHandler(
         404,
       );
     }
-    const id = url.pathname.slice('/rpc/'.length).split('/').join('.');
-    const ctor = apiUseCases.get(id);
+    const key = url.pathname.slice('/rpc/'.length).split('/').join('.');
+    const ctor = apiUseCases.get(key);
     if (ctor === undefined) {
       return json(
-        { ok: false, error: { code: 'NOT_FOUND', status: 404, message: id } },
+        { ok: false, error: { code: 'NOT_FOUND', status: 404, message: key } },
         404,
       );
     }
@@ -59,8 +59,8 @@ export function createFetchHandler(
   };
 }
 
-export function routePath(id: string): string {
-  return rpcPath(id);
+export function routePath(key: string): string {
+  return rpcPath(key);
 }
 
 function json(body: unknown, status = 200): Response {

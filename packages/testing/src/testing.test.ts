@@ -1,5 +1,6 @@
 import { Entity, Port } from '@plinth/domain';
 import { describe, expect, expectTypeOf, it } from 'vitest';
+import type { TestAppInstance } from './app-test.js';
 import { InMemoryRepository } from './in-memory-repository.js';
 
 interface Clock {
@@ -16,7 +17,7 @@ interface ThingRepository {
 const ThingRepository = Port.token<ThingRepository>('ThingRepository');
 
 class Thing extends Entity<{ id: string }> {
-  static readonly type = 'Thing';
+  static readonly key = 'Thing';
   static readonly schema = {
     '~standard': {
       version: 1 as const,
@@ -67,5 +68,19 @@ describe('InMemoryRepository', () => {
       Parameters<typeof InMemoryRepository.of<Clock>>[0]
     >().toEqualTypeOf<`plinth: InMemoryRepository.of expects a CRUD repository port`>();
     void Clock;
+  });
+
+  it('types seed as the repository entity and keyBy as a prop key', () => {
+    expectTypeOf(InMemoryRepository.of<ThingRepository>)
+      .parameter(1)
+      .toEqualTypeOf<{ keyBy: 'id'; seed?: Thing[] }>();
+  });
+});
+
+describe('TestAppInstance', () => {
+  it('is not never for a bag that requires ports', () => {
+    expectTypeOf<
+      TestAppInstance<{ close: never }>
+    >().not.toEqualTypeOf<never>();
   });
 });

@@ -16,11 +16,11 @@ export type SiteProps = Infer<typeof siteSchema>;
  * Tracked aggregate. `relocate` mutates **this** and returns `ok(this)`.
  */
 export class Site extends TrackedEntity<SiteProps> {
-  static readonly type = 'Site';
-  static readonly schema = siteSchema;
-  static readonly errors = {
+  static readonly key = 'Site';
+  static  schema = siteSchema;
+  static  errors = {
     SAME_ADDRESS: { status: 409, message: 'Site is already at that address' },
-  } as const;
+  };
 
   get id() {
     return this.props.id;

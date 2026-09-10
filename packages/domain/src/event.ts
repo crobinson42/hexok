@@ -6,7 +6,7 @@ import type { Infer, StandardSchemaV1 } from '@plinth/core';
  *
  * ```ts
  * class IncidentClosed extends DomainEvent {
- *   static readonly name = 'incident.closed'
+ *   static readonly key = 'incident.closed'
  *   static readonly schema = z.object({ id: z.string(), closedAt: z.date() })
  *   constructor(public readonly payload: Infer<typeof IncidentClosed.schema>) {
  *     super()
@@ -15,11 +15,12 @@ import type { Infer, StandardSchemaV1 } from '@plinth/core';
  * ```
  */
 export abstract class DomainEvent<P = unknown> {
+  static readonly key: string;
   abstract readonly payload: P;
 }
 
 export type EventClass<P = never> = {
-  readonly name: string;
+  readonly key: string;
   readonly schema: StandardSchemaV1;
   new (payload: P): DomainEvent<unknown>;
 };

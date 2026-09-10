@@ -11,7 +11,7 @@ import {
  * Two `local` calls must not share the forked state.
  */
 export class RequestScopeInterceptor implements Interceptor {
-  readonly name = 'request-scope';
+  readonly key = 'request-scope';
 
   aroundAdapter(port: PortToken<unknown>, impl: unknown): unknown {
     if (hasFork(impl)) {
@@ -22,12 +22,11 @@ export class RequestScopeInterceptor implements Interceptor {
 
   aroundUseCase(_uc: UseCaseClass, next: Handler): Handler {
     return async (ctx) => {
-      const executeCtx = ctx as { ports: Record<string, unknown> };
       const ports: Record<string, unknown> = {};
-      for (const [alias, impl] of Object.entries(executeCtx.ports)) {
+      for (const [alias, impl] of Object.entries(ctx.ports)) {
         ports[alias] = hasFork(impl) ? impl.fork() : impl;
       }
-      return next({ ...executeCtx, ports } as never);
+      return next({ ...ctx, ports });
     };
   }
 }

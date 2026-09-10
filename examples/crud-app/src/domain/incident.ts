@@ -15,11 +15,11 @@ export type IncidentProps = Infer<typeof incidentSchema>;
  * Untracked value object. `close` returns a **new** instance.
  */
 export class Incident extends Entity<IncidentProps> {
-  static readonly type = 'Incident';
-  static readonly schema = incidentSchema;
-  static readonly errors = {
+  static readonly key = 'Incident';
+  static  schema = incidentSchema;
+  static  errors = {
     ALREADY_CLOSED: { status: 409, message: 'Incident already closed' },
-  } as const;
+  } ;
 
   get id() {
     return this.props.id;

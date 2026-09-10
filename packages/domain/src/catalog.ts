@@ -5,6 +5,8 @@ const IDENT = /^[A-Za-z_$][A-Za-z0-9_$]*$/;
 
 /**
  * Registry of event classes. `kind` is `'bus'` (in-process) or `'broker'` (acked).
+ * `.event()` accumulates each class on the covariant `Events` generic (empty is `never`).
+ * Use-case convention: `static publishes = [DomainEvents] as const`.
  *
  * ```ts
  * const DomainEvents = new EventCatalog('domain', { kind: 'bus' })
@@ -14,16 +16,17 @@ const IDENT = /^[A-Za-z_$][A-Za-z0-9_$]*$/;
  * ```
  */
 export class EventCatalog<
-  Name extends string = string,
+  Key extends string = string,
   Kind extends CatalogKind = CatalogKind,
+  out Events extends EventClass = never,
 > {
-  readonly name: Name;
+  readonly key: Key;
   readonly kind: Kind;
   #events = new Map<string, EventClass>();
   #frozen = false;
 
-  constructor(name: Name, options: { kind: Kind }) {
-    this.name = name;
+  constructor(key: Key, options: { kind: Kind }) {
+    this.key = key;
     this.kind = options.kind;
   }
 
@@ -32,34 +35,36 @@ export class EventCatalog<
     return [...this.#events.values()];
   }
 
-  event<E extends EventClass>(eventClass: E): this {
+  event<E extends EventClass>(
+    eventClass: E,
+  ): EventCatalog<Key, Kind, Events | E> {
     this.assertWritable();
-    const eventName = eventClass.name;
-    if (this.#events.has(eventName)) {
+    const eventKey = eventClass.key;
+    if (this.#events.has(eventKey)) {
       throw new Error(
-        `plinth: duplicate event "${eventName}" in catalog "${this.name}"`,
+        `plinth: duplicate event "${eventKey}" in catalog "${this.key}"`,
       );
     }
-    this.#events.set(eventName, eventClass);
+    this.#events.set(eventKey, eventClass);
     nestIdentifierPath(
       this as unknown as Record<string, unknown>,
-      eventName,
+      eventKey,
       eventClass,
     );
     return this;
   }
 
   get<E extends EventClass>(eventClass: E): E {
-    const found = this.#events.get(eventClass.name);
+    const found = this.#events.get(eventClass.key);
     if (!found) {
       throw new Error(
-        `plinth: event "${eventClass.name}" is not in catalog "${this.name}"`,
+        `plinth: event "${eventClass.key}" is not in catalog "${this.key}"`,
       );
     }
     return found as E;
   }
 
-  freeze(): this {
+  freeze(): EventCatalog<Key, Kind, Events> {
     if (this.#frozen) return this;
     this.#frozen = true;
     Object.freeze(this);
@@ -72,10 +77,18 @@ export class EventCatalog<
 
   private assertWritable(): void {
     if (this.#frozen) {
-      throw new Error(`plinth: catalog "${this.name}" is frozen`);
+      throw new Error(`plinth: catalog "${this.key}" is frozen`);
     }
   }
 }
+
+/** Safe annotation / Map key. Bare `EventCatalog` is Events=never and rejects populated catalogs. */
+export type AnyEventCatalog = EventCatalog<string, CatalogKind, EventClass>;
+
+export type CatalogEvents<Cat> =
+  Cat extends EventCatalog<infer _Key, infer _Kind, infer E extends EventClass>
+    ? E
+    : never;
 
 function nestIdentifierPath(
   root: Record<string, unknown>,

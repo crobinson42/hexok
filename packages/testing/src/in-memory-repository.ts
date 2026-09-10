@@ -7,7 +7,19 @@ import type {
 
 type CrudKeys = 'get' | 'save' | 'list' | 'delete';
 
-type ExtraKeys<I> = Exclude<keyof I, CrudKeys>;
+type ExtraKeys<I> = Exclude<keyof I, CrudKeys | 'bindTo' | 'fork'>;
+
+type RepoEntity<I> = I extends {
+  get: (id: string) => Promise<infer E>;
+}
+  ? NonNullable<E>
+  : Entity<Record<string, unknown>>;
+
+type EntityKey<E> = E extends { toProps(): infer P }
+  ? P extends object
+    ? keyof P & string
+    : string
+  : string;
 
 type AssertCrud<I> = 'get' | 'save' extends keyof I
   ? ExtraKeys<I> extends never
@@ -42,8 +54,8 @@ export class InMemoryRepository<E extends Entity<Record<string, unknown>>>
   static of<I>(
     _token: [AssertCrud<I>] extends [I] ? PortToken<I> : AssertCrud<I>,
     options: {
-      keyBy: string;
-      seed?: Entity<Record<string, unknown>>[];
+      keyBy: EntityKey<RepoEntity<I>>;
+      seed?: RepoEntity<I>[];
     },
   ): I {
     const repo = new InMemoryRepository(

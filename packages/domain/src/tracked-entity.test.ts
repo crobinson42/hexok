@@ -1,5 +1,5 @@
 import { fail, type Infer, ok, type Result } from '@plinth/core';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, expectTypeOf, it } from 'vitest';
 import { z } from 'zod';
 import { TrackedEntity } from './tracked-entity.js';
 
@@ -13,7 +13,7 @@ const siteSchema = z.object({
 type SiteProps = Infer<typeof siteSchema>;
 
 class Site extends TrackedEntity<SiteProps> {
-  static readonly type = 'Site';
+  static readonly key = 'Site';
   static readonly schema = siteSchema;
   static readonly errors = {
     SAME_ADDRESS: { status: 409, message: 'Site is already at that address' },
@@ -114,7 +114,15 @@ describe('TrackedEntity', () => {
     });
     expect(created.ok).toBe(true);
     if (!created.ok) return;
-    expect(() => created.value.with({ id: 'other' })).toThrow(
+    const site = created.value;
+    expectTypeOf(site.with).not.toEqualTypeOf<
+      (patch: Partial<SiteProps>) => Site
+    >();
+    expect(() =>
+      (created.value as unknown as { with: (p: unknown) => unknown }).with({
+        id: 'other',
+      }),
+    ).toThrow(
       'plinth: TrackedEntity is mutable; use set() and return ok(this)',
     );
   });

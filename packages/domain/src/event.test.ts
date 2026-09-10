@@ -4,7 +4,7 @@ import { z } from 'zod';
 import { DomainEvent } from './event.js';
 
 class IncidentClosed extends DomainEvent {
-  static readonly name = 'incident.closed';
+  static readonly key = 'incident.closed';
   static readonly schema = z.object({
     id: z.string(),
     closedAt: z.date(),
@@ -23,5 +23,8 @@ describe('DomainEvent', () => {
       id: string;
       closedAt: Date;
     }>();
+    expectTypeOf<
+      typeof IncidentClosed.key
+    >().toEqualTypeOf<'incident.closed'>();
   });
 });

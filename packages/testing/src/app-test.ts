@@ -1,22 +1,28 @@
-import type { UseCaseBag } from '@plinth/app';
+import type { AsUseCaseBag, CheckUseCase, UseCaseBag } from '@plinth/app';
 import type {
   CatalogKind,
   Envelope,
-  EventAdapter,
   EventCatalog,
+  EventClass,
   PortToken,
 } from '@plinth/domain';
 import {
+  type AdapterFor,
   type AppBuilder,
+  type AppInstance,
+  type DuplicateCatalogError,
+  type DuplicatePortError,
   type Interceptor,
+  type MissingMessages,
   type NestedClient,
   type RpcMiddleware,
   App as RuntimeApp,
 } from '@plinth/runtime';
 
-export type TestAppInstance<Bag extends UseCaseBag, Ctx = unknown> = ReturnType<
-  Extract<AppBuilder<Bag, never, never, Ctx>['build'], () => unknown>
-> & {
+export type TestAppInstance<
+  Bag extends UseCaseBag,
+  Ctx = unknown,
+> = AppInstance<Bag, Ctx> & {
   published: Envelope[];
   as: (ctx: Ctx) => NestedClient<Bag, Ctx>;
 };
@@ -36,10 +42,12 @@ export type TestAppInstance<Bag extends UseCaseBag, Ctx = unknown> = ReturnType<
  */
 export const App = {
   from: RuntimeApp.from,
-  test<Bag extends UseCaseBag>(useCases: Bag): TestAppBuilder<Bag> {
+  test<Bag extends { [K in keyof Bag]: CheckUseCase<Bag[K]> }>(
+    useCases: Bag,
+  ): TestAppBuilder<AsUseCaseBag<Bag>> {
     const published: Envelope[] = [];
     const inner = RuntimeApp.from(useCases).intercept({
-      name: 'plinth:published',
+      key: 'plinth:published',
       aroundPublish: async (envelope, next) => {
         await next();
         published.push(envelope);
@@ -66,28 +74,42 @@ export class TestAppBuilder<
     this.#published = published;
   }
 
-  provide<I>(
-    token: [PortToken<I>] extends [Provided]
-      ? `plinth: port already provided`
-      : PortToken<I>,
+  provide<I, N extends string>(
+    token: [PortToken<I, N>] extends [Provided]
+      ? DuplicatePortError<N>
+      : PortToken<I, N>,
     impl: I,
-  ): TestAppBuilder<Bag, Provided | PortToken<I>, Bound, Ctx> {
+  ): TestAppBuilder<Bag, Provided | PortToken<I, N>, Bound, Ctx> {
     const next = this.#inner.provide(token as never, impl);
     return new TestAppBuilder(
-      next as AppBuilder<Bag, Provided | PortToken<I>, Bound, Ctx>,
+      next as AppBuilder<Bag, Provided | PortToken<I, N>, Bound, Ctx>,
       this.#published,
     );
   }
 
-  bind<Name extends string, Kind extends CatalogKind>(
-    catalog: [EventCatalog<Name, Kind>] extends [Bound]
-      ? `plinth: catalog already bound`
-      : EventCatalog<Name, Kind>,
-    adapter: EventAdapter & { kind: Kind },
-  ): TestAppBuilder<Bag, Provided, Bound | EventCatalog<Name, Kind>, Ctx> {
-    const next = this.#inner.bind(catalog as never, adapter as never);
+  bind<
+    Key extends string,
+    Kind extends CatalogKind,
+    Events extends EventClass = never,
+  >(
+    catalog: [EventCatalog<Key, Kind, Events>] extends [Bound]
+      ? DuplicateCatalogError<Key>
+      : EventCatalog<Key, Kind, Events>,
+    adapter: AdapterFor<Kind>,
+  ): TestAppBuilder<
+    Bag,
+    Provided,
+    Bound | EventCatalog<Key, Kind, Events>,
+    Ctx
+  > {
+    const next = this.#inner.bind(catalog as never, adapter);
     return new TestAppBuilder(
-      next as AppBuilder<Bag, Provided, Bound | EventCatalog<Name, Kind>, Ctx>,
+      next as AppBuilder<
+        Bag,
+        Provided,
+        Bound | EventCatalog<Key, Kind, Events>,
+        Ctx
+      >,
       this.#published,
     );
   }
@@ -107,26 +129,23 @@ export class TestAppBuilder<
     return this;
   }
 
-  get build(): AppBuilder<Bag, Provided, Bound, Ctx>['build'] extends (
-    ...args: never
-  ) => infer Instance
-    ? () => Instance & {
-        published: Envelope[];
-        as: (ctx: Ctx) => NestedClient<Bag, Ctx>;
-      }
-    : AppBuilder<Bag, Provided, Bound, Ctx>['build'] {
-    const inner = this.#inner.build;
-    if (typeof inner !== 'function') {
-      return inner as never;
-    }
+  get build(): [MissingMessages<Bag, Provided, Bound>] extends [never]
+    ? () => TestAppInstance<Bag, Ctx>
+    : MissingMessages<Bag, Provided, Bound> {
     const published = this.#published;
     return (() => {
-      const app = inner();
+      const app = (
+        this.#inner as unknown as { build: () => AppInstance<Bag, Ctx> }
+      ).build();
       return Object.assign(app, {
         published,
         as: (ctx: Ctx) => rebindLocal(app.local, ctx) as NestedClient<Bag, Ctx>,
       });
-    }) as never;
+    }) as () => TestAppInstance<Bag, Ctx> as [
+      MissingMessages<Bag, Provided, Bound>,
+    ] extends [never]
+      ? () => TestAppInstance<Bag, Ctx>
+      : MissingMessages<Bag, Provided, Bound>;
   }
 }
 

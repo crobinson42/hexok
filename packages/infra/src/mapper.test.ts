@@ -1,6 +1,6 @@
 import type { Infer } from '@plinth/core';
 import { Entity } from '@plinth/domain';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, expectTypeOf, it } from 'vitest';
 import { z } from 'zod';
 import { Mapper } from './mapper.js';
 
@@ -11,7 +11,7 @@ const schema = z.object({
 type Props = Infer<typeof schema>;
 
 class Incident extends Entity<Props> {
-  static readonly type = 'Incident';
+  static readonly key = 'Incident';
   static readonly schema = schema;
   static readonly errors = {};
   get id() {
@@ -57,5 +57,27 @@ describe('Mapper', () => {
       closed_at: null,
     });
     expect(result).toEqual({ ok: false, code: 'VALIDATION' });
+  });
+
+  it('to does not accept a different entity class', () => {
+    class Other extends Entity<{ name: string }> {
+      static readonly key = 'Other';
+      static readonly schema = z.object({ name: z.string() });
+      static readonly errors = {};
+      get name() {
+        return this.props.name;
+      }
+    }
+
+    expectTypeOf(IncidentMapper.to).parameter(0).toEqualTypeOf<Incident>();
+    expectTypeOf<Other>().not.toMatchTypeOf<
+      Parameters<typeof IncidentMapper.to>[0]
+    >();
+
+    const _typeChecks = (other: Other) => {
+      // @ts-expect-error Other is not assignable to IncidentMapper.to
+      IncidentMapper.to(other);
+    };
+    void _typeChecks;
   });
 });

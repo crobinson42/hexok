@@ -19,7 +19,7 @@ A new hire should open a use-case file and understand the business flow without 
 
 ```ts
 class CloseIncident extends ApiUseCase {
-  static readonly id = 'incident.close'
+  static readonly key = 'incident.close'
   static readonly input = z.object({ id: z.string() })
   static readonly output = Incident.schema
   static readonly errors = {

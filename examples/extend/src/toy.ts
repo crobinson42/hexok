@@ -5,7 +5,7 @@ import { DomainEvent, EventCatalog, Port } from '@plinth/domain';
 import { z } from 'zod';
 
 export class LedgerCharged extends DomainEvent {
-  static readonly name = 'ledger.charged';
+  static readonly key = 'ledger.charged';
   static readonly schema = z.object({ amount: z.number() });
   constructor(public readonly payload: Infer<typeof LedgerCharged.schema>) {
     super();
@@ -19,17 +19,17 @@ export const LedgerEvents = new EventCatalog('ledger', { kind: 'bus' }).event(
 export interface Ledger {
   charge(amount: number): Promise<number>;
 }
-export const Ledger = Port.token<Ledger & Transactional<Ledger>>('Ledger');
+export const Ledger = Port.token<Ledger & Transactional<Ledger>>()('Ledger');
 
 export interface RequestIds {
   next(): string;
 }
-export const RequestIds = Port.token<RequestIds & RequestScoped<RequestIds>>(
+export const RequestIds = Port.token<RequestIds & RequestScoped<RequestIds>>()(
   'RequestIds',
 );
 
 export class Charge extends ApiUseCase {
-  static readonly id = 'ledger.charge';
+  static readonly key = 'ledger.charge';
   static readonly policy = 'ledger:charge';
   static readonly input = z.object({ amount: z.number() });
   static readonly output = z.object({ balance: z.number(), id: z.string() });

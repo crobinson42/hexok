@@ -18,7 +18,7 @@ export class InMemoryBroker implements BrokerAdapter {
 
   async publish(envelope: Envelope): Promise<void> {
     this.published.push(envelope);
-    const groups = this.#consumers.get(envelope.name);
+    const groups = this.#consumers.get(envelope.key);
     if (!groups) return;
     for (const consumer of groups.values()) {
       let acked = false;
@@ -36,10 +36,10 @@ export class InMemoryBroker implements BrokerAdapter {
     }
   }
 
-  consume(name: string, group: string, handler: Consumer): void {
-    const groups = this.#consumers.get(name) ?? new Map<string, Consumer>();
+  consume(key: string, group: string, handler: Consumer): void {
+    const groups = this.#consumers.get(key) ?? new Map<string, Consumer>();
     groups.set(group, handler);
-    this.#consumers.set(name, groups);
+    this.#consumers.set(key, groups);
   }
 
   async stop(): Promise<void> {

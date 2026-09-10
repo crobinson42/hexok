@@ -45,7 +45,7 @@ describe('crud-app', () => {
     const { app } = createApp();
     await app.local.incident.close({ id: '1' });
     expect(app.published).toHaveLength(1);
-    expect(app.published[0]?.name).toBe('incident.closed');
+    expect(app.published[0]?.key).toBe('incident.closed');
     await expect(app.local.incident.close({ id: '1' })).rejects.toMatchObject({
       code: 'ALREADY_CLOSED',
     });

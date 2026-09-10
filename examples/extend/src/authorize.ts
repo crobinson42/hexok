@@ -7,7 +7,7 @@ import type { Handler, Interceptor } from '@plinth/runtime';
  * Prefer `errors.FORBIDDEN()` when the use case declared it.
  */
 export class AuthorizeInterceptor implements Interceptor {
-  readonly name = 'authorize';
+  readonly key = 'authorize';
 
   aroundUseCase(uc: UseCaseClass, next: Handler): Handler {
     return async (ctx) => {

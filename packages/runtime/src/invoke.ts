@@ -7,9 +7,9 @@ import {
 } from '@plinth/app';
 import { CodedError, type Infer, validate } from '@plinth/core';
 import type {
+  AnyEventCatalog,
   Envelope,
   EventAdapter,
-  EventCatalog,
   PortToken,
 } from '@plinth/domain';
 import { wrapEvent } from './envelope.js';
@@ -18,7 +18,7 @@ import type { RpcMiddleware } from './middleware.js';
 
 export type InvokeDeps = {
   ports: Map<PortToken<unknown>, unknown>;
-  catalogs: Map<EventCatalog, EventAdapter>;
+  catalogs: Map<AnyEventCatalog, EventAdapter>;
   interceptors: Interceptor[];
   middleware: RpcMiddleware[];
   defaultCtx: unknown;
@@ -120,7 +120,7 @@ function aliasPorts(
   for (const [alias, token] of Object.entries(aliases)) {
     const impl = provided.get(token);
     if (impl === undefined) {
-      throw new Error(`plinth: unprovided port "${token.name}"`);
+      throw new Error(`plinth: unprovided port "${token.key}"`);
     }
     ports[alias] = impl;
   }
@@ -181,7 +181,7 @@ function wrapMiddleware(
         input: executeCtx.input,
         next: () => inner(ctx),
         errors,
-        path: ctor.id,
+        path: ctor.key,
       });
     };
   }
@@ -225,10 +225,10 @@ export async function publishNow(
 
 function adapterFor(
   envelope: Envelope,
-  catalogs: Map<EventCatalog, EventAdapter>,
+  catalogs: Map<AnyEventCatalog, EventAdapter>,
 ): EventAdapter {
   for (const [catalog, adapter] of catalogs) {
-    if (catalog.name === envelope.catalog) return adapter;
+    if (catalog.key === envelope.catalog) return adapter;
   }
   throw new Error(`plinth: unbound catalog "${envelope.catalog}"`);
 }

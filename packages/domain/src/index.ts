@@ -4,7 +4,11 @@ export type {
   Transactional,
   UnitOfWork,
 } from './capabilities.js';
-export { EventCatalog } from './catalog.js';
+export {
+  type AnyEventCatalog,
+  type CatalogEvents,
+  EventCatalog,
+} from './catalog.js';
 export { Entity, type EntityConstructor } from './entity.js';
 export type {
   BrokerAdapter,

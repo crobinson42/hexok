@@ -1,7 +1,19 @@
 import type { UseCaseClass } from '@plinth/app';
 import type { Envelope, PortToken } from '@plinth/domain';
 
-export type Handler = (ctx: never) => Promise<unknown>;
+/** Structural execute/event ctx so interceptors can wrap `next` without `as never`. */
+export type HandlerCtx = {
+  ports: Record<string, unknown>;
+  ctx: unknown;
+  errors: Record<string, (data?: unknown) => never>;
+  signal: AbortSignal;
+  publish(event: unknown): void;
+  input?: unknown;
+  event?: unknown;
+  attempt?: number;
+};
+
+export type Handler = (ctx: HandlerCtx) => Promise<unknown>;
 
 /**
  * Extension seam. First registered is **outer**.
@@ -9,7 +21,7 @@ export type Handler = (ctx: never) => Promise<unknown>;
  *
  * ```ts
  * class AuthorizeInterceptor implements Interceptor {
- *   readonly name = 'authorize'
+ *   readonly key = 'authorize'
  *   aroundUseCase(uc, next) {
  *     return async (ctx) => {
  *       const policy = (uc as { policy?: string }).policy
@@ -25,7 +37,7 @@ export type Handler = (ctx: never) => Promise<unknown>;
  * commit naturally yields after-commit publish.
  */
 export interface Interceptor {
-  readonly name: string;
+  readonly key: string;
   aroundUseCase?(uc: UseCaseClass, next: Handler): Handler;
   aroundAdapter?(port: PortToken<unknown>, impl: unknown): unknown;
   aroundPublish?(envelope: Envelope, next: () => Promise<void>): Promise<void>;
@@ -44,7 +56,7 @@ export function requireCapability(
 ): void {
   if (typeof (impl as { [k: string]: unknown })[method] !== 'function') {
     throw new Error(
-      `plinth: ${token.name} is ${label.toLowerCase()} but the adapter does not implement ${label}`,
+      `plinth: ${token.key} is ${label.toLowerCase()} but the adapter does not implement ${label}`,
     );
   }
 }

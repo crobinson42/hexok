@@ -4,7 +4,7 @@ import { incidentSchema } from '../domain/incident.js';
 import { IncidentRepository } from '../ports.js';
 
 export class UpdateIncident extends ApiUseCase {
-  static readonly id = 'incident.update';
+  static readonly key = 'incident.update';
   static readonly input = z.object({ id: z.string(), title: z.string() });
   static readonly output = incidentSchema;
   static readonly errors = {

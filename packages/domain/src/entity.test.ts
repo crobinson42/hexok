@@ -11,7 +11,7 @@ const incidentSchema = z.object({
 type IncidentProps = Infer<typeof incidentSchema>;
 
 class Incident extends Entity<IncidentProps> {
-  static readonly type = 'Incident';
+  static readonly key = 'Incident';
   static readonly schema = incidentSchema;
   static readonly errors = {
     ALREADY_CLOSED: { status: 409, message: 'Incident already closed' },

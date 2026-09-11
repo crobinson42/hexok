@@ -1,4 +1,4 @@
-import { Port } from 'plinth/domain';
+import { Port } from 'kerf/domain';
 import type { User } from '../../../domain/entities/index.js';
 
 export interface UserRepository {

@@ -1,4 +1,4 @@
-import { Port } from 'plinth/domain';
+import { Port } from 'kerf/domain';
 
 export interface PasswordHasher {
   verify(password: string, passwordHash: string): Promise<boolean>;

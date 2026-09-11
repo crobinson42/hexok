@@ -1,4 +1,4 @@
-import { ApiUseCase, type ExecuteCtx } from 'plinth/app';
+import { ApiUseCase, type ExecuteCtx } from 'kerf/app';
 import { z } from 'zod';
 import { actorSchema } from '../../../domain/schemas/actor.js';
 import { UserCredentialsRepository } from '../../ports/repos/user-credentials-repo.js';

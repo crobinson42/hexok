@@ -1,6 +1,6 @@
-import type { UseCaseClass } from 'plinth/app';
-import { CodedError } from 'plinth/core';
-import type { Handler, Interceptor } from 'plinth/runtime';
+import type { UseCaseClass } from 'kerf/app';
+import { CodedError } from 'kerf/core';
+import type { Handler, Interceptor } from 'kerf/runtime';
 
 /**
  * Reads `static policy`. Missing policy → skip.

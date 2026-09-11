@@ -5,7 +5,7 @@ sidebar:
   order: 0
 ---
 
-`plinth/runtime` boots the app. `App.from(useCases)` is the composition root. `provide` ports, `bind` catalogs, then `build()`.
+`kerf/runtime` boots the app. `App.from(useCases)` is the composition root. `provide` ports, `bind` catalogs, then `build()`.
 
 `build()` is not callable until every required port and catalog is provided — at compile time and at runtime.
 

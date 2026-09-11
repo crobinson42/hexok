@@ -5,7 +5,7 @@ sidebar:
   order: 0
 ---
 
-`plinth/testing` is test-only: `App.test` plus in-memory fakes. Completeness is the same as production. `published` captures envelopes after `aroundPublish`.
+`kerf/testing` is test-only: `App.test` plus in-memory fakes. Completeness is the same as production. `published` captures envelopes after `aroundPublish`.
 
 - [App.test](/testing/app-test/) — `published` and `as(ctx)`
 - [InMemoryRepository](/testing/in-memory-repository/) — CRUD fake

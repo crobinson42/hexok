@@ -4,7 +4,7 @@ import { defineConfig } from 'astro/config';
 export default defineConfig({
   integrations: [
     starlight({
-      title: 'Plinth',
+      title: 'Kerf',
       description:
         'A TypeScript kit for writing a clean-architecture backend as ordinary classes.',
       sidebar: [

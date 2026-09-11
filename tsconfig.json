@@ -1,7 +1,7 @@
 {
   "files": [],
   "references": [
-    { "path": "packages/plinth" },
+    { "path": "packages/kerf" },
     { "path": "examples/crud-app" },
     { "path": "examples/extend" },
     { "path": "examples/app-template/backend" }

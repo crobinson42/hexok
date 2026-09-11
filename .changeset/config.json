@@ -7,5 +7,5 @@
   "access": "public",
   "baseBranch": "main",
   "updateInternalDependencies": "patch",
-  "ignore": ["@plinth/crud-app", "@plinth/extend", "@plinth/docs"]
+  "ignore": ["@kerf/crud-app", "@kerf/extend", "@kerf/docs"]
 }

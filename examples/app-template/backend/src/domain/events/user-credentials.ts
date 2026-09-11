@@ -1,5 +1,5 @@
-import type { Infer } from 'plinth/core';
-import { DomainEvent } from 'plinth/domain';
+import type { Infer } from 'kerf/core';
+import { DomainEvent } from 'kerf/domain';
 import { userCredentialsSchema } from '../entities/user-credentials.js';
 
 export class UserCredentialsCreated extends DomainEvent {

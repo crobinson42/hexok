@@ -1,4 +1,4 @@
-import { Port } from 'plinth/domain';
+import { Port } from 'kerf/domain';
 import type { Actor } from '../../../domain/schemas/actor.js';
 
 export interface AuthTokenService {

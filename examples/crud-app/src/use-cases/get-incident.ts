@@ -1,4 +1,4 @@
-import { ApiUseCase, type ExecuteCtx } from 'plinth/app';
+import { ApiUseCase, type ExecuteCtx } from 'kerf/app';
 import { z } from 'zod';
 import { incidentSchema } from '../domain/incident.js';
 import { IncidentRepository } from '../ports.js';

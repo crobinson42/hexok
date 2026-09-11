@@ -1,4 +1,4 @@
-# Plinth
+# Kerf
 
 A TypeScript kit for writing a clean-architecture backend as **ordinary classes**: Entity, Port, Adapter, UseCase, Event, Interceptor.
 
@@ -7,28 +7,28 @@ A new hire should open a use-case file and understand the business flow without 
 ## Install
 
 ```bash
-npm i plinth
+npm i kerf
 ```
 
 Import from a layer. There is no root barrel — that keeps the public API aligned with the architecture.
 
 ```ts
-import { Entity } from 'plinth/domain'
-import { ApiUseCase } from 'plinth/app'
-import { App } from 'plinth/runtime'
-import { App as TestApp, InMemoryRepository } from 'plinth/testing'
+import { Entity } from 'kerf/domain'
+import { ApiUseCase } from 'kerf/app'
+import { App } from 'kerf/runtime'
+import { App as TestApp, InMemoryRepository } from 'kerf/testing'
 ```
 
 | Import | What it is |
 | --- | --- |
-| `plinth/core` | `Result`, Standard Schema V1, `ErrorMap` |
-| `plinth/domain` | `Entity`, `DeepReadonly`, `Port`, `EventCatalog`, `DomainEvent` |
-| `plinth/app` | `ApiUseCase`, `EventUseCase`, contract derivation |
-| `plinth/infra` | `Mapper` (entity ↔ row), `Adapter.of` |
-| `plinth/runtime` | `App.from` composition, completeness, interceptors, local client, HTTP |
-| `plinth/testing` | Test-only: `App.test`, in-memory repo/bus/broker, `published` |
+| `kerf/core` | `Result`, Standard Schema V1, `ErrorMap` |
+| `kerf/domain` | `Entity`, `DeepReadonly`, `Port`, `EventCatalog`, `DomainEvent` |
+| `kerf/app` | `ApiUseCase`, `EventUseCase`, contract derivation |
+| `kerf/infra` | `Mapper` (entity ↔ row), `Adapter.of` |
+| `kerf/runtime` | `App.from` composition, completeness, interceptors, local client, HTTP |
+| `kerf/testing` | Test-only: `App.test`, in-memory repo/bus/broker, `published` |
 
-Concept docs: `npm run dev -w @plinth/docs`.
+Concept docs: `npm run dev -w @kerf/docs`.
 
 ## Write a use case
 
@@ -100,4 +100,4 @@ Subclass + typed statics + interceptors. See `examples/extend`: authorize, reque
 
 - [`examples/crud-app`](examples/crud-app) — golden path. Read `CloseIncident`.
 - [`examples/extend`](examples/extend) — copy-paste interceptors.
-- [`examples/app-template`](examples/app-template) — Astro client + empty plinth backend.
+- [`examples/app-template`](examples/app-template) — Astro client + empty kerf backend.

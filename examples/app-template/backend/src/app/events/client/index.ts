@@ -1,4 +1,4 @@
-import { EventCatalog } from 'plinth/domain';
+import { EventCatalog } from 'kerf/domain';
 import type { ClientCtx } from '../../../domain/schemas/client-ctx.js';
 import { ApiKeyCreated, ApiKeyDeleted } from './api-key.js';
 import { OrganizationCreated } from './organization.js';

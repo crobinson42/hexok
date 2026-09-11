@@ -1,11 +1,11 @@
 ---
-title: Plinth
+title: Kerf
 description: A TypeScript kit for writing a clean-architecture backend as ordinary classes.
 ---
 
-Plinth is a TypeScript kit for a clean-architecture backend as **ordinary classes**: Entity, Port, Adapter, UseCase, Event, Interceptor.
+Kerf is a TypeScript kit for a clean-architecture backend as **ordinary classes**: Entity, Port, Adapter, UseCase, Event, Interceptor.
 
-Install one package and import a layer: `plinth/core`, `plinth/domain`, `plinth/app`, `plinth/infra`, `plinth/runtime`, `plinth/testing`.
+Install one package and import a layer: `kerf/core`, `kerf/domain`, `kerf/app`, `kerf/infra`, `kerf/runtime`, `kerf/testing`.
 
 A new hire should open a use-case file and understand the business flow without a glossary of hidden methods, phantom fields, or `meta` bags.
 

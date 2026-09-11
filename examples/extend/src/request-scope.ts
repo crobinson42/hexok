@@ -1,10 +1,10 @@
-import type { UseCaseClass } from 'plinth/app';
-import type { PortToken } from 'plinth/domain';
+import type { UseCaseClass } from 'kerf/app';
+import type { PortToken } from 'kerf/domain';
 import {
   type Handler,
   type Interceptor,
   requireCapability,
-} from 'plinth/runtime';
+} from 'kerf/runtime';
 
 /**
  * Ports that `implements RequestScoped` are `fork()`ed per call.

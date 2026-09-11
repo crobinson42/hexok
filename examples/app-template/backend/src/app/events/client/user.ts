@@ -1,5 +1,5 @@
-import type { Infer } from 'plinth/core';
-import { DomainEvent } from 'plinth/domain';
+import type { Infer } from 'kerf/core';
+import { DomainEvent } from 'kerf/domain';
 import { userSchema } from '../../../domain/entities/user.js';
 import type { ClientCtx } from '../../../domain/schemas/client-ctx.js';
 

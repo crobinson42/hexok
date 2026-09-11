@@ -1,4 +1,4 @@
-import { Port } from 'plinth/domain';
+import { Port } from 'kerf/domain';
 import type { Organization } from '../../../domain/entities/index.js';
 
 export interface OrganizationRepository {

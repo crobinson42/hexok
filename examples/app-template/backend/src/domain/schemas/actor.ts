@@ -1,4 +1,4 @@
-import type { Infer } from 'plinth/core';
+import type { Infer } from 'kerf/core';
 import { z } from 'zod';
 
 export const actorSchema = z.discriminatedUnion('type', [

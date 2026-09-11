@@ -1,4 +1,4 @@
-import { ApiUseCase, type ExecuteCtx } from 'plinth/app';
+import { ApiUseCase, type ExecuteCtx } from 'kerf/app';
 import { z } from 'zod';
 import { userCredentialsSchema } from '../../../domain/entities/user-credentials.js';
 import { DomainEvents } from '../../../domain/events/index.js';

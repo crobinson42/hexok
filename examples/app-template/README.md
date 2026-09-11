@@ -1,7 +1,7 @@
 # App template
 
-Astro client + empty plinth backend. Scaffold only.
+Astro client + empty kerf backend. Scaffold only.
 
 ```bash
-npm run dev -w @plinth/app-template
+npm run dev -w @kerf/app-template
 ```

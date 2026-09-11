@@ -1,5 +1,5 @@
-import type { Infer } from 'plinth/core';
-import { Entity } from 'plinth/domain';
+import type { Infer } from 'kerf/core';
+import { Entity } from 'kerf/domain';
 import { z } from 'zod';
 
 export const organizationSchema = z.object({

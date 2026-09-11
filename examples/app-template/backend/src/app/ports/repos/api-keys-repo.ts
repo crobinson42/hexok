@@ -1,4 +1,4 @@
-import { Port } from 'plinth/domain';
+import { Port } from 'kerf/domain';
 import type { ApiKey } from '../../../domain/entities/index.js';
 
 export interface ApiKeyRepository {

@@ -1,5 +1,5 @@
 {
-  "name": "@plinth/extend",
+  "name": "@kerf/extend",
   "version": "0.0.1",
   "private": true,
   "type": "module",
@@ -11,7 +11,7 @@
     "clean": "rm -rf dist *.tsbuildinfo"
   },
   "dependencies": {
-    "plinth": "*",
+    "kerf": "*",
     "zod": "^4.1.5"
   }
 }

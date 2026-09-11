@@ -5,7 +5,7 @@ sidebar:
   order: 4
 ---
 
-Plinth uses [Standard Schema V1](https://standardschema.dev/). Zod (and other libraries that implement `~standard`) work as `input` / `output` / entity `schema`.
+Kerf uses [Standard Schema V1](https://standardschema.dev/). Zod (and other libraries that implement `~standard`) work as `input` / `output` / entity `schema`.
 
 `validate` is **sync only**. Issues collapse to `'VALIDATION'` — the domain trust boundary is binary. Async schemas belong at the RPC boundary and throw.
 

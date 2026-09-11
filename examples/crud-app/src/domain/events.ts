@@ -1,5 +1,5 @@
-import type { Infer } from 'plinth/core';
-import { DomainEvent, EventCatalog } from 'plinth/domain';
+import type { Infer } from 'kerf/core';
+import { DomainEvent, EventCatalog } from 'kerf/domain';
 import { z } from 'zod';
 
 export class IncidentClosed extends DomainEvent {

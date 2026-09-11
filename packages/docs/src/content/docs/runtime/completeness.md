@@ -5,7 +5,7 @@ sidebar:
   order: 2
 ---
 
-Completeness is the point of `AppBuilder`. Until every required port and catalog is provided, `build` is a string (a `plinth:` sentence), not a function.
+Completeness is the point of `AppBuilder`. Until every required port and catalog is provided, `build` is a string (a `kerf:` sentence), not a function.
 
 The same sentences throw at runtime if you bypass the type. Duplicate tokens and catalogs also error.
 

@@ -1,4 +1,4 @@
-import { Port } from 'plinth/domain';
+import { Port } from 'kerf/domain';
 
 export interface EmailService {
   send(message: { to: string; subject: string; body: string }): Promise<void>;

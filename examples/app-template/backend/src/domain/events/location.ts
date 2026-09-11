@@ -1,5 +1,5 @@
-import type { Infer } from 'plinth/core';
-import { DomainEvent } from 'plinth/domain';
+import type { Infer } from 'kerf/core';
+import { DomainEvent } from 'kerf/domain';
 import { locationSchema } from '../entities/location.js';
 
 export class LocationCreated extends DomainEvent {

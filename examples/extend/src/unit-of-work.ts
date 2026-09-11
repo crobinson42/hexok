@@ -1,10 +1,10 @@
-import type { UseCaseClass } from 'plinth/app';
-import type { Envelope, PortToken, UnitOfWork } from 'plinth/domain';
+import type { UseCaseClass } from 'kerf/app';
+import type { Envelope, PortToken, UnitOfWork } from 'kerf/domain';
 import {
   type Handler,
   type Interceptor,
   requireCapability,
-} from 'plinth/runtime';
+} from 'kerf/runtime';
 
 /**
  * Opens `{ onCommit, onRollback }`, `bindTo(uow)` on transactional ports,

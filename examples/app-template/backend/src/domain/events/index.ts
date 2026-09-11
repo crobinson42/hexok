@@ -1,4 +1,4 @@
-import { EventCatalog } from 'plinth/domain';
+import { EventCatalog } from 'kerf/domain';
 import { ApiKeyCreated, ApiKeyDeleted, ApiKeyUpdated } from './api-key.js';
 import {
   LocationCreated,

@@ -15,8 +15,7 @@
     "url": "https://github.com/crobinson42/hexok/issues"
   },
   "publishConfig": {
-    "access": "public",
-    "provenance": true
+    "access": "public"
   },
   "exports": {
     "./core": {

@@ -9,18 +9,22 @@ export {
   type CatalogEvents,
   EventCatalog,
 } from './catalog.js';
+export type {
+  ChannelAdapter,
+  ChannelConnection,
+} from './channel.js';
 export {
   type DeepReadonly,
   Entity,
   type EntityConstructor,
 } from './entity.js';
 export type {
-  BrokerAdapter,
-  BrokerConsumeCtx,
   BusAdapter,
   CatalogKind,
   Envelope,
   EventAdapter,
+  QueueAdapter,
+  QueueConsumeCtx,
 } from './envelope.js';
 export {
   DomainEvent,

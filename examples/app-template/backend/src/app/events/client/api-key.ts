@@ -2,7 +2,7 @@ import type { Infer } from 'hexok/core';
 import { DomainEvent } from 'hexok/domain';
 import { z } from 'zod';
 import { apiKeySchema } from '../../../domain/entities/api-key.js';
-import type {ClientEventCtx} from "../../context.js";
+import type { ClientEventCtx } from '../../context.js';
 
 export class ApiKeyCreated extends DomainEvent {
   static readonly key = 'apiKey.created';

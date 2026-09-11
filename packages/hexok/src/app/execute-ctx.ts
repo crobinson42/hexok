@@ -7,6 +7,7 @@ import type {
   EventClass,
   EventPayload,
 } from '../domain/index.js';
+import type { ChannelProps } from './event-channel.js';
 import type { ApiUseCaseCtor, ErrorFactories, ResolvedPorts } from './types.js';
 
 /**
@@ -49,6 +50,7 @@ export type ExecuteCtx<C, Ctx = unknown> = {
     ? PublishFor<C>
     : Publish;
   run: Run;
+  channels: ChannelProps<C>;
 };
 
 type EventOn<C> = C extends { on: infer E extends EventClass } ? E : EventClass;
@@ -96,7 +98,8 @@ export type EventCtx<C, Ctx = unknown> = {
     ? PublishFor<C>
     : Publish;
   run: Run;
-} & (CatalogKindOf<C> extends 'broker'
+  channels: ChannelProps<C>;
+} & (CatalogKindOf<C> extends 'queue'
   ? { attempt: number }
   : { attempt?: number });
 

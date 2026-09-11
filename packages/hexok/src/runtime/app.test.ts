@@ -6,7 +6,7 @@ import {
   EventUseCase,
   type ExecuteCtx,
 } from '../app/index.js';
-import type { BrokerAdapter, BusAdapter } from '../domain/index.js';
+import type { BusAdapter, QueueAdapter } from '../domain/index.js';
 import {
   DomainEvent,
   type Envelope,
@@ -420,13 +420,13 @@ describe('App type constraints', () => {
       builder.provide(Clock, 'nope');
       // @ts-expect-error Clock is already provided
       builder.provide(Clock, clock);
-      const broker: BrokerAdapter = {
-        kind: 'broker',
+      const queue: QueueAdapter = {
+        kind: 'queue',
         publish: async () => {},
         consume: () => {},
       };
-      // @ts-expect-error broker adapter is not a bus
-      builder.bind(DomainEvents, broker);
+      // @ts-expect-error queue adapter is not a bus
+      builder.bind(DomainEvents, queue);
     };
     void _typeChecks;
 

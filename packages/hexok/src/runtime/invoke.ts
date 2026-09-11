@@ -23,6 +23,7 @@ export type InvokeDeps = {
   middleware: RpcMiddleware[];
   defaultCtx: unknown;
   onFlush?: (envelope: Envelope) => void;
+  channels?: Record<string, unknown>;
 };
 
 type SharedInvoke = {
@@ -66,6 +67,7 @@ async function runNested(
     signal: shared.signal,
     publish,
     run,
+    channels: aliasChannels(ctor.channels, deps.channels),
   };
   const instance = constructUseCase(ctor);
   return instance.execute(ctx as never) as Promise<unknown>;
@@ -104,6 +106,7 @@ export async function invokeApi(
     signal: shared.signal,
     publish,
     run,
+    channels: aliasChannels(ctor.channels, deps.channels),
   };
 
   const instance = constructUseCase(ctor);
@@ -152,6 +155,7 @@ export async function invokeEvent(
     signal: shared.signal,
     publish,
     run,
+    channels: aliasChannels(ctor.channels, deps.channels),
     ...(opts?.attempt !== undefined ? { attempt: opts.attempt } : {}),
   };
   const instance = constructUseCase(ctor);
@@ -173,7 +177,7 @@ function constructUseCase<T>(ctor: { prototype: T }): T {
   return new (ctor as unknown as new () => T)();
 }
 
-function aliasPorts(
+export function aliasPorts(
   aliases: Record<string, PortToken<unknown>>,
   provided: Map<PortToken<unknown>, unknown>,
 ): Record<string, unknown> {
@@ -282,6 +286,23 @@ export async function publishNow(
   deps: InvokeDeps,
 ): Promise<void> {
   await flush([envelope], deps);
+}
+
+function aliasChannels(
+  declared: readonly { catalog: { key: string } }[] | undefined,
+  all: Record<string, unknown> | undefined,
+): Record<string, unknown> {
+  if (!declared || declared.length === 0) return {};
+  const out: Record<string, unknown> = {};
+  for (const ctor of declared) {
+    const key = ctor.catalog.key;
+    const handle = all?.[key];
+    if (handle === undefined) {
+      throw new Error(`hexok: unrouted channel "${key}"`);
+    }
+    out[key] = handle;
+  }
+  return out;
 }
 
 function adapterFor(

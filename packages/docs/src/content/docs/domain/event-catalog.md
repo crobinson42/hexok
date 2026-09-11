@@ -1,11 +1,11 @@
 ---
 title: EventCatalog
-description: Registry of event classes. kind is bus (fire-and-forget pub/sub) or broker (acked).
+description: Registry of event classes. kind is bus (fan-out) or queue (work once).
 sidebar:
   order: 5
 ---
 
-`EventCatalog` is a registry of event classes. `kind` is `'bus'` (pub/sub, fire-and-forget, no persistence) or `'broker'` (acked consume with groups). `.event()` accumulates each class on the covariant `Events` generic.
+`EventCatalog` is a registry of event classes. `kind` is `'bus'` (fan-out, fire-and-forget, no persistence) or `'queue'` (work queue: one consumer in a group, ack/nack). `.event()` accumulates each class on the covariant `Events` generic.
 
 Use-case convention: `static publishes = [DomainEvents] as const`. Without `as const`, `Events` widens and `publish` loses its type.
 
@@ -25,8 +25,8 @@ const ClientEvents = new EventCatalog('client', { kind: 'bus' })
   .event(ChatSaid)
 ```
 
-Channels are catalogs: a second websocket or a webhook feed is another catalog with its own `.ctx<T>()` and `.bind`.
+A second websocket or webhook feed is another catalog with its own `.ctx<T>()` and `.bind`. Client delivery uses an [EventChannel](/application/event-channel/) on a **bus** catalog — not a third `kind`.
 
 `bind(DomainEvents, adapter)` freezes the catalog. Duplicate keys throw.
 
-See also: [DomainEvent](/domain/domain-event/), [BusAdapter](/domain/bus-adapter/), [BrokerAdapter](/domain/broker-adapter/).
+See also: [DomainEvent](/domain/domain-event/), [BusAdapter](/domain/bus-adapter/), [QueueAdapter](/domain/queue-adapter/), [EventChannel](/application/event-channel/).

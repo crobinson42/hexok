@@ -7,6 +7,15 @@ export {
   type UseCaseRoute,
 } from './contract.js';
 export { errorFactories } from './error-factory.js';
+export {
+  type ChannelControl,
+  type ChannelProps,
+  type ChannelSession,
+  EventChannel,
+  type JoinCtx,
+  type RefreshCtx,
+  type RouteCtx,
+} from './event-channel.js';
 export { EventUseCase } from './event-use-case.js';
 export type {
   EventCtx,
@@ -20,6 +29,7 @@ export {
   type AsUseCaseBag,
   type CheckUseCase,
   type ErrorFactories,
+  type EventChannelCtor,
   type EventUseCaseCtor,
   isApiUseCase,
   isEventUseCase,

@@ -1,23 +1,23 @@
 import type {
-  BrokerAdapter,
-  BrokerConsumeCtx,
   Envelope,
+  QueueAdapter,
+  QueueConsumeCtx,
 } from '../domain/index.js';
 
-type Consumer = (envelope: Envelope, ctx: BrokerConsumeCtx) => Promise<void>;
+type Consumer = (envelope: Envelope, ctx: QueueConsumeCtx) => Promise<void>;
 
 /**
- * In-process broker. `consume` dispatches with attempt; ack/nack are no-ops
+ * In-process queue. `consume` dispatches with attempt; ack/nack are no-ops
  * besides recording. `stop()` clears consumers.
  */
-export class InMemoryBroker implements BrokerAdapter {
-  readonly kind = 'broker' as const;
+export class InMemoryQueue implements QueueAdapter {
+  readonly kind = 'queue' as const;
   readonly published: Envelope[] = [];
   #consumers = new Map<string, Map<string, Consumer>>();
   attempts = 1;
 
-  static create(): InMemoryBroker {
-    return new InMemoryBroker();
+  static create(): InMemoryQueue {
+    return new InMemoryQueue();
   }
 
   async publish(envelope: Envelope): Promise<void> {
@@ -26,7 +26,7 @@ export class InMemoryBroker implements BrokerAdapter {
     if (!groups) return;
     for (const consumer of groups.values()) {
       let acked = false;
-      const ctx: BrokerConsumeCtx = {
+      const ctx: QueueConsumeCtx = {
         attempt: this.attempts,
         ack: async () => {
           acked = true;

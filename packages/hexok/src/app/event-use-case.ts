@@ -1,8 +1,9 @@
 import { CodedError, type ErrorMap, type Result } from '../core/index.js';
 import type { AnyEventCatalog, EventClass } from '../domain/index.js';
+import type { EventChannelCtor } from './types.js';
 
 /**
- * Event handler. Mutually exclusive with `ApiUseCase`. Broker catalogs
+ * Event handler. Mutually exclusive with `ApiUseCase`. Queue catalogs
  * require `static group`.
  *
  * ```ts
@@ -23,6 +24,7 @@ export abstract class EventUseCase {
   static readonly catalog?: AnyEventCatalog;
   static readonly group?: string;
   static readonly publishes?: readonly AnyEventCatalog[];
+  static readonly channels?: readonly EventChannelCtor[];
   static readonly errors: ErrorMap = {};
   static readonly middleware?: readonly unknown[];
 

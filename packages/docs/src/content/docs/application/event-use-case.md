@@ -1,11 +1,11 @@
 ---
 title: EventUseCase
-description: Event handler. Mutually exclusive with ApiUseCase. Broker catalogs require static group.
+description: Event handler. Mutually exclusive with ApiUseCase. Queue catalogs require static group.
 sidebar:
   order: 2
 ---
 
-`EventUseCase` is an event handler. It is mutually exclusive with `ApiUseCase`. Declare `on` (the event class) and `catalog`. Broker catalogs require `static group`. The runtime constructs the class; do not `new` it.
+`EventUseCase` is an event handler. It is mutually exclusive with `ApiUseCase`. Declare `on` (the event class) and `catalog`. Queue catalogs require `static group`. The runtime constructs the class; do not `new` it.
 
 Handlers do **not** run until [`app.start()`](/runtime/start-stop/).
 

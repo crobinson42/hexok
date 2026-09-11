@@ -1,6 +1,13 @@
-import type { AsUseCaseBag, CheckUseCase, UseCaseBag } from '../app/index.js';
+import type {
+  AsUseCaseBag,
+  ChannelSession,
+  CheckUseCase,
+  EventChannelCtor,
+  UseCaseBag,
+} from '../app/index.js';
 import type {
   CatalogKind,
+  ChannelAdapter,
   Envelope,
   EventCatalog,
   EventClass,
@@ -10,7 +17,9 @@ import {
   type AdapterFor,
   type AppBuilder,
   type AppInstance,
+  type ChannelKindError,
   type DuplicateCatalogError,
+  type DuplicateChannelError,
   type DuplicatePortError,
   type Interceptor,
   type MissingMessages,
@@ -22,22 +31,41 @@ import {
 export type TestAppInstance<
   Bag extends UseCaseBag,
   Ctx = unknown,
-> = AppInstance<Bag, Ctx> & {
+  Routed = never,
+> = AppInstance<Bag, Ctx, Routed> & {
   published: Envelope[];
   as: (ctx: Ctx) => NestedClient<Bag, Ctx>;
 };
+
+type ChannelCatalogKind<C> = C extends {
+  catalog: EventCatalog<string, infer Kind, infer _E, infer _Ctx>;
+}
+  ? Kind
+  : CatalogKind;
+
+type ChannelCatalogKey<C> = C extends {
+  catalog: EventCatalog<
+    infer K extends string,
+    infer _Kind,
+    infer _E,
+    infer _Ctx
+  >;
+}
+  ? K
+  : string;
 
 export class TestAppBuilder<
   Bag extends UseCaseBag,
   Provided = never,
   Bound = never,
   Ctx = unknown,
+  Routed = never,
 > {
-  readonly #inner: AppBuilder<Bag, Provided, Bound, Ctx>;
+  readonly #inner: AppBuilder<Bag, Provided, Bound, Ctx, Routed>;
   readonly #published: Envelope[];
 
   private constructor(
-    inner: AppBuilder<Bag, Provided, Bound, Ctx>,
+    inner: AppBuilder<Bag, Provided, Bound, Ctx, Routed>,
     published: Envelope[],
   ) {
     this.#inner = inner;
@@ -63,10 +91,10 @@ export class TestAppBuilder<
       ? DuplicatePortError
       : PortToken<I>,
     impl: I,
-  ): TestAppBuilder<Bag, Provided | PortToken<I>, Bound, Ctx> {
+  ): TestAppBuilder<Bag, Provided | PortToken<I>, Bound, Ctx, Routed> {
     const next = this.#inner.provide(token as never, impl);
     return new TestAppBuilder(
-      next as AppBuilder<Bag, Provided | PortToken<I>, Bound, Ctx>,
+      next as AppBuilder<Bag, Provided | PortToken<I>, Bound, Ctx, Routed>,
       this.#published,
     );
   }
@@ -85,7 +113,8 @@ export class TestAppBuilder<
     Bag,
     Provided,
     Bound | EventCatalog<Key, Kind, Events, CatCtx>,
-    Ctx
+    Ctx,
+    Routed
   > {
     const next = this.#inner.bind(catalog as never, adapter);
     return new TestAppBuilder(
@@ -93,13 +122,29 @@ export class TestAppBuilder<
         Bag,
         Provided,
         Bound | EventCatalog<Key, Kind, Events, CatCtx>,
-        Ctx
+        Ctx,
+        Routed
       >,
       this.#published,
     );
   }
 
-  ctx<C>(defaults?: C): TestAppBuilder<Bag, Provided, Bound, C> {
+  route<C extends EventChannelCtor>(
+    channel: ChannelCatalogKind<C> extends 'bus'
+      ? [C] extends [Routed]
+        ? DuplicateChannelError<ChannelCatalogKey<C>>
+        : C
+      : ChannelKindError<ChannelCatalogKey<C>, ChannelCatalogKind<C> & string>,
+    adapter: ChannelAdapter<ChannelSession<C>>,
+  ): TestAppBuilder<Bag, Provided, Bound, Ctx, Routed | C> {
+    const next = this.#inner.route(channel as never, adapter);
+    return new TestAppBuilder(
+      next as AppBuilder<Bag, Provided, Bound, Ctx, Routed | C>,
+      this.#published,
+    );
+  }
+
+  ctx<C>(defaults?: C): TestAppBuilder<Bag, Provided, Bound, C, Routed> {
     const next = this.#inner.ctx(defaults);
     return new TestAppBuilder(next, this.#published);
   }
@@ -114,23 +159,25 @@ export class TestAppBuilder<
     return this;
   }
 
-  get build(): [MissingMessages<Bag, Provided, Bound>] extends [never]
-    ? () => TestAppInstance<Bag, Ctx>
-    : MissingMessages<Bag, Provided, Bound> {
+  get build(): [MissingMessages<Bag, Provided, Bound, Routed>] extends [never]
+    ? () => TestAppInstance<Bag, Ctx, Routed>
+    : MissingMessages<Bag, Provided, Bound, Routed> {
     const published = this.#published;
     return (() => {
       const app = (
-        this.#inner as unknown as { build: () => AppInstance<Bag, Ctx> }
+        this.#inner as unknown as {
+          build: () => AppInstance<Bag, Ctx, Routed>;
+        }
       ).build();
       return Object.assign(app, {
         published,
         as: (ctx: Ctx) => rebindLocal(app.local, ctx) as NestedClient<Bag, Ctx>,
       });
-    }) as () => TestAppInstance<Bag, Ctx> as [
-      MissingMessages<Bag, Provided, Bound>,
+    }) as () => TestAppInstance<Bag, Ctx, Routed> as [
+      MissingMessages<Bag, Provided, Bound, Routed>,
     ] extends [never]
-      ? () => TestAppInstance<Bag, Ctx>
-      : MissingMessages<Bag, Provided, Bound>;
+      ? () => TestAppInstance<Bag, Ctx, Routed>
+      : MissingMessages<Bag, Provided, Bound, Routed>;
   }
 }
 

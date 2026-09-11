@@ -18,4 +18,4 @@ interface BusAdapter {
 
 Tests use [InMemoryBus](/testing/in-memory-bus/).
 
-See also: [BrokerAdapter](/domain/broker-adapter/), [EventCatalog](/domain/event-catalog/).
+See also: [QueueAdapter](/domain/queue-adapter/), [EventCatalog](/domain/event-catalog/).

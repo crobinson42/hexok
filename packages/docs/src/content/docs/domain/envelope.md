@@ -14,7 +14,7 @@ type Envelope = {
   key: string
   payload: unknown
   catalog: string
-  kind: 'bus' | 'broker'
+  kind: 'bus' | 'queue'
   occurredAt: Date
   ctx?: unknown
   correlationId?: string

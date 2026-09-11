@@ -29,7 +29,7 @@ import { App as TestApp, InMemoryRepository } from 'hexok/testing'
 | `hexok/app` | `ApiUseCase`, `EventUseCase`, contract derivation |
 | `hexok/infra` | `Mapper` (entity ↔ row), `Adapter.of` |
 | `hexok/runtime` | `App.from` composition, completeness, interceptors, local client, HTTP |
-| `hexok/testing` | Test-only: `App.test`, in-memory repo/bus/broker, `published` |
+| `hexok/testing` | Test-only: `App.test`, in-memory repo/bus/queue/channel, `published` |
 
 Concept docs: `npm run dev -w @hexok/docs`.
 

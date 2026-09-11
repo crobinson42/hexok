@@ -11,6 +11,7 @@ The entity owns the rule. The use case loads, calls the entity, saves, publishes
 
 - [ApiUseCase](/application/api-use-case/) — request/response
 - [EventUseCase](/application/event-use-case/) — event handler
+- [EventChannel](/application/event-channel/) — join, refresh, route to live sessions
 - [ExecuteCtx](/application/execute-ctx/) — typed `execute` argument
 - [Error factories](/application/error-factories/) — `errors.NOT_FOUND()`
 - [unwrap](/application/unwrap/) — Result → value or throw

@@ -66,6 +66,7 @@ export interface ApiUseCaseCtor {
   readonly errors: ErrorMap;
   readonly ports: Record<string, PortToken<unknown>>;
   readonly publishes?: readonly AnyEventCatalog[];
+  readonly channels?: readonly EventChannelCtor[];
   readonly middleware?: readonly unknown[];
   readonly internal?: boolean;
   readonly prototype: { execute(ctx: never): Promise<unknown> };
@@ -79,9 +80,23 @@ export interface EventUseCaseCtor {
   readonly group?: string;
   readonly ports?: Record<string, PortToken<unknown>>;
   readonly publishes?: readonly AnyEventCatalog[];
+  readonly channels?: readonly EventChannelCtor[];
   readonly errors?: ErrorMap;
   readonly middleware?: readonly unknown[];
   readonly prototype: { execute(ctx: never): Promise<void> };
+}
+
+export interface EventChannelCtor {
+  readonly trigger: 'channel';
+  readonly catalog: AnyEventCatalog;
+  readonly ports?: Record<string, PortToken<unknown>>;
+  readonly joinInput: StandardSchemaV1;
+  readonly errors?: ErrorMap;
+  readonly prototype: {
+    join(ctx: never): Promise<unknown>;
+    refresh(ctx: never): Promise<unknown>;
+    route(ctx: never): Promise<void>;
+  };
 }
 
 export function isEventUseCase(ctor: UseCaseClass): ctor is EventUseCaseCtor {

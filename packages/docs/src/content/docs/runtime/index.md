@@ -12,7 +12,7 @@ sidebar:
 HTTP RPC is one derived adapter. `app.local` is in-process invoke of the same use cases.
 
 - [App.from](/runtime/app-from/) — composition
-- [Completeness](/runtime/completeness/) — missing ports/catalogs are sentences
+- [Completeness](/runtime/completeness/) — missing ports/catalogs/channels are sentences
 - [Interceptor](/runtime/interceptor/) — onion around use case, adapter, publish, dispatch
 - [RpcMiddleware](/runtime/rpc-middleware/) — per-route request/response middleware
 - [Local client](/runtime/local-client/) — `app.local.incident.close`

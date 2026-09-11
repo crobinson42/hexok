@@ -11,4 +11,4 @@ sidebar:
 .bind(DomainEvents, InMemoryBus.create())
 ```
 
-See also: [InMemoryBroker](/testing/in-memory-broker/), [App.test](/testing/app-test/).
+See also: [InMemoryQueue](/testing/in-memory-queue/), [App.test](/testing/app-test/).

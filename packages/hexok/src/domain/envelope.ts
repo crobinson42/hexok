@@ -1,4 +1,4 @@
-export type CatalogKind = 'bus' | 'broker';
+export type CatalogKind = 'bus' | 'queue';
 
 /**
  * Runtime value on the wire. `kind` is copied from the catalog.
@@ -29,21 +29,22 @@ export interface BusAdapter {
   stop?(): Promise<void>;
 }
 
-export interface BrokerConsumeCtx {
+export interface QueueConsumeCtx {
   attempt: number;
   ack: () => Promise<void>;
   nack: () => Promise<void>;
 }
 
-export interface BrokerAdapter {
-  kind: 'broker';
+/** Work queue. One consumer in a group; ack/nack; `attempt`. */
+export interface QueueAdapter {
+  kind: 'queue';
   publish(envelope: Envelope): Promise<void>;
   consume(
     key: string,
     group: string,
-    handler: (envelope: Envelope, ctx: BrokerConsumeCtx) => Promise<void>,
+    handler: (envelope: Envelope, ctx: QueueConsumeCtx) => Promise<void>,
   ): void;
   stop?(): Promise<void>;
 }
 
-export type EventAdapter = BusAdapter | BrokerAdapter;
+export type EventAdapter = BusAdapter | QueueAdapter;

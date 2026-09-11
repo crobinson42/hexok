@@ -1,5 +1,6 @@
 import { CodedError, type ErrorMap, type Result } from '../core/index.js';
 import type { AnyEventCatalog, PortToken } from '../domain/index.js';
+import type { EventChannelCtor } from './types.js';
 
 /**
  * Request/response application use case. Declare static `key`, `input`, `output`, `errors`, `ports`.
@@ -30,6 +31,7 @@ export abstract class ApiUseCase {
   static readonly ports?: Record<string, PortToken<unknown>>;
   /** `static publishes = [DomainEvents] as const` — without `as const`, Events widens to EventClass. */
   static readonly publishes?: readonly AnyEventCatalog[];
+  static readonly channels?: readonly EventChannelCtor[];
   static readonly middleware?: readonly unknown[];
 
   protected constructor() {}

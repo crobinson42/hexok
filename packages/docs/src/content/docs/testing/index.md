@@ -10,4 +10,5 @@ sidebar:
 - [App.test](/testing/app-test/) — `published` and `as(ctx)`
 - [InMemoryRepository](/testing/in-memory-repository/) — CRUD fake
 - [InMemoryBus](/testing/in-memory-bus/) — in-process bus
-- [InMemoryBroker](/testing/in-memory-broker/) — in-process broker
+- [InMemoryQueue](/testing/in-memory-queue/) — in-process queue
+- [InMemoryChannel](/testing/in-memory-channel/) — in-process channel adapter

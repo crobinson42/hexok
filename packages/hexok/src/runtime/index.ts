@@ -1,7 +1,13 @@
 export { type AdapterFor, App, AppBuilder, type AppInstance } from './app.js';
+export type {
+  ChannelGateway,
+  ChannelGateways,
+} from './channel.js';
 export type { NestedClient } from './client.js';
 export type {
+  ChannelKindError,
   DuplicateCatalogError,
+  DuplicateChannelError,
   DuplicatePortError,
   MissingMessages,
 } from './completeness.js';

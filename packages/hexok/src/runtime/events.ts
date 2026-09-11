@@ -24,7 +24,7 @@ export async function startHandlers(
       for (const ctor of list) {
         if (ctor.group === undefined) {
           throw new Error(
-            `hexok: broker handler "${ctor.key}" requires static group`,
+            `hexok: queue handler "${ctor.key}" requires static group`,
           );
         }
         const group = groups.get(ctor.group) ?? [];

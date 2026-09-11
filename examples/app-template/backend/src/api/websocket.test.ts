@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import type { Actor } from '../domain/schemas/actor.js';
 import {
   type ClientConnection,
-  WebSocketClientBus,
+  WebSocketChannel,
 } from '../infra/client-event-bus/index.js';
 import { createApi } from './index.js';
 import { stubToken } from './stubs.js';
@@ -40,56 +40,13 @@ const actor: Actor = {
   organizationIds: ['org-1'],
 };
 
-describe('WebSocketClientBus', () => {
-  it('sends client envelopes to matching sockets', async () => {
-    const bus = WebSocketClientBus.create();
-    const member = fakeSocket();
-    const outsider = fakeSocket();
-    bus.connect(actor, member);
-    bus.connect(
-      { type: 'user', userId: 'u2', organizationIds: ['org-2'] },
-      outsider,
-    );
-
-    await bus.publish({
-      key: 'apiKey.created',
-      catalog: 'client',
-      kind: 'bus',
-      payload: { id: 'k1', userId: 'u1', organizationIds: ['org-1'] },
-      occurredAt: new Date('2026-01-01T00:00:00Z'),
-      ctx: { kind: 'organization', organizationIds: ['org-1'] },
-      meta: {},
-    });
-
-    expect(messages(member)).toEqual([
-      {
-        key: 'apiKey.created',
-        catalog: 'client',
-        payload: { id: 'k1', userId: 'u1', organizationIds: ['org-1'] },
-        occurredAt: '2026-01-01T00:00:00.000Z',
-        ctx: { kind: 'organization', organizationIds: ['org-1'] },
-      },
-    ]);
-    expect(outsider.sent).toEqual([]);
-  });
-
-  it('drops a socket after close', async () => {
-    const bus = WebSocketClientBus.create();
+describe('WebSocketChannel', () => {
+  it('drops a socket after close', () => {
+    const channel = WebSocketChannel.create<Actor>();
     const socket = fakeSocket();
-    bus.connect(actor, socket);
+    channel.join('c1', actor, socket);
     socket.close();
-
-    await bus.publish({
-      key: 'apiKey.created',
-      catalog: 'client',
-      kind: 'bus',
-      payload: { id: 'k1', userId: 'u1', organizationIds: ['org-1'] },
-      occurredAt: new Date(),
-      ctx: { kind: 'organization', organizationIds: ['org-1'] },
-      meta: {},
-    });
-
-    expect(socket.sent).toEqual([]);
+    expect(channel.list()).toEqual([]);
   });
 });
 
@@ -103,6 +60,7 @@ describe('createApi websockets', () => {
 
   it('pushes client events from use-cases', async () => {
     const { app, accept, clientBus } = createApi();
+    await app.start();
     const registered = await app.local.organization.register({
       organization: { id: 'org-1', name: 'Acme' },
       user: {
@@ -158,9 +116,10 @@ describe('createApi websockets', () => {
           userId: 'u1',
           organizationIds: ['org-1'],
         },
-        ctx: { kind: 'organization', organizationIds: ['org-1'] },
       }),
     ]);
+    expect(messages(member)[0]).not.toHaveProperty('ctx');
     expect(outsider.sent).toEqual([]);
+    await app.stop();
   });
 });

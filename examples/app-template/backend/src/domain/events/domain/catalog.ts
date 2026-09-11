@@ -35,7 +35,7 @@ export {
   UserCredentialsUpdated,
 } from './user-credentials.js';
 
-export const DomainEvents = new EventCatalog('domain', { kind: 'broker' })
+export const DomainEvents = new EventCatalog('domain', { kind: 'queue' })
   .event(OrganizationCreated)
   .event(OrganizationUpdated)
   .event(OrganizationDeleted)

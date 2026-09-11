@@ -1,8 +1,8 @@
 import { EventCatalog } from 'hexok/domain';
+import type { ClientEventCtx } from '../../context.js';
 import { ApiKeyCreated, ApiKeyDeleted } from './api-key.js';
 import { OrganizationCreated } from './organization.js';
 import { UserCreated } from './user.js';
-import type {ClientEventCtx} from "../../context.js";
 
 export { ApiKeyCreated, ApiKeyDeleted } from './api-key.js';
 export { OrganizationCreated } from './organization.js';

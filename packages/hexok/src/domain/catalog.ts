@@ -4,8 +4,8 @@ import type { EventClass, EventWithCtx } from './event.js';
 const IDENT = /^[A-Za-z_$][A-Za-z0-9_$]*$/;
 
 /**
- * Registry of event classes. `kind` is `'bus'` (pub/sub, fire-and-forget, no
- * persistence) or `'broker'` (acked consume with groups).
+ * Registry of event classes. `kind` is `'bus'` (fan-out, fire-and-forget, no
+ * persistence) or `'queue'` (work queue: one consumer in a group, ack/nack).
  * `.event()` accumulates each class on the covariant `Events` generic (empty is `never`).
  * Use-case convention: `static publishes = [DomainEvents] as const`.
  *

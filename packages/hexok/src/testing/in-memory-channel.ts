@@ -1,19 +1,21 @@
-import type { ChannelAdapter, ChannelConnection } from 'hexok/domain';
-
-export type { ChannelConnection as ClientConnection };
+import type { ChannelAdapter, ChannelConnection } from '../domain/index.js';
 
 type Row<Session> = {
   session: Session;
   connection: ChannelConnection;
 };
 
-export class WebSocketChannel<Session = unknown>
+/**
+ * In-process channel adapter. Records `sent`. `stop()` closes connections.
+ */
+export class InMemoryChannel<Session = unknown>
   implements ChannelAdapter<Session>
 {
+  readonly sent: Array<{ id: string; payload: string }> = [];
   #clients = new Map<string, Row<Session>>();
 
-  static create<S>(): WebSocketChannel<S> {
-    return new WebSocketChannel<S>();
+  static create<S>(): InMemoryChannel<S> {
+    return new InMemoryChannel<S>();
   }
 
   join(id: string, session: Session, connection: ChannelConnection): void {
@@ -49,6 +51,7 @@ export class WebSocketChannel<Session = unknown>
   send(id: string, payload: string): void {
     const row = this.#clients.get(id);
     if (!row) return;
+    this.sent.push({ id, payload });
     try {
       row.connection.send(payload);
     } catch {

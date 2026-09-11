@@ -5,13 +5,12 @@ export {
   createHandler,
   publicRoutes,
   tokenFromRequest,
-  WebSocketClientBus,
+  WebSocketChannel,
 } from './api/index.js';
 export { requireUser } from './app/auth.js';
+export { ClientChannel, visibleTo } from './app/channels/client-channel.js';
 export type { AppContext } from './app/context.js';
-export {
-  ClientEvents,
-} from './app/events/client/catalog.js';
+export { ClientEvents } from './app/events/client/catalog.js';
 export {
   ApiKeyRepository,
   AuthTokenService,

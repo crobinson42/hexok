@@ -1,9 +1,11 @@
 import {
   type ApiUseCaseCtor,
   type AsUseCaseBag,
+  type ChannelSession,
   type CheckUseCase,
   type DerivedContract,
   deriveContract,
+  type EventChannelCtor,
   type EventUseCaseCtor,
   isApiUseCase,
   isEventUseCase,
@@ -14,18 +16,29 @@ import {
 } from '../app/index.js';
 import type {
   AnyEventCatalog,
-  BrokerAdapter,
   BusAdapter,
   CatalogKind,
+  ChannelAdapter,
   Envelope,
   EventAdapter,
   EventCatalog,
   EventClass,
   PortToken,
+  QueueAdapter,
 } from '../domain/index.js';
+import {
+  type ChannelGateways,
+  createChannelHandle,
+  type RoutedChannel,
+  resolveChannelPorts,
+  startChannels,
+  stopChannelAdapters,
+} from './channel.js';
 import type { NestedClient } from './client.js';
 import type {
+  ChannelKindError,
   DuplicateCatalogError,
+  DuplicateChannelError,
   DuplicatePortError,
   MissingMessages,
 } from './completeness.js';
@@ -36,11 +49,16 @@ import { type InvokeDeps, invokeApi, publishNow } from './invoke.js';
 import type { RpcMiddleware } from './middleware.js';
 import { deriveRpc, type RpcContract } from './rpc.js';
 
-export type AppInstance<Bag extends UseCaseBag, Ctx = unknown> = {
+export type AppInstance<
+  Bag extends UseCaseBag,
+  Ctx = unknown,
+  Routed = never,
+> = {
   contract: DerivedContract<Bag>;
   router: { fetch: (request: Request) => Promise<Response> };
   local: NestedClient<Bag, Ctx>;
   handlers: Record<string, Record<string, EventUseCaseCtor[]>>;
+  channels: ChannelGateways<Routed>;
   publish(envelope: Envelope): Promise<void>;
   start(): Promise<void>;
   stop(): Promise<void>;
@@ -49,19 +67,38 @@ export type AppInstance<Bag extends UseCaseBag, Ctx = unknown> = {
 
 export type AdapterFor<K extends CatalogKind> = K extends 'bus'
   ? BusAdapter
-  : K extends 'broker'
-    ? BrokerAdapter
+  : K extends 'queue'
+    ? QueueAdapter
     : EventAdapter;
+
+type ChannelCatalogKind<C> = C extends {
+  catalog: EventCatalog<string, infer Kind, infer _E, infer _Ctx>;
+}
+  ? Kind
+  : CatalogKind;
+
+type ChannelCatalogKey<C> = C extends {
+  catalog: EventCatalog<
+    infer K extends string,
+    infer _Kind,
+    infer _E,
+    infer _Ctx
+  >;
+}
+  ? K
+  : string;
 
 export class AppBuilder<
   Bag extends UseCaseBag,
   Provided = never,
   Bound = never,
   Ctx = unknown,
+  Routed = never,
 > {
   readonly #useCases: Bag;
   readonly #provided = new Map<PortToken<unknown>, unknown>();
   readonly #bound = new Map<AnyEventCatalog, EventAdapter>();
+  readonly #routed = new Map<AnyEventCatalog, RoutedChannel>();
   readonly #interceptors: Interceptor[] = [];
   readonly #middleware: RpcMiddleware[] = [];
   #defaultCtx: unknown;
@@ -81,7 +118,7 @@ export class AppBuilder<
       ? DuplicatePortError
       : PortToken<I>,
     impl: I,
-  ): AppBuilder<Bag, Provided | PortToken<I>, Bound, Ctx> {
+  ): AppBuilder<Bag, Provided | PortToken<I>, Bound, Ctx, Routed> {
     const port = token as PortToken<I>;
     if (this.#provided.has(port as PortToken<unknown>)) {
       throw new Error(`hexok: port "${port.key}" already provided`);
@@ -96,7 +133,8 @@ export class AppBuilder<
       Bag,
       Provided | PortToken<I>,
       Bound,
-      Ctx
+      Ctx,
+      Routed
     >;
   }
 
@@ -114,7 +152,8 @@ export class AppBuilder<
     Bag,
     Provided,
     Bound | EventCatalog<Key, Kind, Events, CatCtx>,
-    Ctx
+    Ctx,
+    Routed
   > {
     const cat = catalog as EventCatalog<Key, Kind, Events, CatCtx>;
     if (this.#bound.has(cat as AnyEventCatalog)) {
@@ -131,13 +170,45 @@ export class AppBuilder<
       Bag,
       Provided,
       Bound | EventCatalog<Key, Kind, Events, CatCtx>,
-      Ctx
+      Ctx,
+      Routed
     >;
   }
 
-  ctx<C>(defaults?: C): AppBuilder<Bag, Provided, Bound, C> {
+  route<C extends EventChannelCtor>(
+    channel: ChannelCatalogKind<C> extends 'bus'
+      ? [C] extends [Routed]
+        ? DuplicateChannelError<ChannelCatalogKey<C>>
+        : C
+      : ChannelKindError<ChannelCatalogKey<C>, ChannelCatalogKind<C> & string>,
+    adapter: ChannelAdapter<ChannelSession<C>>,
+  ): AppBuilder<Bag, Provided, Bound, Ctx, Routed | C> {
+    const ctor = channel as EventChannelCtor;
+    const catalog = ctor.catalog;
+    if (catalog.kind !== 'bus') {
+      throw new Error(
+        `hexok: channel catalog "${catalog.key}" is kind "${catalog.kind}". Channels require a bus catalog.`,
+      );
+    }
+    if (this.#routed.has(catalog)) {
+      throw new Error(`hexok: catalog "${catalog.key}" already routed`);
+    }
+    catalog.freeze();
+    const instance = new (
+      ctor as unknown as new () => RoutedChannel['instance']
+    )();
+    this.#routed.set(catalog, {
+      ctor,
+      instance,
+      adapter: adapter as ChannelAdapter<unknown>,
+      ports: {},
+    });
+    return this as unknown as AppBuilder<Bag, Provided, Bound, Ctx, Routed | C>;
+  }
+
+  ctx<C>(defaults?: C): AppBuilder<Bag, Provided, Bound, C, Routed> {
     this.#defaultCtx = defaults;
-    return this as unknown as AppBuilder<Bag, Provided, Bound, C>;
+    return this as unknown as AppBuilder<Bag, Provided, Bound, C, Routed>;
   }
 
   use(middleware: RpcMiddleware): this {
@@ -157,17 +228,17 @@ export class AppBuilder<
    * Complete the graph. Incomplete builders expose `build` as the missing
    * port/catalog message (not callable). Runtime throws the same sentences.
    */
-  get build(): [MissingMessages<Bag, Provided, Bound>] extends [never]
-    ? () => AppInstance<Bag, Ctx>
-    : MissingMessages<Bag, Provided, Bound> {
+  get build(): [MissingMessages<Bag, Provided, Bound, Routed>] extends [never]
+    ? () => AppInstance<Bag, Ctx, Routed>
+    : MissingMessages<Bag, Provided, Bound, Routed> {
     return (() => this.#build()) as unknown as [
-      MissingMessages<Bag, Provided, Bound>,
+      MissingMessages<Bag, Provided, Bound, Routed>,
     ] extends [never]
-      ? () => AppInstance<Bag, Ctx>
-      : MissingMessages<Bag, Provided, Bound>;
+      ? () => AppInstance<Bag, Ctx, Routed>
+      : MissingMessages<Bag, Provided, Bound, Routed>;
   }
 
-  #build(): AppInstance<Bag, Ctx> {
+  #build(): AppInstance<Bag, Ctx, Routed> {
     this.#assertComplete();
     const adapted = new Map<PortToken<unknown>, unknown>();
     for (const [token, impl] of this.#provided) {
@@ -178,6 +249,10 @@ export class AppBuilder<
         }
       }
       adapted.set(token, current);
+    }
+
+    for (const routed of this.#routed.values()) {
+      routed.ports = resolveChannelPorts(routed.ctor, adapted);
     }
 
     const api = new Map<string, ApiUseCaseCtor>();
@@ -204,12 +279,24 @@ export class AppBuilder<
 
     const catalog = deriveContract(this.#useCases);
     const rpc = deriveRpc(catalog);
+
+    const channelHandles: Record<string, unknown> = {};
+    for (const [cat, routed] of this.#routed) {
+      channelHandles[cat.key] = createChannelHandle(
+        routed.ctor,
+        routed.instance,
+        routed.adapter,
+        routed.ports,
+      );
+    }
+
     const deps = (): InvokeDeps => ({
       ports: adapted,
       catalogs: this.#bound,
       interceptors: this.#interceptors,
       middleware: this.#middleware,
       defaultCtx: this.#defaultCtx,
+      channels: channelHandles,
     });
 
     const local = nestByKey(
@@ -222,19 +309,22 @@ export class AppBuilder<
 
     let started = false;
 
-    const instance: AppInstance<Bag, Ctx> = {
+    const instance: AppInstance<Bag, Ctx, Routed> = {
       contract: nestedContract(catalog) as DerivedContract<Bag>,
       rpc,
       router: { fetch: createFetchHandler(api, deps()) },
       local,
       handlers: handlersView,
+      channels: channelHandles as ChannelGateways<Routed>,
       publish: (envelope) => publishNow(envelope, deps()),
       start: async () => {
         if (started) throw new Error('hexok: start() called twice');
         started = true;
         await startHandlers(this.#bound, eventHandlers, deps());
+        startChannels(this.#routed, this.#bound);
       },
       stop: async () => {
+        await stopChannelAdapters(this.#routed);
         if (!started) return;
         await stopAdapters(this.#bound);
         started = false;
@@ -251,6 +341,10 @@ export class AppBuilder<
     const requiredCatalogs = new Map<
       string,
       { catalog: AnyEventCatalog; usedBy: string[] }
+    >();
+    const requiredChannels = new Map<
+      string,
+      { ctor: EventChannelCtor; usedBy: string[] }
     >();
 
     for (const ctor of Object.values(this.#useCases) as UseCaseClass[]) {
@@ -272,6 +366,36 @@ export class AppBuilder<
         rec.usedBy.push(ctor.key);
         requiredCatalogs.set(catalog.key, rec);
       }
+      for (const channel of ctor.channels ?? []) {
+        const rec = requiredChannels.get(channel.catalog.key) ?? {
+          ctor: channel,
+          usedBy: [],
+        };
+        rec.usedBy.push(ctor.key);
+        requiredChannels.set(channel.catalog.key, rec);
+      }
+    }
+
+    for (const routed of this.#routed.values()) {
+      const ports = (routed.ctor.ports ?? {}) as Record<
+        string,
+        PortToken<unknown>
+      >;
+      for (const token of Object.values(ports)) {
+        const rec = requiredPorts.get(token.key) ?? {
+          token,
+          usedBy: [],
+        };
+        rec.usedBy.push(routed.ctor.catalog.key);
+        requiredPorts.set(token.key, rec);
+      }
+      const catalog = routed.ctor.catalog;
+      const rec = requiredCatalogs.get(catalog.key) ?? {
+        catalog,
+        usedBy: [],
+      };
+      rec.usedBy.push('channel');
+      requiredCatalogs.set(catalog.key, rec);
     }
 
     for (const { token, usedBy } of requiredPorts.values()) {
@@ -285,6 +409,13 @@ export class AppBuilder<
       if (!this.#bound.has(catalog)) {
         throw new Error(
           `hexok: unbound catalog "${catalog.key}" (used by ${usedBy.join(', ')})`,
+        );
+      }
+    }
+    for (const { ctor, usedBy } of requiredChannels.values()) {
+      if (!this.#routed.has(ctor.catalog)) {
+        throw new Error(
+          `hexok: unrouted channel "${ctor.catalog.key}" (used by ${usedBy.join(', ')}). Call .route(...) before .build()`,
         );
       }
     }

@@ -5,6 +5,6 @@ export type AppContext = {
 };
 
 export type ClientEventCtx =
-    | { kind: 'authenticated' }
-    | { kind: 'organization'; organizationIds: string[] }
-    | { kind: 'user'; userIds: string[] };
+  | { kind: 'authenticated' }
+  | { kind: 'organization'; organizationIds: string[] }
+  | { kind: 'user'; userIds: string[] };

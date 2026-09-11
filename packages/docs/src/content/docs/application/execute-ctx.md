@@ -7,7 +7,7 @@ sidebar:
 
 `ExecuteCtx<typeof UseCase>` is the argument to `ApiUseCase.execute`. `EventCtx` is the same idea for event handlers (`event` instead of `input`).
 
-Fields: validated `input` (or `event` envelope), resolved `ports`, request `ctx`, `errors` factories, `signal`, typed `publish`, and `run`. Broker handlers also get `attempt`.
+Fields: validated `input` (or `event` envelope), resolved `ports`, request `ctx`, `errors` factories, `signal`, typed `publish`, `run`, and `channels` (when the use case declared `static channels`). Queue handlers also get `attempt`.
 
 ```ts
 async execute({ input, ports, errors, publish }: ExecuteCtx<typeof CloseIncident>) {

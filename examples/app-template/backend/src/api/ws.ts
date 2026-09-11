@@ -1,8 +1,6 @@
+import type { ChannelConnection } from 'hexok/domain';
 import type { AuthTokenService } from '../app/ports/services/auth-token.js';
-import type {
-  ClientConnection,
-  WebSocketClientBus,
-} from '../infra/client-event-bus/index.js';
+import type { Actor } from '../domain/schemas/actor.js';
 
 export function tokenFromRequest(request: Request): string {
   const header = request.headers.get('authorization') ?? '';
@@ -11,15 +9,21 @@ export function tokenFromRequest(request: Request): string {
 }
 
 export async function acceptClient(
-  connection: ClientConnection,
+  connection: ChannelConnection,
   request: Request,
   token: AuthTokenService,
-  bus: WebSocketClientBus,
+  channel: {
+    join(actor: Actor, connection: ChannelConnection): Promise<unknown>;
+  },
 ): Promise<void> {
   const actor = await token.verify(tokenFromRequest(request));
   if (!actor) {
     connection.close();
     return;
   }
-  bus.connect(actor, connection);
+  try {
+    await channel.join(actor, connection);
+  } catch {
+    connection.close();
+  }
 }

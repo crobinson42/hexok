@@ -1,6 +1,6 @@
 import type { Infer } from 'hexok/core';
 import { DomainEvent } from 'hexok/domain';
-import { apiKeySchema } from '../entities/api-key.js';
+import { apiKeySchema } from '../../entities/api-key.js';
 
 export class ApiKeyCreated extends DomainEvent {
   static readonly key = 'apiKey.created';

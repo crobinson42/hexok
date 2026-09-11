@@ -1,6 +1,6 @@
 import type { BusAdapter, Envelope } from 'hexok/domain';
 import type { Actor } from '../../domain/schemas/actor.js';
-import type { ClientCtx } from '../../domain/schemas/client-ctx.js';
+import type {ClientEventCtx} from "../../app/context.js";
 
 export type ClientConnection = {
   send(data: string): void;
@@ -77,7 +77,7 @@ function visibleTo(actor: Actor, ctx: unknown): boolean {
   return ctx.organizationIds.some((id) => actor.organizationIds.includes(id));
 }
 
-function isClientCtx(value: unknown): value is ClientCtx {
+function isClientCtx(value: unknown): value is ClientEventCtx {
   if (typeof value !== 'object' || value === null || !('kind' in value)) {
     return false;
   }

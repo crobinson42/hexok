@@ -1,8 +1,8 @@
 import { ApiUseCase, type ExecuteCtx } from 'hexok/app';
 import { z } from 'zod';
 import { actorSchema } from '../../../domain/schemas/actor.js';
-import { ApiKeyRepository } from '../../ports/repos/api-keys-repo.js';
-import { AuthTokenService } from '../../ports/services/authTokenService.js';
+import { ApiKeyRepository } from '../../ports/repos/api-keys.js';
+import { AuthTokenService } from '../../ports/services/auth-token.js';
 
 export class AuthenticateApiKey extends ApiUseCase {
   static readonly key = 'auth.authenticateApiKey';

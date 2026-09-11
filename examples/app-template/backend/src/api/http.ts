@@ -1,5 +1,5 @@
 import type { AppContext } from '../app/context.js';
-import type { AuthTokenService } from '../app/ports/services/authTokenService.js';
+import type { AuthTokenService } from '../app/ports/services/auth-token.js';
 
 export const publicRoutes = new Set([
   'auth.login',

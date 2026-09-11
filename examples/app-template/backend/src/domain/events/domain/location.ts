@@ -1,6 +1,6 @@
 import type { Infer } from 'hexok/core';
 import { DomainEvent } from 'hexok/domain';
-import { locationSchema } from '../entities/location.js';
+import { locationSchema } from '../../entities/location.js';
 
 export class LocationCreated extends DomainEvent {
   static readonly key = 'location.created';

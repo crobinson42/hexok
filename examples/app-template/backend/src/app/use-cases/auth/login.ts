@@ -1,9 +1,9 @@
 import { ApiUseCase, type ExecuteCtx } from 'hexok/app';
 import { z } from 'zod';
 import { actorSchema } from '../../../domain/schemas/actor.js';
-import { UserCredentialsRepository } from '../../ports/repos/user-credentials-repo.js';
-import { UserRepository } from '../../ports/repos/users-repo.js';
-import { AuthTokenService } from '../../ports/services/authTokenService.js';
+import { UserCredentialsRepository } from '../../ports/repos/user-credentials.js';
+import { UserRepository } from '../../ports/repos/users.js';
+import { AuthTokenService } from '../../ports/services/auth-token.js';
 import { PasswordHasher } from '../../ports/utilities/password-hasher.js';
 
 export class Login extends ApiUseCase {

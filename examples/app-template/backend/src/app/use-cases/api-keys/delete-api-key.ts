@@ -1,14 +1,14 @@
 import { ApiUseCase, type ExecuteCtx } from 'hexok/app';
 import { z } from 'zod';
-import { ApiKeyDeleted } from '../../../domain/events/api-key.js';
-import { DomainEvents } from '../../../domain/events/index.js';
+import { ApiKeyDeleted } from '../../../domain/events/domain/api-key.js';
+import { DomainEvents } from '../../../domain/events/domain/catalog.js';
 import { requireUser } from '../../auth.js';
 import type { AppContext } from '../../context.js';
 import {
   ApiKeyDeleted as ApiKeyDeletedClient,
   ClientEvents,
-} from '../../events/client/index.js';
-import { ApiKeyRepository } from '../../ports/repos/api-keys-repo.js';
+} from '../../events/client/catalog.js';
+import { ApiKeyRepository } from '../../ports/repos/api-keys.js';
 
 export class DeleteApiKey extends ApiUseCase {
   static readonly key = 'apiKey.delete';

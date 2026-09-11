@@ -4,13 +4,13 @@ import {
   Organization,
   organizationSchema,
 } from '../../../domain/entities/organization.js';
-import { DomainEvents } from '../../../domain/events/index.js';
-import { OrganizationCreated } from '../../../domain/events/organization.js';
+import { DomainEvents } from '../../../domain/events/domain/catalog.js';
+import { OrganizationCreated } from '../../../domain/events/domain/organization.js';
 import {
   ClientEvents,
   OrganizationCreated as OrganizationCreatedClient,
-} from '../../events/client/index.js';
-import { OrganizationRepository } from '../../ports/repos/organizations-repo.js';
+} from '../../events/client/catalog.js';
+import { OrganizationRepository } from '../../ports/repos/organizations.js';
 import { CreateUser } from '../users/create-user.js';
 
 export class RegisterOrganization extends ApiUseCase {

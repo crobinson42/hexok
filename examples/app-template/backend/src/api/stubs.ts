@@ -1,7 +1,7 @@
-import type { ApiKeyRepository } from '../app/ports/repos/api-keys-repo.js';
-import type { UserCredentialsRepository } from '../app/ports/repos/user-credentials-repo.js';
-import type { UserRepository } from '../app/ports/repos/users-repo.js';
-import type { AuthTokenService } from '../app/ports/services/authTokenService.js';
+import type { ApiKeyRepository } from '../app/ports/repos/api-keys.js';
+import type { UserCredentialsRepository } from '../app/ports/repos/user-credentials.js';
+import type { UserRepository } from '../app/ports/repos/users.js';
+import type { AuthTokenService } from '../app/ports/services/auth-token.js';
 import type { EmailService } from '../app/ports/services/email.js';
 import type { PasswordHasher } from '../app/ports/utilities/password-hasher.js';
 import type { ApiKey } from '../domain/entities/api-key.js';

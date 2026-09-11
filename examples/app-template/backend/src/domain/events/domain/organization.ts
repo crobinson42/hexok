@@ -1,6 +1,6 @@
 import type { Infer } from 'hexok/core';
 import { DomainEvent } from 'hexok/domain';
-import { organizationSchema } from '../entities/organization.js';
+import { organizationSchema } from '../../entities/organization.js';
 
 export class OrganizationCreated extends DomainEvent {
   static readonly key = 'organization.created';

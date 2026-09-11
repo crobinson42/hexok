@@ -4,10 +4,10 @@ import {
   UserCredentials,
   userCredentialsSchema,
 } from '../../../domain/entities/user-credentials.js';
-import { DomainEvents } from '../../../domain/events/index.js';
-import { UserCredentialsCreated } from '../../../domain/events/user-credentials.js';
-import { UserCredentialsRepository } from '../../ports/repos/user-credentials-repo.js';
-import { UserRepository } from '../../ports/repos/users-repo.js';
+import { DomainEvents } from '../../../domain/events/domain/catalog.js';
+import { UserCredentialsCreated } from '../../../domain/events/domain/user-credentials.js';
+import { UserCredentialsRepository } from '../../ports/repos/user-credentials.js';
+import { UserRepository } from '../../ports/repos/users.js';
 
 export class SetupUserCredentials extends ApiUseCase {
   static readonly key = 'user.setupCredentials';

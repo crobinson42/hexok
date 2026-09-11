@@ -10,12 +10,8 @@ export {
 export { requireUser } from './app/auth.js';
 export type { AppContext } from './app/context.js';
 export {
-  ApiKeyCreated as ApiKeyCreatedClient,
-  ApiKeyDeleted as ApiKeyDeletedClient,
   ClientEvents,
-  OrganizationCreated as OrganizationCreatedClient,
-  UserCreated as UserCreatedClient,
-} from './app/events/client/index.js';
+} from './app/events/client/catalog.js';
 export {
   ApiKeyRepository,
   AuthTokenService,
@@ -70,9 +66,8 @@ export {
   UserCredentialsUpdated,
   UserDeleted,
   UserUpdated,
-} from './domain/events/index.js';
+} from './domain/events/domain/catalog.js';
 export {
   type Actor,
   actorSchema,
-  type ClientCtx,
-} from './domain/schemas/index.js';
+} from './domain/schemas/actor.js';

@@ -1,4 +1,4 @@
-import type { AuthTokenService } from '../app/ports/services/authTokenService.js';
+import type { AuthTokenService } from '../app/ports/services/auth-token.js';
 import type {
   ClientConnection,
   WebSocketClientBus,

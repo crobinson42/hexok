@@ -1,6 +1,6 @@
 import type { Infer } from 'hexok/core';
 import { DomainEvent } from 'hexok/domain';
-import { userCredentialsSchema } from '../entities/user-credentials.js';
+import { userCredentialsSchema } from '../../entities/user-credentials.js';
 
 export class UserCredentialsCreated extends DomainEvent {
   static readonly key = 'userCredentials.created';

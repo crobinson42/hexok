@@ -13,7 +13,8 @@
   },
   "dependencies": {
     "astro": "^7.3.2",
-    "plinth": "*"
+    "plinth": "*",
+    "zod": "^4.1.5"
   },
   "devDependencies": {
     "@astrojs/check": "^0.9.10"

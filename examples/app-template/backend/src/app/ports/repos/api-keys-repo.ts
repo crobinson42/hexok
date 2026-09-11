@@ -1,4 +1,4 @@
-import { Port } from 'kerf/domain';
+import { Port } from 'hexok/domain';
 import type { ApiKey } from '../../../domain/entities/index.js';
 
 export interface ApiKeyRepository {

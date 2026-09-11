@@ -1,4 +1,4 @@
-import { ApiUseCase, type ExecuteCtx } from 'kerf/app';
+import { ApiUseCase, type ExecuteCtx } from 'hexok/app';
 import { z } from 'zod';
 import { actorSchema } from '../../../domain/schemas/actor.js';
 import { ApiKeyRepository } from '../../ports/repos/api-keys-repo.js';

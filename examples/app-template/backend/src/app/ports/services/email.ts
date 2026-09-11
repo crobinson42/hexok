@@ -1,4 +1,4 @@
-import { Port } from 'kerf/domain';
+import { Port } from 'hexok/domain';
 
 export interface EmailService {
   send(message: { to: string; subject: string; body: string }): Promise<void>;

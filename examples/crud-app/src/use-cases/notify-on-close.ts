@@ -1,4 +1,4 @@
-import { type EventCtx, EventUseCase } from 'kerf/app';
+import { type EventCtx, EventUseCase } from 'hexok/app';
 import { DomainEvents, IncidentClosed } from '../domain/events.js';
 import { Notifier } from '../ports.js';
 

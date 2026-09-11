@@ -1,4 +1,4 @@
-import type { Infer } from 'kerf/core';
+import type { Infer } from 'hexok/core';
 import { z } from 'zod';
 
 export const actorSchema = z.discriminatedUnion('type', [

@@ -1,5 +1,5 @@
-import type { Infer } from 'kerf/core';
-import { DomainEvent } from 'kerf/domain';
+import type { Infer } from 'hexok/core';
+import { DomainEvent } from 'hexok/domain';
 import { organizationSchema } from '../../../domain/entities/organization.js';
 import type { ClientCtx } from '../../../domain/schemas/client-ctx.js';
 

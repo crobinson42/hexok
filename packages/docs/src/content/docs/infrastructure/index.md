@@ -5,7 +5,7 @@ sidebar:
   order: 0
 ---
 
-`kerf/infra` is thin. An adapter implements a port. A mapper converts entity ↔ row. Composition still receives the **impl**, not a factory object.
+`hexok/infra` is thin. An adapter implements a port. A mapper converts entity ↔ row. Composition still receives the **impl**, not a factory object.
 
 - [Adapter](/infrastructure/adapter/) — `Adapter.of(token, create)`
 - [Mapper](/infrastructure/mapper/) — entity ↔ row

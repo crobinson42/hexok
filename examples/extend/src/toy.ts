@@ -1,7 +1,7 @@
-import { ApiUseCase, type ExecuteCtx } from 'kerf/app';
-import type { Infer } from 'kerf/core';
-import type { RequestScoped, Transactional, UnitOfWork } from 'kerf/domain';
-import { DomainEvent, EventCatalog, Port } from 'kerf/domain';
+import { ApiUseCase, type ExecuteCtx } from 'hexok/app';
+import type { Infer } from 'hexok/core';
+import type { RequestScoped, Transactional, UnitOfWork } from 'hexok/domain';
+import { DomainEvent, EventCatalog, Port } from 'hexok/domain';
 import { z } from 'zod';
 
 export class LedgerCharged extends DomainEvent {

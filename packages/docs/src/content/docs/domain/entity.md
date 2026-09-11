@@ -7,7 +7,7 @@ sidebar:
 
 Entities are **mutable aggregates**. Domain methods mutate `this` and return `this`. They never I/O, never publish, never hold ports.
 
-`set(draft => { … })` is the only supported write. Nested assignment inside `set` is fine. `props` and `original` are `DeepReadonly` (exported from `kerf/domain`).
+`set(draft => { … })` is the only supported write. Nested assignment inside `set` is fine. `props` and `original` are `DeepReadonly` (exported from `hexok/domain`).
 
 Validation, invariants, and declared refusals **throw**. Check invariants in the method **before** `set`. `create` / `restore` / `parse` validate against `static schema` and throw `CodedError` `VALIDATION` if rejected. Construct through those factories, not `new`. `set` does not re-run the schema.
 

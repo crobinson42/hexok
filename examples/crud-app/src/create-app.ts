@@ -1,4 +1,4 @@
-import { App, InMemoryBus, InMemoryRepository } from 'kerf/testing';
+import { App, InMemoryBus, InMemoryRepository } from 'hexok/testing';
 import { type AppContext, defaultContext } from './context.js';
 import { DomainEvents } from './domain/events.js';
 import { Incident } from './domain/incident.js';

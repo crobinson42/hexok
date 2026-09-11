@@ -1,5 +1,5 @@
-import { App } from 'kerf/runtime';
-import { InMemoryBroker, InMemoryRepository } from 'kerf/testing';
+import { App } from 'hexok/runtime';
+import { InMemoryBroker, InMemoryRepository } from 'hexok/testing';
 import type { AppContext } from '../app/context.js';
 import { ClientEvents } from '../app/events/client/index.js';
 import { ApiKeyRepository } from '../app/ports/repos/api-keys-repo.js';

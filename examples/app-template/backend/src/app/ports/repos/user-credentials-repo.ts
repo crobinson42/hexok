@@ -1,4 +1,4 @@
-import { Port } from 'kerf/domain';
+import { Port } from 'hexok/domain';
 import type { UserCredentials } from '../../../domain/entities/index.js';
 
 export interface UserCredentialsRepository {

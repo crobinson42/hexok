@@ -1,4 +1,4 @@
-import type { BusAdapter, Envelope } from 'kerf/domain';
+import type { BusAdapter, Envelope } from 'hexok/domain';
 import type { Actor } from '../../domain/schemas/actor.js';
 import type { ClientCtx } from '../../domain/schemas/client-ctx.js';
 

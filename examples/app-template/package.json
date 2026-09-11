@@ -1,5 +1,5 @@
 {
-  "name": "@kerf/app-template",
+  "name": "@hexok/app-template",
   "version": "0.0.1",
   "private": true,
   "type": "module",
@@ -14,7 +14,7 @@
   },
   "dependencies": {
     "astro": "^7.3.2",
-    "kerf": "*",
+    "hexok": "*",
     "zod": "^4.1.5"
   },
   "devDependencies": {

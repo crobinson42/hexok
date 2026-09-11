@@ -1,6 +1,6 @@
-import type { UseCaseClass } from 'kerf/app';
-import { CodedError } from 'kerf/core';
-import type { Handler, Interceptor } from 'kerf/runtime';
+import type { UseCaseClass } from 'hexok/app';
+import { CodedError } from 'hexok/core';
+import type { Handler, Interceptor } from 'hexok/runtime';
 
 /**
  * Reads `static policy`. Missing policy → skip.

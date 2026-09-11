@@ -1,5 +1,5 @@
-import type { Infer } from 'kerf/core';
-import { DomainEvent, EventCatalog } from 'kerf/domain';
+import type { Infer } from 'hexok/core';
+import { DomainEvent, EventCatalog } from 'hexok/domain';
 import { z } from 'zod';
 
 export class IncidentClosed extends DomainEvent {

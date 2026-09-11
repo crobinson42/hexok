@@ -1,4 +1,4 @@
-import { ApiUseCase, type ExecuteCtx } from 'kerf/app';
+import { ApiUseCase, type ExecuteCtx } from 'hexok/app';
 import { z } from 'zod';
 import { DomainEvents, IncidentOpened } from '../domain/events.js';
 import { Incident, incidentSchema } from '../domain/incident.js';

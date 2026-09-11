@@ -1,4 +1,4 @@
-import { ApiUseCase, type ExecuteCtx } from 'kerf/app';
+import { ApiUseCase, type ExecuteCtx } from 'hexok/app';
 import { z } from 'zod';
 import { ApiKeyDeleted } from '../../../domain/events/api-key.js';
 import { DomainEvents } from '../../../domain/events/index.js';

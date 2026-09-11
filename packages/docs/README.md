@@ -1,7 +1,7 @@
-# @kerf/docs
+# @hexok/docs
 
-Concept docs for Kerf. Markdown pages, one per concern and child concept.
+Concept docs for Hexok. Markdown pages, one per concern and child concept.
 
 ```bash
-npm run dev -w @kerf/docs
+npm run dev -w @hexok/docs
 ```

@@ -1,3 +1,3 @@
 # Changesets
 
-This repo uses [changesets](https://github.com/changesets/changesets) to version `@kerf/*` packages.
+This repo uses [changesets](https://github.com/changesets/changesets) to version `hexok`.

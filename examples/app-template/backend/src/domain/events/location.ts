@@ -1,5 +1,5 @@
-import type { Infer } from 'kerf/core';
-import { DomainEvent } from 'kerf/domain';
+import type { Infer } from 'hexok/core';
+import { DomainEvent } from 'hexok/domain';
 import { locationSchema } from '../entities/location.js';
 
 export class LocationCreated extends DomainEvent {

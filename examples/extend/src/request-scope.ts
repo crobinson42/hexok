@@ -1,10 +1,10 @@
-import type { UseCaseClass } from 'kerf/app';
-import type { PortToken } from 'kerf/domain';
+import type { UseCaseClass } from 'hexok/app';
+import type { PortToken } from 'hexok/domain';
 import {
   type Handler,
   type Interceptor,
   requireCapability,
-} from 'kerf/runtime';
+} from 'hexok/runtime';
 
 /**
  * Ports that `implements RequestScoped` are `fork()`ed per call.

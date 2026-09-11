@@ -1,5 +1,5 @@
-import type { Infer } from 'kerf/core';
-import { Entity } from 'kerf/domain';
+import type { Infer } from 'hexok/core';
+import { Entity } from 'hexok/domain';
 import { z } from 'zod';
 
 export const organizationSchema = z.object({

@@ -5,7 +5,7 @@ sidebar:
   order: 0
 ---
 
-`kerf/runtime` boots the app. `App.from(useCases)` is the composition root. `provide` ports, `bind` catalogs, then `build()`.
+`hexok/runtime` boots the app. `App.from(useCases)` is the composition root. `provide` ports, `bind` catalogs, then `build()`.
 
 `build()` is not callable until every required port and catalog is provided — at compile time and at runtime.
 

@@ -42,7 +42,7 @@
   },
   "overrides": [
     {
-      "includes": ["packages/kerf/src/core/**"],
+      "includes": ["packages/hexok/src/core/**"],
       "linter": {
         "rules": {
           "style": {
@@ -62,11 +62,11 @@
                       "../runtime/**",
                       "../testing",
                       "../testing/**",
-                      "kerf/domain",
-                      "kerf/app",
-                      "kerf/infra",
-                      "kerf/runtime",
-                      "kerf/testing"
+                      "hexok/domain",
+                      "hexok/app",
+                      "hexok/infra",
+                      "hexok/runtime",
+                      "hexok/testing"
                     ],
                     "message": "core cannot import other layers"
                   }
@@ -78,7 +78,7 @@
       }
     },
     {
-      "includes": ["packages/kerf/src/domain/**"],
+      "includes": ["packages/hexok/src/domain/**"],
       "linter": {
         "rules": {
           "style": {
@@ -96,10 +96,10 @@
                       "../runtime/**",
                       "../testing",
                       "../testing/**",
-                      "kerf/app",
-                      "kerf/infra",
-                      "kerf/runtime",
-                      "kerf/testing"
+                      "hexok/app",
+                      "hexok/infra",
+                      "hexok/runtime",
+                      "hexok/testing"
                     ],
                     "message": "domain can only import core"
                   }
@@ -111,7 +111,7 @@
       }
     },
     {
-      "includes": ["packages/kerf/src/app/**"],
+      "includes": ["packages/hexok/src/app/**"],
       "linter": {
         "rules": {
           "style": {
@@ -127,9 +127,9 @@
                       "../runtime/**",
                       "../testing",
                       "../testing/**",
-                      "kerf/infra",
-                      "kerf/runtime",
-                      "kerf/testing"
+                      "hexok/infra",
+                      "hexok/runtime",
+                      "hexok/testing"
                     ],
                     "message": "app can only import core and domain"
                   }
@@ -141,7 +141,7 @@
       }
     },
     {
-      "includes": ["packages/kerf/src/infra/**"],
+      "includes": ["packages/hexok/src/infra/**"],
       "linter": {
         "rules": {
           "style": {
@@ -157,9 +157,9 @@
                       "../runtime/**",
                       "../testing",
                       "../testing/**",
-                      "kerf/app",
-                      "kerf/runtime",
-                      "kerf/testing"
+                      "hexok/app",
+                      "hexok/runtime",
+                      "hexok/testing"
                     ],
                     "message": "infra can only import core and domain"
                   }
@@ -171,7 +171,7 @@
       }
     },
     {
-      "includes": ["packages/kerf/src/runtime/**"],
+      "includes": ["packages/hexok/src/runtime/**"],
       "linter": {
         "rules": {
           "style": {
@@ -185,8 +185,8 @@
                       "../infra/**",
                       "../testing",
                       "../testing/**",
-                      "kerf/infra",
-                      "kerf/testing"
+                      "hexok/infra",
+                      "hexok/testing"
                     ],
                     "message": "runtime can only import core, domain, and app"
                   }
@@ -198,7 +198,7 @@
       }
     },
     {
-      "includes": ["packages/kerf/src/testing/**"],
+      "includes": ["packages/hexok/src/testing/**"],
       "linter": {
         "rules": {
           "style": {
@@ -210,7 +210,7 @@
                     "group": [
                       "../infra",
                       "../infra/**",
-                      "kerf/infra"
+                      "hexok/infra"
                     ],
                     "message": "testing can import core, domain, app, and runtime — not infra"
                   }

@@ -1,4 +1,4 @@
-import { Port } from 'kerf/domain';
+import { Port } from 'hexok/domain';
 
 export interface PasswordHasher {
   verify(password: string, passwordHash: string): Promise<boolean>;

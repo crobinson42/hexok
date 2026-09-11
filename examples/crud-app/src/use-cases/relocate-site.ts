@@ -1,4 +1,4 @@
-import { ApiUseCase, type ExecuteCtx } from 'kerf/app';
+import { ApiUseCase, type ExecuteCtx } from 'hexok/app';
 import { z } from 'zod';
 import { Site, siteSchema } from '../domain/site.js';
 import { SiteRepository } from '../ports.js';

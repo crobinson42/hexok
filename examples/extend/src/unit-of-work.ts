@@ -1,10 +1,10 @@
-import type { UseCaseClass } from 'kerf/app';
-import type { Envelope, PortToken, UnitOfWork } from 'kerf/domain';
+import type { UseCaseClass } from 'hexok/app';
+import type { Envelope, PortToken, UnitOfWork } from 'hexok/domain';
 import {
   type Handler,
   type Interceptor,
   requireCapability,
-} from 'kerf/runtime';
+} from 'hexok/runtime';
 
 /**
  * Opens `{ onCommit, onRollback }`, `bindTo(uow)` on transactional ports,

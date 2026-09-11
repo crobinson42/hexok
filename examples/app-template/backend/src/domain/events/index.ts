@@ -1,4 +1,4 @@
-import { EventCatalog } from 'kerf/domain';
+import { EventCatalog } from 'hexok/domain';
 import { ApiKeyCreated, ApiKeyDeleted, ApiKeyUpdated } from './api-key.js';
 import {
   LocationCreated,

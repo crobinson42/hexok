@@ -4,9 +4,9 @@ import { defineConfig } from 'astro/config';
 export default defineConfig({
   integrations: [
     starlight({
-      title: 'Kerf',
+      title: 'Hexok',
       description:
-        'A TypeScript kit for writing a clean-architecture backend as ordinary classes.',
+        'Hexo Kit — a TypeScript kit for writing a clean-architecture backend as ordinary classes.',
       sidebar: [
         { label: 'Start', items: ['index'] },
         {

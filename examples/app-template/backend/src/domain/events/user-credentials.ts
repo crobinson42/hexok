@@ -1,5 +1,5 @@
-import type { Infer } from 'kerf/core';
-import { DomainEvent } from 'kerf/domain';
+import type { Infer } from 'hexok/core';
+import { DomainEvent } from 'hexok/domain';
 import { userCredentialsSchema } from '../entities/user-credentials.js';
 
 export class UserCredentialsCreated extends DomainEvent {

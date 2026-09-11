@@ -1,4 +1,4 @@
-import { App, InMemoryBus } from 'kerf/testing';
+import { App, InMemoryBus } from 'hexok/testing';
 import { describe, expect, it } from 'vitest';
 import { AuthorizeInterceptor } from './authorize.js';
 import type { AppContext } from './context.js';

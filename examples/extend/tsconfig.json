@@ -7,5 +7,5 @@
   },
   "include": ["src"],
   "exclude": ["src/**/*.test.ts"],
-  "references": [{ "path": "../../packages/kerf" }]
+  "references": [{ "path": "../../packages/hexok" }]
 }

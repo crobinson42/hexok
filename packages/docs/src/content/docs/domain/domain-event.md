@@ -7,7 +7,7 @@ sidebar:
 
 Domain events are classes. Construction types the payload; validation happens at the use-case / RPC edge, not in the constructor.
 
-Register each class on an [EventCatalog](/domain/event-catalog/). Use cases `publish(new IncidentClosed({ ... }))`.
+Register each class on an [EventCatalog](/domain/event-catalog/). Use cases `publish(new IncidentClosed({ ... }))`. Catalogs that call `.ctx<T>()` require a second constructor argument `ctx: T` — the app defines `T`.
 
 ```ts
 class IncidentClosed extends DomainEvent {

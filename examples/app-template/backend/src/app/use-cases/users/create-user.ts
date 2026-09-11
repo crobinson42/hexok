@@ -3,8 +3,12 @@ import { z } from 'zod';
 import { User, userSchema } from '../../../domain/entities/user.js';
 import { DomainEvents } from '../../../domain/events/index.js';
 import { UserCreated } from '../../../domain/events/user.js';
-import { EmailService } from '../../ports/services/email.js';
+import {
+  ClientEvents,
+  UserCreated as UserCreatedClient,
+} from '../../events/client/index.js';
 import { UserRepository } from '../../ports/repos/users-repo.js';
+import { EmailService } from '../../ports/services/email.js';
 
 export class CreateUser extends ApiUseCase {
   static readonly key = 'user.create';
@@ -25,10 +29,10 @@ export class CreateUser extends ApiUseCase {
 
   static ports = {
     users: UserRepository,
-    email: Email,
+    email: EmailService,
   };
 
-  static publishes = [DomainEvents] as const;
+  static publishes = [DomainEvents, ClientEvents] as const;
 
   async execute({
     input,
@@ -53,10 +57,15 @@ export class CreateUser extends ApiUseCase {
       body: `Set up credentials for user ${user.props.id}.`,
     });
 
+    const payload = {
+      ...user.toProps(),
+      organizationIds: [...user.props.organizationIds],
+    };
+    publish(new UserCreated(payload));
     publish(
-      new UserCreated({
-        ...user.toProps(),
-        organizationIds: [...user.props.organizationIds],
+      new UserCreatedClient(payload, {
+        kind: 'organization',
+        organizationIds: payload.organizationIds,
       }),
     );
 

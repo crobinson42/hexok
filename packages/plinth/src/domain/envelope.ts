@@ -8,12 +8,14 @@ export type Envelope<
   P = unknown,
   Cat extends string = string,
   Kind extends CatalogKind = CatalogKind,
+  Ctx = unknown,
 > = {
   key: K;
   payload: P;
   catalog: Cat;
   kind: Kind;
   occurredAt: Date;
+  ctx?: Ctx;
   correlationId?: string;
   causationId?: string;
   meta: Record<string, unknown>;

@@ -1,10 +1,10 @@
 import { ApiUseCase, type ExecuteCtx } from 'plinth/app';
 import { z } from 'zod';
 import { actorSchema } from '../../../domain/schemas/actor.js';
-import { PasswordHasher } from '../../ports/utilities/password-hasher.js';
-import { AuthTokenService } from '../../ports/services/authTokenService.js';
 import { UserCredentialsRepository } from '../../ports/repos/user-credentials-repo.js';
 import { UserRepository } from '../../ports/repos/users-repo.js';
+import { AuthTokenService } from '../../ports/services/authTokenService.js';
+import { PasswordHasher } from '../../ports/utilities/password-hasher.js';
 
 export class Login extends ApiUseCase {
   static readonly key = 'auth.login';
@@ -27,7 +27,7 @@ export class Login extends ApiUseCase {
     users: UserRepository,
     userCredentials: UserCredentialsRepository,
     passwordHasher: PasswordHasher,
-    token: Token,
+    token: AuthTokenService,
   };
 
   async execute({ input, ports, errors }: ExecuteCtx<typeof Login>) {

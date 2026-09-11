@@ -6,7 +6,7 @@ import {
   type CatalogEvents,
   EventCatalog,
 } from './catalog.js';
-import { DomainEvent } from './event.js';
+import { DomainEvent, type EventWithCtx } from './event.js';
 
 class IncidentClosed extends DomainEvent {
   static readonly key = 'incident.closed';
@@ -84,5 +84,47 @@ describe('EventCatalog', () => {
 
     expectTypeOf(two).toMatchTypeOf<AnyEventCatalog>();
     expectTypeOf<typeof two>().not.toMatchTypeOf<EventCatalog>();
+  });
+
+  it('ctx() requires instance.ctx on registered classes', () => {
+    type Room = { room: string };
+    class ChatSaid extends DomainEvent {
+      static readonly key = 'chat.said';
+      static readonly schema = z.object({ text: z.string() });
+      constructor(
+        public readonly payload: { text: string },
+        public readonly ctx: Room,
+      ) {
+        super();
+      }
+    }
+
+    const catalog = new EventCatalog('client', { kind: 'bus' }).ctx<Room>();
+    expect(catalog.hasCtx).toBe(true);
+    catalog.event(ChatSaid);
+    expect(catalog.list()).toEqual([ChatSaid]);
+
+    expectTypeOf<EventWithCtx<typeof ChatSaid, Room>>().toEqualTypeOf<
+      typeof ChatSaid
+    >();
+    expectTypeOf<
+      EventWithCtx<typeof IncidentClosed, Room>
+    >().toEqualTypeOf<'plinth: event "incident.closed" is missing ctx for this catalog'>();
+  });
+
+  it('ctx() must be called once, before events', () => {
+    const catalog = new EventCatalog('client', { kind: 'bus' }).ctx<{
+      room: string;
+    }>();
+    expect(() => catalog.ctx<{ room: string }>()).toThrow(
+      'plinth: catalog "client" already has ctx',
+    );
+    const domain = new EventCatalog('domain', { kind: 'bus' }).event(
+      IncidentClosed,
+    );
+    expect(() => domain.ctx<{ room: string }>()).toThrow(
+      'plinth: catalog "domain" ctx() must be called before .event()',
+    );
+    expect(domain.hasCtx).toBe(false);
   });
 });

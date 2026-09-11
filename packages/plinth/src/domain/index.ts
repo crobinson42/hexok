@@ -22,5 +22,10 @@ export type {
   Envelope,
   EventAdapter,
 } from './envelope.js';
-export { DomainEvent, type EventClass, type EventPayload } from './event.js';
+export {
+  DomainEvent,
+  type EventClass,
+  type EventPayload,
+  type EventWithCtx,
+} from './event.js';
 export { Port, PortToken, type PortType } from './port.js';

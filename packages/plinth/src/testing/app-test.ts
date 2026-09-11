@@ -75,15 +75,16 @@ export class TestAppBuilder<
     Key extends string,
     Kind extends CatalogKind,
     Events extends EventClass = never,
+    CatCtx = undefined,
   >(
-    catalog: [EventCatalog<Key, Kind, Events>] extends [Bound]
+    catalog: [EventCatalog<Key, Kind, Events, CatCtx>] extends [Bound]
       ? DuplicateCatalogError<Key>
-      : EventCatalog<Key, Kind, Events>,
+      : EventCatalog<Key, Kind, Events, CatCtx>,
     adapter: AdapterFor<Kind>,
   ): TestAppBuilder<
     Bag,
     Provided,
-    Bound | EventCatalog<Key, Kind, Events>,
+    Bound | EventCatalog<Key, Kind, Events, CatCtx>,
     Ctx
   > {
     const next = this.#inner.bind(catalog as never, adapter);
@@ -91,7 +92,7 @@ export class TestAppBuilder<
       next as AppBuilder<
         Bag,
         Provided,
-        Bound | EventCatalog<Key, Kind, Events>,
+        Bound | EventCatalog<Key, Kind, Events, CatCtx>,
         Ctx
       >,
       this.#published,

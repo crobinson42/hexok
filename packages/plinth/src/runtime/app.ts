@@ -104,13 +104,19 @@ export class AppBuilder<
     Key extends string,
     Kind extends CatalogKind,
     Events extends EventClass = never,
+    CatCtx = undefined,
   >(
-    catalog: [EventCatalog<Key, Kind, Events>] extends [Bound]
+    catalog: [EventCatalog<Key, Kind, Events, CatCtx>] extends [Bound]
       ? DuplicateCatalogError<Key>
-      : EventCatalog<Key, Kind, Events>,
+      : EventCatalog<Key, Kind, Events, CatCtx>,
     adapter: AdapterFor<Kind>,
-  ): AppBuilder<Bag, Provided, Bound | EventCatalog<Key, Kind, Events>, Ctx> {
-    const cat = catalog as EventCatalog<Key, Kind, Events>;
+  ): AppBuilder<
+    Bag,
+    Provided,
+    Bound | EventCatalog<Key, Kind, Events, CatCtx>,
+    Ctx
+  > {
+    const cat = catalog as EventCatalog<Key, Kind, Events, CatCtx>;
     if (this.#bound.has(cat as AnyEventCatalog)) {
       throw new Error(`plinth: catalog "${cat.key}" already bound`);
     }
@@ -124,7 +130,7 @@ export class AppBuilder<
     return this as unknown as AppBuilder<
       Bag,
       Provided,
-      Bound | EventCatalog<Key, Kind, Events>,
+      Bound | EventCatalog<Key, Kind, Events, CatCtx>,
       Ctx
     >;
   }

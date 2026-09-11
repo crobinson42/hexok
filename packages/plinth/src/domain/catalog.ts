@@ -1,5 +1,5 @@
 import type { CatalogKind } from './envelope.js';
-import type { EventClass } from './event.js';
+import type { EventClass, EventWithCtx } from './event.js';
 
 const IDENT = /^[A-Za-z_$][A-Za-z0-9_$]*$/;
 
@@ -20,15 +20,36 @@ export class EventCatalog<
   Key extends string = string,
   Kind extends CatalogKind = CatalogKind,
   out Events extends EventClass = never,
+  out Ctx = undefined,
 > {
   readonly key: Key;
   readonly kind: Kind;
   #events = new Map<string, EventClass>();
   #frozen = false;
+  #hasCtx = false;
 
   constructor(key: Key, options: { kind: Kind }) {
     this.key = key;
     this.kind = options.kind;
+  }
+
+  /** Require `ctx: C` on every event in this catalog. Call before `.event()`. */
+  ctx<C>(): EventCatalog<Key, Kind, Events, C> {
+    this.assertWritable();
+    if (this.#hasCtx) {
+      throw new Error(`plinth: catalog "${this.key}" already has ctx`);
+    }
+    if (this.#events.size > 0) {
+      throw new Error(
+        `plinth: catalog "${this.key}" ctx() must be called before .event()`,
+      );
+    }
+    this.#hasCtx = true;
+    return this as unknown as EventCatalog<Key, Kind, Events, C>;
+  }
+
+  get hasCtx(): boolean {
+    return this.#hasCtx;
   }
 
   /** Registered event classes, in registration order. */
@@ -37,20 +58,21 @@ export class EventCatalog<
   }
 
   event<E extends EventClass>(
-    eventClass: E,
-  ): EventCatalog<Key, Kind, Events | E> {
+    eventClass: [Ctx] extends [undefined] ? E : EventWithCtx<E, Ctx>,
+  ): EventCatalog<Key, Kind, Events | E, Ctx> {
     this.assertWritable();
-    const eventKey = eventClass.key;
+    const ctor = eventClass as E;
+    const eventKey = ctor.key;
     if (this.#events.has(eventKey)) {
       throw new Error(
         `plinth: duplicate event "${eventKey}" in catalog "${this.key}"`,
       );
     }
-    this.#events.set(eventKey, eventClass);
+    this.#events.set(eventKey, ctor);
     nestIdentifierPath(
       this as unknown as Record<string, unknown>,
       eventKey,
-      eventClass,
+      ctor,
     );
     return this;
   }
@@ -65,7 +87,7 @@ export class EventCatalog<
     return found as E;
   }
 
-  freeze(): EventCatalog<Key, Kind, Events> {
+  freeze(): EventCatalog<Key, Kind, Events, Ctx> {
     if (this.#frozen) return this;
     this.#frozen = true;
     Object.freeze(this);
@@ -84,10 +106,20 @@ export class EventCatalog<
 }
 
 /** Safe annotation / Map key. Bare `EventCatalog` is Events=never and rejects populated catalogs. */
-export type AnyEventCatalog = EventCatalog<string, CatalogKind, EventClass>;
+export type AnyEventCatalog = EventCatalog<
+  string,
+  CatalogKind,
+  EventClass,
+  unknown
+>;
 
 export type CatalogEvents<Cat> =
-  Cat extends EventCatalog<infer _Key, infer _Kind, infer E extends EventClass>
+  Cat extends EventCatalog<
+    infer _Key,
+    infer _Kind,
+    infer E extends EventClass,
+    infer _Ctx
+  >
     ? E
     : never;
 

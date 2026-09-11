@@ -7,7 +7,7 @@ sidebar:
 
 An `Envelope` is the runtime value on the wire. `kind` is copied from the catalog. Use cases usually `publish` a `DomainEvent`; the runtime wraps it.
 
-Fields: `key`, `payload`, `catalog`, `kind`, `occurredAt`, optional `correlationId` / `causationId`, and `meta`.
+Fields: `key`, `payload`, `catalog`, `kind`, `occurredAt`, optional `ctx` (when the catalog called `.ctx<T>()`), optional `correlationId` / `causationId`, and `meta`.
 
 ```ts
 type Envelope = {
@@ -16,6 +16,7 @@ type Envelope = {
   catalog: string
   kind: 'bus' | 'broker'
   occurredAt: Date
+  ctx?: unknown
   correlationId?: string
   causationId?: string
   meta: Record<string, unknown>

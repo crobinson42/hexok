@@ -7,6 +7,7 @@
     "dev": "astro dev",
     "build": "tsc -b backend && astro build",
     "preview": "astro preview",
+    "test": "vitest run",
     "type-check": "tsc --noEmit -p backend/tsconfig.check.json && astro check",
     "lint": "biome check .",
     "clean": "rm -rf dist backend/dist .astro backend/*.tsbuildinfo"

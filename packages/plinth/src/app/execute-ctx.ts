@@ -54,23 +54,35 @@ export type ExecuteCtx<C, Ctx = unknown> = {
 type EventOn<C> = C extends { on: infer E extends EventClass } ? E : EventClass;
 
 type CatalogKeyOf<C> = C extends {
-  catalog: EventCatalog<infer K extends string, infer _Kind, infer _E>;
+  catalog: EventCatalog<
+    infer K extends string,
+    infer _Kind,
+    infer _E,
+    infer _Ctx
+  >;
 }
   ? K
   : string;
 
 type CatalogKindOf<C> = C extends {
-  catalog: EventCatalog<string, infer Kind, infer _E>;
+  catalog: EventCatalog<string, infer Kind, infer _E, infer _Ctx>;
 }
   ? Kind
   : 'bus';
+
+type CatalogCtxOf<C> = C extends {
+  catalog: EventCatalog<string, infer _Kind, infer _E, infer Ctx>;
+}
+  ? Ctx
+  : unknown;
 
 export type EventCtx<C, Ctx = unknown> = {
   event: Envelope<
     EventOn<C>['key'] extends infer N extends string ? N : string,
     EventPayload<EventOn<C>>,
     CatalogKeyOf<C>,
-    CatalogKindOf<C>
+    CatalogKindOf<C>,
+    CatalogCtxOf<C>
   >;
   ports: C extends { ports: infer P }
     ? ResolvedPorts<P>

@@ -22,7 +22,7 @@ export class AuthenticateApiKey extends ApiUseCase {
 
   static ports = {
     apiKeys: ApiKeyRepository,
-    token: Token,
+    token: AuthTokenService,
   };
 
   async execute({

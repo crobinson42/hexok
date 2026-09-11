@@ -23,7 +23,12 @@ type KeyOf<C> = C extends { key: infer I extends string } ? I : 'unknown';
 type OnInCatalog<C> = C extends {
   key: infer Key extends string;
   on: infer On;
-  catalog: EventCatalog<infer _K, infer _Kind, infer Events extends EventClass>;
+  catalog: EventCatalog<
+    infer _K,
+    infer _Kind,
+    infer Events extends EventClass,
+    infer _Ctx
+  >;
 }
   ? [On] extends [Events]
     ? C

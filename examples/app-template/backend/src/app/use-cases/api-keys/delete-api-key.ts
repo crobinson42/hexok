@@ -4,6 +4,10 @@ import { ApiKeyDeleted } from '../../../domain/events/api-key.js';
 import { DomainEvents } from '../../../domain/events/index.js';
 import { requireUser } from '../../auth.js';
 import type { AppContext } from '../../context.js';
+import {
+  ApiKeyDeleted as ApiKeyDeletedClient,
+  ClientEvents,
+} from '../../events/client/index.js';
 import { ApiKeyRepository } from '../../ports/repos/api-keys-repo.js';
 
 export class DeleteApiKey extends ApiUseCase {
@@ -27,7 +31,7 @@ export class DeleteApiKey extends ApiUseCase {
     apiKeys: ApiKeyRepository,
   };
 
-  static publishes = [DomainEvents] as const;
+  static publishes = [DomainEvents, ClientEvents] as const;
 
   async execute({
     input,
@@ -46,6 +50,15 @@ export class DeleteApiKey extends ApiUseCase {
     await ports.apiKeys.delete(apiKey.props.id);
 
     publish(new ApiKeyDeleted({ id: apiKey.props.id }));
+    publish(
+      new ApiKeyDeletedClient(
+        { id: apiKey.props.id },
+        {
+          kind: 'organization',
+          organizationIds: [...apiKey.props.organizationIds],
+        },
+      ),
+    );
 
     return { id: apiKey.props.id };
   }

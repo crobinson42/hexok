@@ -201,6 +201,65 @@ describe('App invoke', () => {
     expect(bus.published[0]?.key).toBe('incident.closed');
   });
 
+  it('publishes the same key to each catalog that registered the class', async () => {
+    class DomainNote extends DomainEvent {
+      static readonly key = 'note.posted';
+      static readonly schema = z.object({ text: z.string() });
+      constructor(public readonly payload: { text: string }) {
+        super();
+      }
+    }
+    class ClientNote extends DomainEvent {
+      static readonly key = 'note.posted';
+      static readonly schema = z.object({ text: z.string() });
+      constructor(public readonly payload: { text: string }) {
+        super();
+      }
+    }
+    const Notes = new EventCatalog('domain', { kind: 'bus' }).event(DomainNote);
+    const ClientNotes = new EventCatalog('client', { kind: 'bus' }).event(
+      ClientNote,
+    );
+
+    class PostNote extends ApiUseCase {
+      static readonly key = 'note.post';
+      static readonly input = z.object({ text: z.string() });
+      static readonly output = z.object({});
+      static readonly errors = {} as const;
+      static readonly ports = {};
+      static readonly publishes = [Notes, ClientNotes] as const;
+
+      async execute({ input, publish }: ExecuteCtx<typeof PostNote>) {
+        publish(new DomainNote({ text: input.text }));
+        publish(new ClientNote({ text: input.text }));
+        return {};
+      }
+    }
+
+    const domainBus = memoryBus();
+    const clientBus = memoryBus();
+    const app = App.from({ post: PostNote })
+      .bind(Notes, domainBus)
+      .bind(ClientNotes, clientBus)
+      .build();
+
+    await app.local.note.post({ text: 'hi' });
+    expect(domainBus.published).toEqual([
+      expect.objectContaining({
+        catalog: 'domain',
+        key: 'note.posted',
+        payload: { text: 'hi' },
+      }),
+    ]);
+    expect(clientBus.published).toEqual([
+      expect.objectContaining({
+        catalog: 'client',
+        key: 'note.posted',
+        payload: { text: 'hi' },
+      }),
+    ]);
+  });
+
   it('drops the publish queue when execute throws', async () => {
     const bus = memoryBus();
     const app = App.from({ close: CloseIncident })

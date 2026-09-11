@@ -55,7 +55,12 @@ type PortDisplayName<Bag extends UseCaseBag, Token> = JoinUnion<
 >;
 
 type CatalogKeyOf<T> =
-  T extends EventCatalog<infer Key extends string, infer _Kind, infer _Events>
+  T extends EventCatalog<
+    infer Key extends string,
+    infer _Kind,
+    infer _Events,
+    infer _Ctx
+  >
     ? Key
     : 'unknown';
 

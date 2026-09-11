@@ -24,14 +24,14 @@ export function wrapEvent(
   if (isEnvelope(event)) return event;
   const Ctor = event.constructor as EventClass;
   const catalog = catalogs.find((item) =>
-    item.list().some((registered) => registered.key === Ctor.key),
+    item.list().some((registered) => registered === Ctor),
   );
   if (!catalog) {
     throw new Error(
       `plinth: event "${Ctor.key}" is not in a bound catalog declared by publishes`,
     );
   }
-  return {
+  const envelope: Envelope = {
     key: Ctor.key,
     payload: event.payload,
     catalog: catalog.key,
@@ -39,4 +39,13 @@ export function wrapEvent(
     occurredAt: new Date(),
     meta: {},
   };
+  if (catalog.hasCtx) {
+    if (!('ctx' in event)) {
+      throw new Error(
+        `plinth: event "${Ctor.key}" is missing ctx for catalog "${catalog.key}"`,
+      );
+    }
+    envelope.ctx = (event as { ctx: unknown }).ctx;
+  }
+  return envelope;
 }

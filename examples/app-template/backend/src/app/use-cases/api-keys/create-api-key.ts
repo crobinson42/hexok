@@ -5,6 +5,10 @@ import { ApiKeyCreated } from '../../../domain/events/api-key.js';
 import { DomainEvents } from '../../../domain/events/index.js';
 import { requireUser } from '../../auth.js';
 import type { AppContext } from '../../context.js';
+import {
+  ApiKeyCreated as ApiKeyCreatedClient,
+  ClientEvents,
+} from '../../events/client/index.js';
 import { ApiKeyRepository } from '../../ports/repos/api-keys-repo.js';
 import { UserRepository } from '../../ports/repos/users-repo.js';
 
@@ -33,7 +37,7 @@ export class CreateApiKey extends ApiUseCase {
     apiKeys: ApiKeyRepository,
   };
 
-  static publishes = [DomainEvents] as const;
+  static publishes = [DomainEvents, ClientEvents] as const;
 
   async execute({
     input,
@@ -66,11 +70,23 @@ export class CreateApiKey extends ApiUseCase {
     });
     await ports.apiKeys.save(apiKey);
 
+    const payload = {
+      ...apiKey.toProps(),
+      organizationIds: [...apiKey.props.organizationIds],
+    };
+    publish(new ApiKeyCreated(payload));
     publish(
-      new ApiKeyCreated({
-        ...apiKey.toProps(),
-        organizationIds: [...apiKey.props.organizationIds],
-      }),
+      new ApiKeyCreatedClient(
+        {
+          id: payload.id,
+          userId: payload.userId,
+          organizationIds: payload.organizationIds,
+        },
+        {
+          kind: 'organization',
+          organizationIds: payload.organizationIds,
+        },
+      ),
     );
 
     return apiKey.toProps();

@@ -77,6 +77,21 @@ describe('InMemoryRepository', () => {
     expect(await repo.get('1')).not.toBeNull();
   });
 
+  it('get clone can be set after restore(toProps())', async () => {
+    const repo = InMemoryRepository.of(ThingRepository, {
+      keyBy: 'id',
+      seed: [Thing.create({ id: '1' })],
+    });
+    const got = await repo.get('1');
+    if (got === null) throw new Error('expected Thing');
+    got.set((draft) => {
+      draft.id = '2';
+    });
+    expect(got.id).toBe('2');
+    expect(got.getChangedKeys()).toEqual(['id']);
+    expect((await repo.get('1'))?.id).toBe('1');
+  });
+
   it('seed does not commit the caller', () => {
     const created = Thing.create({ id: '1' });
     InMemoryRepository.of(ThingRepository, {

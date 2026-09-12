@@ -395,6 +395,69 @@ describe('Entity', () => {
     expect(site.toProps()).toBe(afterSet);
   });
 
+  it('set after restore(toProps()) copies the frozen snapshot', () => {
+    const snap = Site.restore(hq()).toProps();
+    const site = Site.restore(snap);
+    expect(site.props).toBe(snap);
+    expect(Object.isFrozen(site.props)).toBe(true);
+
+    site.relocate('Denver', 'CO');
+    expect(site.address).toEqual({ city: 'Denver', region: 'CO' });
+    expect(site.getChangedKeys()).toEqual(['address']);
+    expect(snap.address).toEqual({ city: 'Austin', region: 'TX' });
+    expect(site.props).not.toBe(snap);
+    expect(site.original).toBe(snap);
+
+    const working = site.props;
+    site.set((draft) => {
+      draft.address.city = 'Boulder';
+    });
+    expect(site.props).toBe(working);
+    expect(site.props.address.city).toBe('Boulder');
+  });
+
+  it('scalar set after restore(toProps()) copies the frozen snapshot', () => {
+    const snap = Incident.open('1').toProps();
+    const incident = Incident.restore(snap);
+    const now = new Date('2026-01-01T00:00:00Z');
+    incident.close(now);
+    expect(incident.status).toBe('closed');
+    expect(incident.closedAt).toEqual(now);
+    expect(snap.status).toBe('open');
+    expect(snap.closedAt).toBeNull();
+    expect(incident.getChangedKeys().sort()).toEqual(['closedAt', 'status']);
+  });
+
+  it('no-op set after restore(toProps()) stays clean', () => {
+    const snap = Site.restore(hq()).toProps();
+    const site = Site.restore(snap);
+    site.set((draft) => {
+      void draft.address.city;
+    });
+    expect(site.props).toBe(snap);
+    expect(site.original).toBeUndefined();
+    expect(site.isDirty()).toBe(false);
+    expect(Object.isFrozen(site.props)).toBe(true);
+  });
+
+  it('failed set after restore(toProps()) stays clean', () => {
+    const snap = Site.restore(hq()).toProps();
+    const site = Site.restore(snap);
+    try {
+      site.set((draft) => {
+        draft.address.city = 1 as unknown as string;
+      });
+      expect.unreachable();
+    } catch (error) {
+      expect(error).toBeInstanceOf(CodedError);
+      expect(error).toMatchObject({ code: 'VALIDATION' });
+    }
+    expect(site.props).toBe(snap);
+    expect(site.original).toBeUndefined();
+    expect(site.isDirty()).toBe(false);
+    expect(site.isValidated).toBe(false);
+  });
+
   it('toProps Date values are copied', () => {
     const closedAt = new Date('2026-01-01T00:00:00Z');
     const timed = Timed.restore({

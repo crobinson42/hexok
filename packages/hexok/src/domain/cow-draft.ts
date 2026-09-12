@@ -30,19 +30,22 @@ export function applyCowDraft<T extends object>(
   const sourceOf = <O extends object>(obj: O): O =>
     (copies.get(obj) as O | undefined) ?? obj;
 
-  const dest = <O extends object>(obj: O): O => {
+  const dest = <O extends object>(obj: O, asWrite = true): O => {
     const copied = copies.get(obj) as O | undefined;
     if (copied) return copied;
-    if (nextOwned.has(obj)) return obj;
+    if (nextOwned.has(obj) && !Object.isFrozen(obj)) return obj;
 
-    wrote = true;
+    if (asWrite) wrote = true;
     const clone = (Array.isArray(obj) ? obj.slice() : { ...obj }) as O;
     copies.set(obj, clone);
     nextOwned.add(clone);
 
     const link = parents.get(obj);
     if (link) {
-      const parentDest = dest(link.parent) as Record<PropertyKey, unknown>;
+      const parentDest = dest(link.parent, asWrite) as Record<
+        PropertyKey,
+        unknown
+      >;
       parentDest[link.key] = clone;
     } else {
       currentRoot = clone as unknown as T;
@@ -61,8 +64,12 @@ export function applyCowDraft<T extends object>(
   const wrap = (obj: object): object => {
     const existing = proxies.get(obj);
     if (existing) return existing;
-    const proxy = new Proxy(obj, handler);
+    // Frozen objects cannot be proxy targets: non-writable, non-configurable
+    // keys reject a nested draft proxy (get) and a differing assignment (set).
+    const target = Object.isFrozen(obj) ? dest(obj, false) : obj;
+    const proxy = new Proxy(target, handler);
     proxies.set(obj, proxy);
+    if (target !== obj) proxies.set(target, proxy);
     return proxy;
   };
 

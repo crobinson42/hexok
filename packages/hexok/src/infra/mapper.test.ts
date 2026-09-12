@@ -22,13 +22,24 @@ class Incident extends Entity<Props> {
   }
 }
 
+const rowOf = (e: Incident) => ({
+  id: e.id,
+  closed_at: e.closedAt?.toISOString() ?? null,
+});
+
 const IncidentMapper = Mapper.for(Incident)
-  .to((e) => ({
-    id: e.id,
-    closed_at: e.closedAt?.toISOString() ?? null,
-  }))
+  .to(rowOf)
   .from((row) =>
     Incident.restore({
+      id: row.id,
+      closedAt: row.closed_at ? new Date(row.closed_at) : null,
+    }),
+  );
+
+const IncidentParseMapper = Mapper.for(Incident)
+  .to(rowOf)
+  .from((row) =>
+    Incident.parse({
       id: row.id,
       closedAt: row.closed_at ? new Date(row.closed_at) : null,
     }),
@@ -41,11 +52,24 @@ describe('Mapper', () => {
     expect(row).toEqual({ id: '1', closed_at: null });
     const back = IncidentMapper.from(row);
     expect(back.id).toBe('1');
+    expect(back.isValidated).toBe(false);
   });
 
-  it('throws CodedError at the trust boundary', () => {
+  it('restore from does not run the schema', () => {
+    const back = IncidentMapper.from({
+      id: 1 as unknown as string,
+      closed_at: null,
+    });
+    expect(back.id).toBe(1 as unknown as string);
+    expect(back.isValidated).toBe(false);
+  });
+
+  it('parse from throws CodedError at the trust boundary', () => {
     try {
-      IncidentMapper.from({ id: 1 as unknown as string, closed_at: null });
+      IncidentParseMapper.from({
+        id: 1 as unknown as string,
+        closed_at: null,
+      });
       expect.unreachable();
     } catch (error) {
       expect(error).toBeInstanceOf(CodedError);
@@ -61,8 +85,20 @@ describe('Mapper', () => {
     }
   });
 
-  it('unsafe from returns Result with issues', () => {
+  it('unsafe restore from does not run the schema', () => {
     const result = IncidentMapper.unsafe().from({
+      id: 1 as unknown as string,
+      closed_at: null,
+    });
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.value.isValidated).toBe(false);
+      expect(result.value.id).toBe(1 as unknown as string);
+    }
+  });
+
+  it('unsafe from returns Result with issues when parse rejects', () => {
+    const result = IncidentParseMapper.unsafe().from({
       id: 1 as unknown as string,
       closed_at: null,
     });

@@ -10,7 +10,10 @@ import type { EntityConstructor } from '../domain/index.js';
 const TRUST = 'hexok: model.from() failed entity.parse (trust boundary)';
 
 /**
- * One entity, two functions. Inbound `from` is the trust boundary.
+ * One entity, two functions. Inbound `from` wraps the mapping.
+ * `restore` does not run the schema; `parse` does (untyped trust
+ * boundary). `VALIDATION` from `parse` / `create` / `set` is rethrown
+ * with a mapper message.
  *
  * ```ts
  * const IncidentMapper = Mapper.for(Incident)
@@ -47,7 +50,7 @@ export class Mapper<E extends EntityConstructor, Row> {
     return this.#toFn(entity);
   }
 
-  /** Inbound trust boundary. Rethrows `CodedError` so `instanceof` still works. */
+  /** Run the inbound mapping. Rethrows `VALIDATION` from `parse` / `create` / `set`. */
   from(row: Row): E['prototype'] {
     try {
       return this.#fromFn(row);
@@ -101,7 +104,7 @@ export type MapperTo<E extends EntityConstructor> = {
 export type MapperFrom<E extends EntityConstructor, Row> = {
   /**
    * Set the inbound mapping (row → entity) and return the mapper.
-   * This is the trust boundary.
+   * `restore` does not run the schema; `parse` does.
    */
   from(fromFn: (row: Row) => E['prototype']): Mapper<E, Row>;
 };

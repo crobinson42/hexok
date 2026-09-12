@@ -29,7 +29,9 @@ export type DeepReadonly<T> = T extends Date
  * They never I/O, never publish, never hold ports.
  *
  * Validation, invariants, and declared refusals **throw**.
- * `set` re-runs the schema after the producer returns.
+ * `create` / `parse` run the schema. `restore` does not — it rehydrates
+ * mapper output as-is. `set` re-runs the schema after a write.
+ * `validate()` is the optional fail-fast for a restored instance.
  *
  * ```ts
  * class Incident extends Entity<IncidentProps> {
@@ -49,17 +51,18 @@ export type DeepReadonly<T> = T extends Date
 export abstract class Entity<P extends object> {
   /** Entity name used in validation and undeclared-error messages. Declare on each subclass. */
   static readonly key: string;
-  /** Standard Schema for `create` / `restore` / `parse`. Declare on each subclass. */
+  /** Standard Schema for `create` / `parse` / `set` / `validate()`. Declare on each subclass. */
   static readonly schema: StandardSchemaV1;
   /** Declared refusal codes. Keys are the `error()` union. Declare on each subclass. */
   static readonly errors: ErrorMap;
   #isNew = false;
+  #validated = false;
   #original: P | undefined = undefined;
   #owned: WeakSet<object> | undefined = undefined;
   #snapshot: P | undefined = undefined;
   protected _props: P;
 
-  /** Live schema output. Read-only; write through `set`. */
+  /** Live props. Read-only; write through `set`. */
   get props(): DeepReadonly<P> {
     return this._props as DeepReadonly<P>;
   }
@@ -67,6 +70,14 @@ export abstract class Entity<P extends object> {
   /** True after `create` until `commit`. `restore` / `parse` start false. */
   get isNew(): boolean {
     return this.#isNew;
+  }
+
+  /**
+   * True after `create`, `parse`, a writing `set`, or `validate()`.
+   * `restore` starts false — the schema has not run.
+   */
+  get isValidated(): boolean {
+    return this.#validated;
   }
 
   /**
@@ -89,6 +100,7 @@ export abstract class Entity<P extends object> {
 
   /** Copy-on-write mutate. Edit `draft` and return `this`. Re-validates the schema after a write. */
   set(producer: (draft: P) => void): this {
+    const previousRoot = this._props;
     const backup = cloneValue(this._props);
     const previousSnapshot = this.#snapshot;
     const wasOwned = this.#owned?.has(this._props) === true;
@@ -97,18 +109,28 @@ export abstract class Entity<P extends object> {
     this.#owned = result.owned;
     if (result.wrote) {
       this.#snapshot = undefined;
-      const Ctor = this.constructor as unknown as EntityConstructor;
-      const parsed = validate(Ctor.schema, this._props);
-      if (!parsed.ok) {
-        this._props = backup;
+      try {
+        this.#assertSchema();
+      } catch (error) {
+        this._props = wasOwned ? backup : previousRoot;
         this.#owned = wasOwned ? new WeakSet([backup]) : undefined;
         this.#snapshot = previousSnapshot;
-        throw validationError(
-          `hexok: ${Ctor.key} validation failed`,
-          parsed.issues,
-        );
+        throw error;
       }
+      this.#validated = true;
     }
+    return this;
+  }
+
+  /**
+   * Run the schema if it has not already passed on this instance.
+   * No-op when `isValidated`. Does not rewrite props (no strip/defaults).
+   * Throws `CodedError` `VALIDATION` if the schema rejects current props.
+   */
+  validate(): this {
+    if (this.#validated) return this;
+    this.#assertSchema();
+    this.#validated = true;
     return this;
   }
 
@@ -198,25 +220,27 @@ export abstract class Entity<P extends object> {
   ): T['prototype'] {
     const instance = instantiate(this, props) as Entity<object>;
     instance.#markNew();
+    instance.#validated = true;
     return instance as T['prototype'];
   }
 
   /**
-   * Validate typed props and reconstruct an existing instance (`isNew: false`).
-   * Throws `CodedError` `VALIDATION` if the schema rejects the props.
+   * Reconstruct an existing instance (`isNew: false`) without running the
+   * schema. Props are stored as given (no strip/defaults). `isValidated`
+   * starts false until `set` writes or `validate()` runs.
    */
   static restore<T extends EntityConstructor>(
     this: T,
     props: SchemaOutput<T> | DeepReadonly<SchemaOutput<T>>,
   ): T['prototype'] {
-    const instance = instantiate(this, props) as Entity<object>;
+    const instance = construct(this, props) as Entity<object>;
     instance.#markRestored();
     return instance as T['prototype'];
   }
 
   /**
-   * Trust boundary for untyped input. Same validation as create/restore;
-   * tracking matches restore (`isNew: false`).
+   * Trust boundary for untyped input. Validates like `create`;
+   * tracking matches `restore` (`isNew: false`).
    * Throws `CodedError` `VALIDATION` if the schema rejects the value.
    */
   static parse<T extends EntityConstructor>(
@@ -225,6 +249,7 @@ export abstract class Entity<P extends object> {
   ): T['prototype'] {
     const instance = instantiate(this, value) as Entity<object>;
     instance.#markRestored();
+    instance.#validated = true;
     return instance as T['prototype'];
   }
 
@@ -243,13 +268,24 @@ export abstract class Entity<P extends object> {
     this.#owned = undefined;
     this.#snapshot = undefined;
   }
+
+  #assertSchema(): void {
+    const Ctor = this.constructor as unknown as EntityConstructor;
+    const parsed = validate(Ctor.schema, this._props);
+    if (!parsed.ok) {
+      throw validationError(
+        `hexok: ${Ctor.key} validation failed`,
+        parsed.issues,
+      );
+    }
+  }
 }
 
 /** Subclass constructor shape for `create` / `restore` / `parse`. */
 export type EntityConstructor = {
   /** Entity name used in validation and error messages. */
   readonly key: string;
-  /** Standard Schema for `create` / `restore` / `parse`. Declare on each subclass. */
+  /** Standard Schema for `create` / `parse` / `set` / `validate()`. Declare on each subclass. */
   readonly schema: StandardSchemaV1;
   /** Declared refusal codes. Keys are the `error()` union. Declare on each subclass. */
   readonly errors: ErrorMap;
@@ -275,8 +311,15 @@ function instantiate<T extends EntityConstructor>(
       parsed.issues,
     );
   }
+  return construct(Ctor, parsed.value);
+}
+
+function construct<T extends EntityConstructor>(
+  Ctor: T,
+  value: unknown,
+): T['prototype'] {
   const CtorImpl = Ctor as unknown as new (props: unknown) => T['prototype'];
-  return new CtorImpl(parsed.value);
+  return new CtorImpl(value);
 }
 
 function diffDeep(

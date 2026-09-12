@@ -138,7 +138,7 @@ describe('Entity', () => {
     void _typeChecks;
   });
 
-  it('create / restore / parse validate via the schema', () => {
+  it('create / parse validate via the schema; restore does not', () => {
     const created = Incident.create({
       id: '1',
       status: 'open',
@@ -146,9 +146,11 @@ describe('Entity', () => {
     });
     expect(created).toBeInstanceOf(Incident);
     expect(created.id).toBe('1');
+    expect(created.isValidated).toBe(true);
 
     const restored = Incident.restore(created.toProps());
     expect(restored).toBeInstanceOf(Incident);
+    expect(restored.isValidated).toBe(false);
 
     const parsed = Incident.parse({
       id: '2',
@@ -156,6 +158,7 @@ describe('Entity', () => {
       closedAt: null,
     });
     expect(parsed).toBeInstanceOf(Incident);
+    expect(parsed.isValidated).toBe(true);
 
     try {
       Incident.parse({ id: 1 });
@@ -167,6 +170,134 @@ describe('Entity', () => {
         message: 'hexok: Incident validation failed',
       });
     }
+
+    try {
+      Incident.create({ id: 1 } as unknown as IncidentProps);
+      expect.unreachable();
+    } catch (error) {
+      expect(error).toBeInstanceOf(CodedError);
+      expect(error).toMatchObject({ code: 'VALIDATION' });
+    }
+
+    const invalid = Incident.restore({
+      id: 1,
+    } as unknown as IncidentProps);
+    expect(invalid).toBeInstanceOf(Incident);
+    expect(invalid.isValidated).toBe(false);
+  });
+
+  it('restore keeps mapper props as-is, including extra keys', () => {
+    const input = {
+      id: '1',
+      status: 'open' as const,
+      closedAt: null,
+      extra: true,
+    };
+    const restored = Incident.restore(input as unknown as IncidentProps);
+    expect(restored.props).toBe(input);
+    expect((restored.props as { extra?: boolean }).extra).toBe(true);
+    expect(restored.isValidated).toBe(false);
+    expect(restored.isDirty()).toBe(false);
+    restored.validate();
+    expect(restored.isValidated).toBe(true);
+    expect((restored.props as { extra?: boolean }).extra).toBe(true);
+    expect(restored.isDirty()).toBe(false);
+  });
+
+  it('validate() runs the schema on a restored instance and is a no-op after', () => {
+    const restored = Incident.restore({
+      id: '1',
+      status: 'open',
+      closedAt: null,
+    });
+    expect(restored.validate()).toBe(restored);
+    expect(restored.isValidated).toBe(true);
+    expect(restored.isDirty()).toBe(false);
+    expect(restored.validate()).toBe(restored);
+
+    const created = Incident.open('1');
+    expect(created.isValidated).toBe(true);
+    expect(created.validate()).toBe(created);
+
+    try {
+      Incident.restore({ id: 1 } as unknown as IncidentProps).validate();
+      expect.unreachable();
+    } catch (error) {
+      expect(error).toBeInstanceOf(CodedError);
+      expect(error).toMatchObject({
+        code: 'VALIDATION',
+        message: 'hexok: Incident validation failed',
+      });
+    }
+  });
+
+  it('set on restore validates and marks isValidated; no-op set does not', () => {
+    const site = Site.restore(hq());
+    expect(site.isValidated).toBe(false);
+    site.set(() => {});
+    expect(site.isValidated).toBe(false);
+
+    site.relocate('Denver', 'CO');
+    expect(site.isValidated).toBe(true);
+    expect(site.address.city).toBe('Denver');
+
+    const bad = Incident.restore({
+      id: 1,
+      status: 'open',
+      closedAt: null,
+    } as unknown as IncidentProps);
+    expect(bad.isValidated).toBe(false);
+    const now = new Date('2026-01-01T00:00:00Z');
+    try {
+      bad.close(now);
+      expect.unreachable();
+    } catch (error) {
+      expect(error).toBeInstanceOf(CodedError);
+      expect(error).toMatchObject({ code: 'VALIDATION' });
+    }
+    expect(bad.status).toBe('open');
+    expect(bad.isValidated).toBe(false);
+    expect(bad.isDirty()).toBe(false);
+    expect(bad.original).toBeUndefined();
+  });
+
+  it('failed set on a restored nested object stays clean', () => {
+    const site = Site.restore(hq());
+    const before = site.props;
+    try {
+      site.set((draft) => {
+        draft.address.city = 1 as unknown as string;
+      });
+      expect.unreachable();
+    } catch (error) {
+      expect(error).toBeInstanceOf(CodedError);
+      expect(error).toMatchObject({ code: 'VALIDATION' });
+    }
+    expect(site.props).toBe(before);
+    expect(site.original).toBeUndefined();
+    expect(site.isDirty()).toBe(false);
+    expect(site.isValidated).toBe(false);
+    expect(site.getChangedKeys()).toEqual([]);
+  });
+
+  it('create / parse adopt schema output; restore does not', () => {
+    const extra = {
+      id: '1',
+      status: 'open' as const,
+      closedAt: null,
+      extra: true,
+    };
+    const created = Incident.create(extra as unknown as IncidentProps);
+    expect((created.props as { extra?: boolean }).extra).toBeUndefined();
+    expect(created.isValidated).toBe(true);
+
+    const parsed = Incident.parse(extra);
+    expect((parsed.props as { extra?: boolean }).extra).toBeUndefined();
+    expect(parsed.isValidated).toBe(true);
+
+    const restored = Incident.restore(extra as unknown as IncidentProps);
+    expect((restored.props as { extra?: boolean }).extra).toBe(true);
+    expect(restored.props).toBe(extra);
   });
 
   it('close mutates this; the original incident is closed', () => {
@@ -205,6 +336,7 @@ describe('Entity', () => {
       );
     }
     expect(incident.status).toBe('open');
+    expect(incident.isValidated).toBe(true);
   });
 
   it('close throws ALREADY_CLOSED', () => {

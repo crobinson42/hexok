@@ -10,7 +10,8 @@ export type Infer<S extends StandardSchemaV1> = NonNullable<
  * Validate `value` with a Standard Schema. Sync only.
  *
  * Failures are `'VALIDATION'` plus Standard Schema `issues`. Entity
- * `create` / `restore` / `parse` / `set` throw that as `CodedError`.
+ * `create` / `parse` / `set` / `validate()` throw that as `CodedError`.
+ * `restore` does not run the schema.
  * Async schemas belong at the RPC boundary and throw.
  *
  * ```ts

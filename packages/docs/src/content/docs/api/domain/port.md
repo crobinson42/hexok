@@ -43,7 +43,7 @@ Pass `{ transactional: true }` / `{ requestScoped: true }` so `provide` throws i
 | `key` | `string` | Name used in runtime provide/completeness errors. |
 | `capabilities` | `{ transactional: boolean; requestScoped: boolean }` | Frozen. Checked by `App.provide`. |
 
-`.build()` names a missing port by its use-case alias (`ports: { incidents: IncidentRepository }` → `"incidents"`).
+The compile-time type of `.build()` names a missing port by its use-case alias (`ports: { incidents: IncidentRepository }` → `"incidents"`). Runtime throws use the token key (`"IncidentRepository"`).
 
 ## Types
 

@@ -6,7 +6,7 @@ sidebar:
 ---
 
 ```ts
-import type { ApiMiddleware, RpcMiddleware } from 'hexok/runtime'
+import type { ApiMiddleware } from 'hexok/runtime'
 ```
 
 Register with [`App.use`](/api/runtime/app/). Onion around **external** `execute` (`local` and HTTP). Does not run for event handlers or nested `run`.
@@ -30,8 +30,6 @@ type ApiMiddleware<Ctx = unknown> = (args: {
 | `errors` | Error factories from the use-case error map. |
 | `path` | Use-case key (`incident.close`). |
 | `request` | Present on HTTP `router.fetch` only. Read headers here; set ctx with `.ctxFrom`. |
-
-`RpcMiddleware` is a deprecated alias of `ApiMiddleware`.
 
 ```ts
 const withTiming: ApiMiddleware = async ({ path, next }) => {

@@ -1,6 +1,6 @@
 ---
 title: ExecuteCtx
-description: Typed argument to ExternalUseCase.execute, InternalUseCase.execute, and EventUseCase.execute.
+description: ExecuteCtx for ExternalUseCase and InternalUseCase; EventCtx for EventUseCase.
 sidebar:
   order: 4
 ---

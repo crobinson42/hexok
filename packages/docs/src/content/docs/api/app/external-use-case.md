@@ -49,7 +49,7 @@ class CloseIncident extends ExternalUseCase {
     if (!incident) throw errors.NOT_FOUND()
     const closed = incident.close(ports.clock.now())
     await ports.incidents.save(closed)
-    publish(new IncidentClosed({ id: closed.id, closedAt: closed.closedAt }))
+    publish(new IncidentClosed({ id: closed.props.id, closedAt: closed.props.closedAt }))
     return closed.toProps()
   }
 }

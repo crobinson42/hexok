@@ -52,7 +52,7 @@ class CloseIncident extends ExternalUseCase {
     if (!incident) throw errors.NOT_FOUND()
     const closed = incident.close(ports.clock.now())
     await ports.incidents.save(closed)
-    publish(new IncidentClosed({ id: closed.id, closedAt: closed.closedAt }))
+    publish(new IncidentClosed({ id: closed.props.id, closedAt: closed.props.closedAt }))
     return closed.toProps()
   }
 }
@@ -85,7 +85,7 @@ HTTP: `POST /rpc/incident/close` with `{ input: { id: '1' } }`. Request context 
 ## Test
 
 ```ts
-const app = App.test({ close: CloseIncident })
+const app = TestApp.test({ close: CloseIncident })
   .provide(IncidentRepository, InMemoryRepository.of(IncidentRepository, {
     keyBy: 'id',
     seed: [Incident.open('1', 'Seeded')],

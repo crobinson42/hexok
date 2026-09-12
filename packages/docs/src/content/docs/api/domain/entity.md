@@ -21,7 +21,7 @@ Subclass with typed props. Writes go through `set`. Validation and declared refu
 | `create(props)` | `(props) => instance` | Validates, constructs, `isNew: true`. |
 | `restore(props)` | `(props) => instance` | No schema run. `isNew: false`, `isValidated: false`. |
 | `parse(value)` | `(unknown) => instance` | Validates like `create`; tracking matches `restore`. |
-| `error(code, data?)` | `(code) => never` | Throws a declared entity error. |
+| `error(code, data?)` | `(code, data?) => never` | Throws a declared entity error. |
 
 `create` / `parse` throw `CodedError` `VALIDATION` if the schema rejects. `restore` stores props as given (no strip/defaults).
 
@@ -35,9 +35,9 @@ An undeclared `error()` code is a type error at the call site and a programming 
 | `isNew` | `boolean` | True after `create` until `commit`. `restore` / `parse` start false. |
 | `isValidated` | `boolean` | True after `create`, `parse`, a writing `set`, or `validate()`. |
 | `original` | `DeepReadonly<P> \| undefined` | Pre-mutation props after the first `set` on a restored entity. |
-| `set(producer)` | `(draft: P) => this` | Copy-on-write mutate. Re-validates the schema after a write. |
+| `set(producer)` | `(producer: (draft: P) => void) => this` | Copy-on-write mutate. Re-validates the schema after a write. |
 | `validate()` | `() => this` | Runs the schema if not already passed. No-op when `isValidated`. |
-| `getChangedKeys()` | `() => string[]` | Shallow keys that differ from `original`. `{ deep: true }` returns dotted leaf paths. |
+| `getChangedKeys(opts?)` | `(opts?: { deep?: boolean }) => string[]` | Shallow keys that differ from `original`. `{ deep: true }` returns dotted leaf paths. |
 | `isDirty()` | `() => boolean` | True after `create` until `commit`, or when any shallow key changed. |
 | `commit()` | `() => this` | Accept current props as original; `isNew` becomes false. |
 | `toProps()` | `() => DeepReadonly<P>` | Deep frozen snapshot. Reused until the next `set`. |

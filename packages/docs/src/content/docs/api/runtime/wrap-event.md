@@ -17,7 +17,7 @@ function wrapEvent(
 ): Envelope
 ```
 
-The event must belong to one of `catalogs`. An envelope is copied through. Catalog `.ctx()` requires `ctx` on the event.
+The event must belong to one of `catalogs`. An existing envelope is passed through (not cloned) and may have tracing fields filled in. Catalog `.ctx()` requires `ctx` on the event.
 
 When `requestCtx` has string `correlationId` / `causationId`, those fields are copied onto the envelope.
 

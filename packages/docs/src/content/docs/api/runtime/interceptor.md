@@ -21,7 +21,7 @@ Register with [`App.intercept`](/api/runtime/app/). First registered is **outer*
 | Member | Notes |
 | --- | --- |
 | `key` | Unique registration id. |
-| `aroundUseCase?(uc, next)` | Wrap external, internal, and event `execute`. Nested `run` does not re-enter this hook. |
+| `aroundUseCase?(uc, next)` | Wrap external and event `execute`. Internal use cases and nested `run` do not enter this hook. |
 | `aroundAdapter?(port, impl)` | Wrap a provided port impl once at `build`. |
 | `aroundPublish?(envelope, next)` | Wrap catalog publish after execute returns. Swallowing `next()` drops the event. |
 | `aroundDispatch?(envelope, uc, next)` | Wrap one event-handler invocation. External and internal use cases never call this hook. |

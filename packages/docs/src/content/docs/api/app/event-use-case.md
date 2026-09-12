@@ -20,8 +20,8 @@ Listens to one event class in one catalog. Queue catalogs require `static group`
 | `on` | `EventClass` | Event class this handler listens to. Must be in `catalog`. |
 | `catalog` | `AnyEventCatalog` | Catalog that owns `on`. Bind it with `App.bind`. |
 | `group` | `string` | Consumer group. Required when `catalog.kind` is `'queue'`. |
-| `ports` | `Record<string, PortToken>` | Port tokens keyed by the alias used in `execute`. |
-| `errors` | `ErrorMap` | Declared refusals. Keys become `errors.CODE()` on `EventCtx`. |
+| `ports` | `Record<string, PortToken>?` | Port tokens keyed by the alias used in `execute`. Optional. |
+| `errors` | `ErrorMap?` | Declared refusals. Keys become `errors.CODE()` on `EventCtx`. Defaults to `{}`. |
 | `publishes` | `readonly AnyEventCatalog[]` | Catalogs this handler may `publish` to. Use `as const`. |
 | `channels` | `readonly EventChannelCtor[]` | Channels available as `channels` on event ctx. Use `as const`. |
 

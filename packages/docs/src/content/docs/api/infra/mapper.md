@@ -31,7 +31,7 @@ Chain `Mapper.for(Entity).to(…).from(…)`.
 
 ```ts
 const IncidentMapper = Mapper.for(Incident)
-  .to((e) => ({ id: e.id, closed_at: e.closedAt?.toISOString() ?? null }))
+  .to((e) => ({ id: e.props.id, closed_at: e.props.closedAt?.toISOString() ?? null }))
   .from((row) =>
     Incident.restore({
       id: row.id,

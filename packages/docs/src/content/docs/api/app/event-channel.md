@@ -26,8 +26,8 @@ Presence I/O is a [`ChannelAdapter`](/api/domain/channel/) passed to `.route()`.
 | `trigger` | `'channel'` | Discriminator. Do not override. |
 | `catalog` | `AnyEventCatalog` | Catalog whose events this channel delivers. Must be a bus. |
 | `joinInput` | `StandardSchemaV1` | Join-claims schema. Validated before `join`. |
-| `ports` | `Record<string, PortToken>` | Port tokens keyed by the alias used in join, refresh, and route. |
-| `errors` | `ErrorMap` | Declared refusals. Keys become `errors.CODE()` on join/refresh. |
+| `ports` | `Record<string, PortToken>?` | Port tokens keyed by the alias used in join, refresh, and route. Optional. |
+| `errors` | `ErrorMap?` | Declared refusals. Keys become `errors.CODE()` on join/refresh. Defaults to `{}`. |
 
 ## Instance
 

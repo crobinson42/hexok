@@ -53,7 +53,7 @@ Start composition from a map of use-case classes. Each entry is checked by `Chec
 | `rpc` | Nested RPC catalog (`rpc.incident.close.path`) plus flat `routes`. |
 | `handlers` | Event use-case constructors grouped by catalog key then event key. They subscribe only after `start()`. |
 | `channels` | Routed channel gateways keyed by catalog key. Routing starts on `start()`. |
-| `publish(envelope)` | Publish an envelope to its bound adapter now. Does not start handlers. |
+| `publish(envelope)` | Publish an envelope to its bound adapter now. Throws if handlers exist for that event and `start()` has not run. |
 | `start()` | Subscribe event handlers and start channel routing. Throws if called twice without `stop()`. |
 | `stop()` | Stop channel and event adapters. Safe to call more than once. |
 
@@ -65,15 +65,15 @@ HTTP: `POST /rpc/incident/close` with `{ input: { id: '1' } }`. Request context 
 
 These types appear as the type of `build` / `provide` / `bind` / `route` when the graph is incomplete or duplicated. They are not typically imported.
 
-| Type | Message |
+| Type | Compile-time message |
 | --- | --- |
-| `MissingMessages` | `hexok: unprovided port "…"` / `unbound catalog "…"` / `unrouted channel "…"` |
+| `MissingMessages` | `hexok: unprovided port "…"` (use-case alias) / `unbound catalog "…"` / `unrouted channel "…"`. Missing ports also say `Call .provide(token, impl) before .build()`. |
 | `DuplicatePortError` | `hexok: port already provided` |
 | `DuplicateCatalogError` | `hexok: catalog "…" already bound` |
 | `DuplicateChannelError` | `hexok: catalog "…" already routed` |
 | `ChannelKindError` | `hexok: channel catalog "…" is kind "…". Channels require a bus catalog.` |
 
-Runtime throws the same sentences.
+Runtime throws related sentences with the token or catalog key interpolated (`hexok: port "Clock" already provided`, `hexok: unprovided port "Clock" (used by …)`).
 
 ## Example
 

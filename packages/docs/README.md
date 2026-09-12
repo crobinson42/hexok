@@ -1,6 +1,6 @@
 # @hexok/docs
 
-Concept docs for Hexok. Markdown pages, one per concern and child concept.
+Hexok documentation site (Astro + Starlight).
 
 ```bash
 npm run dev -w @hexok/docs

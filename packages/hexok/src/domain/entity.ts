@@ -9,6 +9,7 @@ import { applyCowDraft, frozenSnapshot, isPlainObject } from './cow-draft.js';
 
 const EMPTY_CHANGED_KEYS: string[] = Object.freeze([]) as unknown as string[];
 
+/** Recursively readonly view of entity props. `Date` values stay `Date`. */
 export type DeepReadonly<T> = T extends Date
   ? T
   : T extends readonly (infer U)[]
@@ -40,7 +41,12 @@ export type DeepReadonly<T> = T extends Date
  * ```
  */
 export abstract class Entity<P extends object> {
+  /** Entity name used in validation and undeclared-error messages. Declare on each subclass. */
   static readonly key: string;
+  /** Standard Schema for `create` / `restore` / `parse`. Declare on each subclass. */
+  static readonly schema: StandardSchemaV1;
+  /** Declared refusal codes. Keys are the `error()` union. Declare on each subclass. */
+  static readonly errors: ErrorMap;
   #isNew = false;
   #original: P | undefined = undefined;
   #owned: WeakSet<object> | undefined = undefined;
@@ -52,6 +58,7 @@ export abstract class Entity<P extends object> {
     return this._props as DeepReadonly<P>;
   }
 
+  /** True after `create` until `commit`. `restore` / `parse` start false. */
   get isNew(): boolean {
     return this.#isNew;
   }
@@ -74,6 +81,7 @@ export abstract class Entity<P extends object> {
     this._props = props;
   }
 
+  /** Copy-on-write mutate. Edit `draft` and return `this`. Does not re-run the schema. */
   set(producer: (draft: P) => void): this {
     const result = applyCowDraft(this._props, this.#owned, producer);
     this._props = result.root;
@@ -82,6 +90,7 @@ export abstract class Entity<P extends object> {
     return this;
   }
 
+  /** Shallow keys that differ from `original`. `{ deep: true }` returns dotted leaf paths. */
   getChangedKeys(): Array<ChangedKey<P>>;
   getChangedKeys(opts: { deep: true }): string[];
   getChangedKeys(opts?: { deep?: boolean }): string[];
@@ -117,6 +126,7 @@ export abstract class Entity<P extends object> {
     return changed.length === 0 ? EMPTY_CHANGED_KEYS : changed;
   }
 
+  /** True when `create`d and not yet `commit`ted, or any shallow key changed. */
   isDirty(): boolean {
     return this.#isNew || this.getChangedKeys().length > 0;
   }
@@ -226,9 +236,13 @@ export abstract class Entity<P extends object> {
   }
 }
 
+/** Subclass constructor shape for `create` / `restore` / `parse`. */
 export type EntityConstructor = {
+  /** Entity name used in validation and error messages. */
   readonly key: string;
+  /** Standard Schema for `create` / `restore` / `parse`. Declare on each subclass. */
   readonly schema: StandardSchemaV1;
+  /** Declared refusal codes. Keys are the `error()` union. Declare on each subclass. */
   readonly errors: ErrorMap;
   // biome-ignore lint/suspicious/noExplicitAny: Entity is invariant in P; subclasses must still satisfy this
   readonly prototype: Entity<any>;

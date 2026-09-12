@@ -6,10 +6,12 @@ import type {
   PortToken,
 } from '../domain/index.js';
 
+/** Port map with tokens replaced by their bound implementations. */
 export type ResolvedPorts<P> = {
   [K in keyof P]: P[K] extends PortToken<infer I> ? I : never;
 };
 
+/** `errors.CODE()` map. Each factory throws `CodedError` and types as `never`. */
 export type ErrorFactories<M> = {
   [K in keyof M]: M[K] extends { data: infer S }
     ? S extends StandardSchemaV1
@@ -51,46 +53,73 @@ export type CheckUseCase<C> = C extends { trigger: 'api' }
       : `hexok: EventUseCase "${KeyOf<C>}" is missing static on`
     : `hexok: "${KeyOf<C>}" must extend ApiUseCase or EventUseCase`;
 
+/** Named map of use-case classes passed to `App.from`. */
 export type UseCaseBag = Record<string, UseCaseClass>;
 
 /** Keep a checked bag's specific classes; do not intersect with UseCaseBag. */
 export type AsUseCaseBag<Bag> = Bag extends UseCaseBag ? Bag : UseCaseBag;
 
+/** An API or event use-case constructor. */
 export type UseCaseClass = ApiUseCaseCtor | EventUseCaseCtor;
 
+/** Constructor shape of an `ApiUseCase` subclass. */
 export interface ApiUseCaseCtor {
   readonly trigger: 'api';
+  /** Dotted RPC path (`incident.close`). */
   readonly key: string;
+  /** Request Standard Schema. */
   readonly input: StandardSchemaV1;
+  /** Success Standard Schema. */
   readonly output: StandardSchemaV1;
+  /** Declared refusals. */
   readonly errors: ErrorMap;
+  /** Port tokens keyed by the alias used in `execute`. */
   readonly ports: Record<string, PortToken<unknown>>;
+  /** Catalogs this use case may `publish` to. */
   readonly publishes?: readonly AnyEventCatalog[];
+  /** Channels available as `channels` on execute ctx. */
   readonly channels?: readonly EventChannelCtor[];
+  /** Per-use-case RPC middleware, after app-level `App.use`. */
   readonly middleware?: readonly unknown[];
+  /** When true, omitted from contract, HTTP RPC, and `app.local`. */
   readonly internal?: boolean;
   readonly prototype: { execute(ctx: never): Promise<unknown> };
 }
 
+/** Constructor shape of an `EventUseCase` subclass. */
 export interface EventUseCaseCtor {
   readonly trigger: 'event';
+  /** Handler id (`incident.notifyOnClose`). */
   readonly key: string;
+  /** Event class this handler listens to. Must be in `catalog`. */
   readonly on: EventClass;
+  /** Catalog that owns `on`. Bind it with `App.bind`. */
   readonly catalog: AnyEventCatalog;
+  /** Consumer group for queue catalogs. */
   readonly group?: string;
+  /** Port tokens keyed by the alias used in `execute`. */
   readonly ports?: Record<string, PortToken<unknown>>;
+  /** Catalogs this handler may `publish` to. */
   readonly publishes?: readonly AnyEventCatalog[];
+  /** Channels available as `channels` on event ctx. */
   readonly channels?: readonly EventChannelCtor[];
+  /** Declared refusals. */
   readonly errors?: ErrorMap;
+  /** Same constructor field as API use cases; event dispatch does not run it. */
   readonly middleware?: readonly unknown[];
   readonly prototype: { execute(ctx: never): Promise<void> };
 }
 
+/** Constructor shape of an `EventChannel` subclass (`catalog`, `joinInput`, optional `ports`). */
 export interface EventChannelCtor {
   readonly trigger: 'channel';
+  /** Catalog whose events this channel delivers. Must be a bus. */
   readonly catalog: AnyEventCatalog;
+  /** Port tokens keyed by the alias used in join, refresh, and route. */
   readonly ports?: Record<string, PortToken<unknown>>;
+  /** Join-claims Standard Schema. Validated before `join`. */
   readonly joinInput: StandardSchemaV1;
+  /** Declared refusals for join/refresh. */
   readonly errors?: ErrorMap;
   readonly prototype: {
     join(ctx: never): Promise<unknown>;
@@ -99,10 +128,12 @@ export interface EventChannelCtor {
   };
 }
 
+/** True when `ctor.trigger === 'event'`. */
 export function isEventUseCase(ctor: UseCaseClass): ctor is EventUseCaseCtor {
   return ctor.trigger === 'event';
 }
 
+/** True when `ctor.trigger === 'api'`. */
 export function isApiUseCase(ctor: UseCaseClass): ctor is ApiUseCaseCtor {
   return ctor.trigger === 'api';
 }

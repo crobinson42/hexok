@@ -1,14 +1,21 @@
 import type { ErrorMap, StandardSchemaV1 } from '../core/index.js';
 import { isApiUseCase, type UseCaseBag, type UseCaseClass } from './types.js';
 
+/** One public API use case in a derived contract. */
 export type UseCaseRoute = {
+  /** Use-case `key` (`incident.close`). */
   key: string;
+  /** Request schema. */
   input: StandardSchemaV1;
+  /** Success schema. */
   output: StandardSchemaV1;
+  /** Declared error map. */
   errors: ErrorMap;
 };
 
+/** Flat route catalog from `deriveContract`. Event and `internal` use cases are omitted. */
 export type UseCaseContract = {
+  /** Routes keyed by use-case `key`. */
   routes: Record<string, UseCaseRoute>;
 };
 
@@ -87,6 +94,7 @@ export function deriveContract(useCases: UseCaseBag): UseCaseContract {
   return { routes };
 }
 
+/** Nest dotted keys (`incident.close` → `{ incident: { close } }`). */
 export function nestByKey<V>(
   entries: Iterable<[string, V]>,
 ): Record<string, unknown> {

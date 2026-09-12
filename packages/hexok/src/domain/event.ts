@@ -15,16 +15,24 @@ import type { Infer, StandardSchemaV1 } from '../core/index.js';
  * ```
  */
 export abstract class DomainEvent<P = unknown> {
+  /** Dotted event name, e.g. `'incident.closed'`. Declare on each subclass. */
   static readonly key: string;
+  /** Standard Schema for the payload, applied at the use-case / RPC edge. */
+  static readonly schema: StandardSchemaV1;
+  /** Event body. Typed by the subclass constructor; not validated here. */
   abstract readonly payload: P;
 }
 
+/** Event subclass constructor: `key`, `schema`, and `new (payload)`. */
 export type EventClass<P = never> = {
+  /** Dotted event name, e.g. `'incident.closed'`. */
   readonly key: string;
+  /** Standard Schema for the payload, applied at the use-case / RPC edge. */
   readonly schema: StandardSchemaV1;
   new (payload: P, ...args: never[]): DomainEvent<unknown>;
 };
 
+/** Payload type inferred from an event class's `schema`. */
 export type EventPayload<E extends EventClass> = Infer<E['schema']>;
 
 type EventKeyOf<E> = E extends { readonly key: infer K extends string }

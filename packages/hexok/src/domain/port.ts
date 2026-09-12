@@ -1,3 +1,5 @@
+declare const portType: unique symbol;
+
 /**
  * A port is a TypeScript interface plus a token used at compose time.
  *
@@ -14,9 +16,8 @@
  * `.build()` names a missing port by its use-case alias
  * (`ports: { incidents: IncidentRepository }` → `"incidents"`).
  */
-declare const portType: unique symbol;
-
 export class PortToken<out I> {
+  /** Name used in runtime provide/completeness errors. */
   readonly key: string;
   declare readonly [portType]: I;
 
@@ -25,13 +26,16 @@ export class PortToken<out I> {
     Object.freeze(this);
   }
 
+  /** Create a token for interface `I`. Prefer `Port.token<I>('Name')` at call sites. */
   static token<I>(key: string): PortToken<I> {
     return new PortToken<I>(key);
   }
 }
 
+/** `Port.token<I>('Name')` — the usual way to create a `PortToken`. */
 export const Port: { token: typeof PortToken.token } = {
   token: PortToken.token,
 };
 
+/** Interface stored on a `PortToken`. */
 export type PortType<T> = T extends PortToken<infer I> ? I : never;

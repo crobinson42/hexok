@@ -27,6 +27,7 @@ export class Mapper<E extends EntityConstructor, Row> {
     this.#fromFn = fromFn;
   }
 
+  /** Start a mapper for this entity class. Chain `.to` then `.from`. */
   static for<E extends EntityConstructor>(_entity: E): MapperTo<E> {
     return {
       to: <Row>(toFn: (entity: E['prototype']) => Row): MapperFrom<E, Row> => ({
@@ -71,11 +72,18 @@ export class Mapper<E extends EntityConstructor, Row> {
   }
 }
 
+/** Next step after `Mapper.for`. Call `.to` with the outbound mapping. */
 export type MapperTo<E extends EntityConstructor> = {
+  /** Set the outbound mapping (entity → row). Returns the `.from` builder. */
   to<Row>(toFn: (entity: E['prototype']) => Row): MapperFrom<E, Row>;
 };
 
+/** Next step after `.to`. Call `.from` with the inbound mapping to finish. */
 export type MapperFrom<E extends EntityConstructor, Row> = {
+  /**
+   * Set the inbound mapping (row → entity) and return the mapper.
+   * This is the trust boundary.
+   */
   from(fromFn: (row: Row) => E['prototype']): Mapper<E, Row>;
 };
 

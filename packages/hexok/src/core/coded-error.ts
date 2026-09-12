@@ -7,9 +7,12 @@
  * ```
  */
 export class CodedError<C extends string = string> extends Error {
+  /** Machine-readable refusal code. Catch and switch on this; HTTP maps it to a status. */
   readonly code: C;
+  /** Optional payload. Set only when the constructor received `data`. */
   readonly data?: unknown;
 
+  /** `message` defaults to `code`. */
   constructor(args: {
     code: C;
     message?: string;

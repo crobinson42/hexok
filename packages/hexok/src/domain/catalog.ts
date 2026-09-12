@@ -22,12 +22,15 @@ export class EventCatalog<
   out Events extends EventClass = never,
   out Ctx = undefined,
 > {
+  /** Catalog name, copied onto envelopes and used in error messages. */
   readonly key: Key;
+  /** `'bus'` (fan-out) or `'queue'` (work queue). Copied onto every envelope. */
   readonly kind: Kind;
   #events = new Map<string, EventClass>();
   #frozen = false;
   #hasCtx = false;
 
+  /** Create a named `'bus'` or `'queue'` catalog. Chain `.event(...)` then `.freeze()`. */
   constructor(key: Key, options: { kind: Kind }) {
     this.key = key;
     this.kind = options.kind;
@@ -48,6 +51,7 @@ export class EventCatalog<
     return this as unknown as EventCatalog<Key, Kind, Events, C>;
   }
 
+  /** True after `.ctx()` — every registered event must expose `ctx`. */
   get hasCtx(): boolean {
     return this.#hasCtx;
   }
@@ -57,6 +61,7 @@ export class EventCatalog<
     return [...this.#events.values()];
   }
 
+  /** Register an event class. Dotted keys become nested properties when each segment is a JS identifier. */
   event<E extends EventClass>(
     eventClass: [Ctx] extends [undefined] ? E : EventWithCtx<E, Ctx>,
   ): EventCatalog<Key, Kind, Events | E, Ctx> {
@@ -77,6 +82,7 @@ export class EventCatalog<
     return this;
   }
 
+  /** Look up a registered class. Throws if it is not in this catalog. */
   get<E extends EventClass>(eventClass: E): E {
     const found = this.#events.get(eventClass.key);
     if (!found) {
@@ -87,6 +93,7 @@ export class EventCatalog<
     return found as E;
   }
 
+  /** Seal the catalog. Further `.event()` / `.ctx()` throw. */
   freeze(): EventCatalog<Key, Kind, Events, Ctx> {
     if (this.#frozen) return this;
     this.#frozen = true;
@@ -94,6 +101,7 @@ export class EventCatalog<
     return this;
   }
 
+  /** True after `.freeze()`. */
   get frozen(): boolean {
     return this.#frozen;
   }
@@ -113,6 +121,7 @@ export type AnyEventCatalog = EventCatalog<
   unknown
 >;
 
+/** Event classes registered on `Cat`, or `never` when the catalog is empty. */
 export type CatalogEvents<Cat> =
   Cat extends EventCatalog<
     infer _Key,

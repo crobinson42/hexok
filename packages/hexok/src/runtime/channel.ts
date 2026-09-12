@@ -22,9 +22,11 @@ import type {
 } from '../domain/index.js';
 import { aliasPorts } from './invoke.js';
 
+/** Presence handle for one routed channel: join, list, eject, refresh, update. */
 export type ChannelGateway<C extends EventChannelCtor> = ChannelControl<
   ChannelSession<C>
 > & {
+  /** Admit a connection after validating `joinInput`. Routing of events starts on `app.start()`. */
   join(
     input: C extends { joinInput: infer S extends StandardSchemaV1 }
       ? Infer<S>
@@ -41,6 +43,7 @@ type UnionToIntersection<U> = (
   ? I
   : never;
 
+/** Routed channel gateways keyed by catalog key (`app.channels.client`). */
 export type ChannelGateways<Routed> = [Routed] extends [never]
   ? Record<string, never>
   : UnionToIntersection<

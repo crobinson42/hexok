@@ -9,10 +9,19 @@ import type { PortToken } from '../domain/index.js';
  * ```
  */
 export const Adapter = {
+  /**
+   * Pair a port token with a factory. Call `create(...deps)` and pass the impl
+   * to `App.provide` — not this holder.
+   */
   of<I, Deps extends unknown[]>(
     token: PortToken<I>,
     create: (...deps: Deps) => I,
-  ): { token: PortToken<I>; create: (...deps: Deps) => I } {
+  ): {
+    /** Port token for this adapter. Use with `App.provide(token, impl)`. */
+    token: PortToken<I>;
+    /** Build the adapter impl. Composition receives that value, not the holder. */
+    create: (...deps: Deps) => I;
+  } {
     return { token, create };
   },
 };

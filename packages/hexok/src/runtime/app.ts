@@ -49,22 +49,33 @@ import { type InvokeDeps, invokeApi, publishNow } from './invoke.js';
 import type { RpcMiddleware } from './middleware.js';
 import { deriveRpc, type RpcContract } from './rpc.js';
 
+/** Built app: in-process client, HTTP RPC, event lifecycle, and routed channels. */
 export type AppInstance<
   Bag extends UseCaseBag,
   Ctx = unknown,
   Routed = never,
 > = {
+  /** Nested API contract (`incident.close` → `contract.incident.close`). Event and `internal` use cases are omitted. */
   contract: DerivedContract<Bag>;
+  /** `fetch` handler for `POST /rpc/...`. Event handlers still require `start()`. */
   router: { fetch: (request: Request) => Promise<Response> };
+  /** In-process nested client. Same keys as `contract`; pass `{ ctx, signal }` as the second argument. */
   local: NestedClient<Bag, Ctx>;
+  /** Event use-case constructors grouped by catalog key then event key. They subscribe only after `start()`. */
   handlers: Record<string, Record<string, EventUseCaseCtor[]>>;
+  /** Routed channel gateways keyed by catalog key. Routing starts on `start()`. */
   channels: ChannelGateways<Routed>;
+  /** Publish an envelope to its bound adapter now. Does not start handlers. */
   publish(envelope: Envelope): Promise<void>;
+  /** Subscribe event handlers and start channel routing. Throws if called twice without `stop()`. */
   start(): Promise<void>;
+  /** Stop channel and event adapters. Safe to call more than once. */
   stop(): Promise<void>;
+  /** Flat RPC catalog: each API route has `method: 'POST'` and a `/rpc/...` path. */
   readonly rpc: RpcContract;
 };
 
+/** Adapter `bind` expects for a catalog kind. */
 export type AdapterFor<K extends CatalogKind> = K extends 'bus'
   ? BusAdapter
   : K extends 'queue'
@@ -88,6 +99,7 @@ type ChannelCatalogKey<C> = C extends {
   ? K
   : string;
 
+/** Fluent composition. `build` is callable only after every required port, catalog, and channel is wired. */
 export class AppBuilder<
   Bag extends UseCaseBag,
   Provided = never,
@@ -107,12 +119,14 @@ export class AppBuilder<
     this.#useCases = useCases;
   }
 
+  /** Start composition from a map of use-case classes. */
   static from<Bag extends { [K in keyof Bag]: CheckUseCase<Bag[K]> }>(
     useCases: Bag,
   ): AppBuilder<AsUseCaseBag<Bag>, never, never, unknown> {
     return new AppBuilder(useCases as AsUseCaseBag<Bag>);
   }
 
+  /** Register a port implementation. A second `provide` for the same token is a compile-time error and a runtime throw. */
   provide<I>(
     token: [PortToken<I>] extends [Provided]
       ? DuplicatePortError
@@ -138,6 +152,7 @@ export class AppBuilder<
     >;
   }
 
+  /** Bind an event adapter to a catalog. Adapter `kind` must match; a second bind of the same catalog fails. */
   bind<
     Key extends string,
     Kind extends CatalogKind,
@@ -175,6 +190,7 @@ export class AppBuilder<
     >;
   }
 
+  /** Route a channel class to a presence adapter. The channel catalog must be a bus and still needs `bind`. */
   route<C extends EventChannelCtor>(
     channel: ChannelCatalogKind<C> extends 'bus'
       ? [C] extends [Routed]
@@ -206,16 +222,19 @@ export class AppBuilder<
     return this as unknown as AppBuilder<Bag, Provided, Bound, Ctx, Routed | C>;
   }
 
+  /** Set the default request context for `local`, HTTP, and event handlers. Per-call `ctx` overrides it. */
   ctx<C>(defaults?: C): AppBuilder<Bag, Provided, Bound, C, Routed> {
     this.#defaultCtx = defaults;
     return this as unknown as AppBuilder<Bag, Provided, Bound, C, Routed>;
   }
 
+  /** Register RPC middleware. Runs around API `execute` only — not event handlers or nested `run`. */
   use(middleware: RpcMiddleware): this {
     this.#middleware.push(middleware);
     return this;
   }
 
+  /** Register an interceptor. First registered is outermost for execute/publish. Duplicate `key` throws. */
   intercept(interceptor: Interceptor): this {
     if (this.#interceptors.some((item) => item.key === interceptor.key)) {
       throw new Error(`hexok: duplicate interceptor key "${interceptor.key}"`);
@@ -436,6 +455,7 @@ export class AppBuilder<
  * ```
  */
 export const App = {
+  /** Start composition from a map of use-case classes. */
   from: AppBuilder.from,
 };
 

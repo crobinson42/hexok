@@ -17,6 +17,7 @@ export function isEnvelope(value: unknown): value is Envelope {
   );
 }
 
+/** Wrap a domain event in an envelope, or pass an envelope through. The event must belong to one of `catalogs`. */
 export function wrapEvent(
   event: DomainEvent | Envelope,
   catalogs: readonly AnyEventCatalog[],

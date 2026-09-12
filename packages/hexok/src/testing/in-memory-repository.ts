@@ -51,6 +51,7 @@ export class InMemoryRepository<E extends Entity<Record<string, unknown>>>
     }
   }
 
+  /** Fake a CRUD port. `keyBy` is the entity prop used as the map key; `seed` is cloned in. */
   static of<I>(
     _token: [AssertCrud<I>] extends [I] ? PortToken<I> : AssertCrud<I>,
     options: {
@@ -65,20 +66,24 @@ export class InMemoryRepository<E extends Entity<Record<string, unknown>>>
     return repo as unknown as I;
   }
 
+  /** Clone of the stored entity, or `null`. */
   async get(id: string): Promise<E | null> {
     const found = this.#store.get(id);
     return found ? cloneEntity(found) : null;
   }
 
+  /** Clone into the store and `commit()` the working entity. */
   async save(entity: E): Promise<void> {
     this.#store.set(this.keyOf(entity), cloneEntity(entity));
     entity.commit();
   }
 
+  /** Clones of every stored entity. */
   async list(): Promise<E[]> {
     return [...this.#store.values()].map((entity) => cloneEntity(entity));
   }
 
+  /** Remove by id. No-op if missing. */
   async delete(id: string): Promise<void> {
     this.#store.delete(id);
   }

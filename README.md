@@ -31,7 +31,7 @@ import { App as TestApp, InMemoryRepository } from 'hexok/testing'
 | `hexok/runtime` | `App.from` composition, completeness, interceptors, local client, HTTP |
 | `hexok/testing` | Test-only: `App.test`, in-memory repo/bus/queue/channel, `published` |
 
-Concept docs: `npm run dev -w @hexok/docs`.
+Docs site: `npm run dev -w @hexok/docs`.
 
 ## Write a use case
 

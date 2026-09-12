@@ -180,6 +180,7 @@ type MissingChannelMessages<Bag extends UseCaseBag, Routed> =
       : never
     : never;
 
+/** Compile-time type of `build` when a required port, catalog, or channel is still missing. */
 export type MissingMessages<
   Bag extends UseCaseBag,
   Provided,
@@ -190,16 +191,20 @@ export type MissingMessages<
   | MissingCatalogMessages<Bag, Bound, Routed>
   | MissingChannelMessages<Bag, Routed>;
 
+/** Compile-time error when `provide` is called twice for the same token. */
 export type DuplicatePortError = `hexok: port already provided`;
 
+/** Compile-time error when `bind` is called twice for the same catalog. */
 export type DuplicateCatalogError<N extends string = string> = string extends N
   ? `hexok: catalog already bound`
   : `hexok: catalog "${N}" already bound`;
 
+/** Compile-time error when `route` is called twice for the same channel catalog. */
 export type DuplicateChannelError<N extends string = string> = string extends N
   ? `hexok: channel already routed`
   : `hexok: catalog "${N}" already routed`;
 
+/** Compile-time error when `route` is given a catalog that is not a bus. */
 export type ChannelKindError<
   Key extends string = string,
   Kind extends string = string,

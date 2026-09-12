@@ -28,12 +28,18 @@ import {
   App as RuntimeApp,
 } from '../runtime/index.js';
 
+/**
+ * Built test app: runtime `AppInstance` plus `published` and `as(ctx)`.
+ * Use `App.test(...).build()`, then assert `app.published` or call `app.as(ctx)`.
+ */
 export type TestAppInstance<
   Bag extends UseCaseBag,
   Ctx = unknown,
   Routed = never,
 > = AppInstance<Bag, Ctx, Routed> & {
+  /** Envelopes that completed `aroundPublish`, in order. */
   published: Envelope[];
+  /** Nested local client with `ctx` fixed on every call. */
   as: (ctx: Ctx) => NestedClient<Bag, Ctx>;
 };
 
@@ -54,6 +60,10 @@ type ChannelCatalogKey<C> = C extends {
   ? K
   : string;
 
+/**
+ * Test composition root with the same `provide`/`bind`/`route`/`ctx`/`build`
+ * as runtime, plus `published` capture. Construct with `App.test`, not `new`.
+ */
 export class TestAppBuilder<
   Bag extends UseCaseBag,
   Provided = never,
@@ -72,6 +82,7 @@ export class TestAppBuilder<
     this.#published = published;
   }
 
+  /** Start a test graph from a use-case bag. The built app has `published` and `as`. */
   static test<Bag extends { [K in keyof Bag]: CheckUseCase<Bag[K]> }>(
     useCases: Bag,
   ): TestAppBuilder<AsUseCaseBag<Bag>> {
@@ -86,6 +97,7 @@ export class TestAppBuilder<
     return new TestAppBuilder(inner, published);
   }
 
+  /** Bind a port token to an implementation, usually an in-memory fake. */
   provide<I>(
     token: [PortToken<I>] extends [Provided]
       ? DuplicatePortError
@@ -99,6 +111,7 @@ export class TestAppBuilder<
     );
   }
 
+  /** Bind a catalog to a bus or queue adapter (`InMemoryBus` / `InMemoryQueue`). */
   bind<
     Key extends string,
     Kind extends CatalogKind,
@@ -129,6 +142,7 @@ export class TestAppBuilder<
     );
   }
 
+  /** Route a bus `EventChannel` to a channel adapter (`InMemoryChannel`). */
   route<C extends EventChannelCtor>(
     channel: ChannelCatalogKind<C> extends 'bus'
       ? [C] extends [Routed]
@@ -144,21 +158,28 @@ export class TestAppBuilder<
     );
   }
 
+  /** Set default request context for `local` and HTTP. `as(ctx)` overrides per call. */
   ctx<C>(defaults?: C): TestAppBuilder<Bag, Provided, Bound, C, Routed> {
     const next = this.#inner.ctx(defaults);
     return new TestAppBuilder(next, this.#published);
   }
 
+  /** Register RPC middleware on the inner runtime builder. */
   use(middleware: RpcMiddleware): this {
     this.#inner.use(middleware);
     return this;
   }
 
+  /** Register an interceptor. First registered is outer; `App.test` already captured publish. */
   intercept(interceptor: Interceptor): this {
     this.#inner.intercept(interceptor);
     return this;
   }
 
+  /**
+   * Complete the graph; incomplete builders expose `build` as the missing
+   * port/catalog message (not callable). The instance includes `published` and `as`.
+   */
   get build(): [MissingMessages<Bag, Provided, Bound, Routed>] extends [never]
     ? () => TestAppInstance<Bag, Ctx, Routed>
     : MissingMessages<Bag, Provided, Bound, Routed> {
@@ -195,7 +216,9 @@ export class TestAppBuilder<
  * ```
  */
 export const App = {
+  /** Same as `hexok/runtime` `App.from` — no `published` capture. Prefer `test`. */
   from: RuntimeApp.from,
+  /** Start a test graph. The built app has `published` and `as`. */
   test: TestAppBuilder.test,
 };
 

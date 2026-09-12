@@ -358,7 +358,7 @@ describe('nested run', () => {
 
     expect(app.contract).not.toHaveProperty('user');
     expectTypeOf(app.local).not.toHaveProperty('user');
-    expect(app.rpc.routes['user.create']).toBeUndefined();
+    expect(app.rpc.routes).not.toHaveProperty('user.create');
 
     const response = await app.router.fetch(
       new Request('http://app/rpc/user/create', {

@@ -19,13 +19,16 @@ export const LedgerEvents = new EventCatalog('ledger', { kind: 'bus' }).event(
 export interface Ledger {
   charge(amount: number): Promise<number>;
 }
-export const Ledger = Port.token<Ledger & Transactional<Ledger>>('Ledger');
+export const Ledger = Port.token<Ledger & Transactional<Ledger>>('Ledger', {
+  transactional: true,
+});
 
 export interface RequestIds {
   next(): string;
 }
 export const RequestIds = Port.token<RequestIds & RequestScoped<RequestIds>>(
   'RequestIds',
+  { requestScoped: true },
 );
 
 export class Charge extends ApiUseCase {

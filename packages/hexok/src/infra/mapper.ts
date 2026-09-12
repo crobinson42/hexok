@@ -1,4 +1,10 @@
-import { CodedError, fail, ok, type Result } from '../core/index.js';
+import {
+  CodedError,
+  fail,
+  ok,
+  type Result,
+  type StandardSchemaV1,
+} from '../core/index.js';
 import type { EntityConstructor } from '../domain/index.js';
 
 const TRUST = 'hexok: model.from() failed entity.parse (trust boundary)';
@@ -41,12 +47,18 @@ export class Mapper<E extends EntityConstructor, Row> {
     return this.#toFn(entity);
   }
 
-  /** Inbound trust boundary. Throws if entity.parse/restore fails. */
+  /** Inbound trust boundary. Rethrows `CodedError` so `instanceof` still works. */
   from(row: Row): E['prototype'] {
     try {
       return this.#fromFn(row);
     } catch (error) {
-      if (isValidation(error)) throw new Error(TRUST);
+      if (isValidation(error)) {
+        throw new CodedError({
+          code: error.code,
+          message: TRUST,
+          ...(error.data !== undefined ? { data: error.data } : {}),
+        });
+      }
       throw error;
     }
   }
@@ -64,7 +76,14 @@ export class Mapper<E extends EntityConstructor, Row> {
         try {
           return ok(this.#fromFn(row));
         } catch (error) {
-          if (isValidation(error)) return fail('VALIDATION');
+          if (isValidation(error)) {
+            const issues = (
+              error.data as
+                | { issues?: readonly StandardSchemaV1.Issue[] }
+                | undefined
+            )?.issues;
+            return fail('VALIDATION', issues);
+          }
           throw error;
         }
       },
@@ -87,6 +106,6 @@ export type MapperFrom<E extends EntityConstructor, Row> = {
   from(fromFn: (row: Row) => E['prototype']): Mapper<E, Row>;
 };
 
-function isValidation(error: unknown): boolean {
+function isValidation(error: unknown): error is CodedError {
   return error instanceof CodedError && error.code === 'VALIDATION';
 }

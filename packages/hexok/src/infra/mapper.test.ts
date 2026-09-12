@@ -1,6 +1,6 @@
 import { describe, expect, expectTypeOf, it } from 'vitest';
 import { z } from 'zod';
-import type { Infer } from '../core/index.js';
+import { CodedError, type Infer } from '../core/index.js';
 import { Entity } from '../domain/index.js';
 import { Mapper } from './mapper.js';
 
@@ -43,18 +43,34 @@ describe('Mapper', () => {
     expect(back.id).toBe('1');
   });
 
-  it('throws at the trust boundary', () => {
-    expect(() =>
-      IncidentMapper.from({ id: 1 as unknown as string, closed_at: null }),
-    ).toThrow('hexok: model.from() failed entity.parse (trust boundary)');
+  it('throws CodedError at the trust boundary', () => {
+    try {
+      IncidentMapper.from({ id: 1 as unknown as string, closed_at: null });
+      expect.unreachable();
+    } catch (error) {
+      expect(error).toBeInstanceOf(CodedError);
+      expect(error).toMatchObject({
+        code: 'VALIDATION',
+        message: 'hexok: model.from() failed entity.parse (trust boundary)',
+      });
+      expect((error as CodedError).data as { issues: unknown[] }).toEqual(
+        expect.objectContaining({
+          issues: expect.any(Array),
+        }),
+      );
+    }
   });
 
-  it('unsafe from returns Result', () => {
+  it('unsafe from returns Result with issues', () => {
     const result = IncidentMapper.unsafe().from({
       id: 1 as unknown as string,
       closed_at: null,
     });
-    expect(result).toEqual({ ok: false, code: 'VALIDATION' });
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.code).toBe('VALIDATION');
+      expect(result.issues?.length).toBeGreaterThan(0);
+    }
   });
 
   it('to does not accept a different entity class', () => {

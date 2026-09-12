@@ -4,8 +4,14 @@ import {
   type Infer,
   type StandardSchemaV1,
   validate,
+  validationError,
 } from '../core/index.js';
-import { applyCowDraft, frozenSnapshot, isPlainObject } from './cow-draft.js';
+import {
+  applyCowDraft,
+  cloneValue,
+  frozenSnapshot,
+  isPlainObject,
+} from './cow-draft.js';
 
 const EMPTY_CHANGED_KEYS: string[] = Object.freeze([]) as unknown as string[];
 
@@ -23,7 +29,7 @@ export type DeepReadonly<T> = T extends Date
  * They never I/O, never publish, never hold ports.
  *
  * Validation, invariants, and declared refusals **throw**.
- * Check invariants before `set`.
+ * `set` re-runs the schema after the producer returns.
  *
  * ```ts
  * class Incident extends Entity<IncidentProps> {
@@ -81,12 +87,28 @@ export abstract class Entity<P extends object> {
     this._props = props;
   }
 
-  /** Copy-on-write mutate. Edit `draft` and return `this`. Does not re-run the schema. */
+  /** Copy-on-write mutate. Edit `draft` and return `this`. Re-validates the schema after a write. */
   set(producer: (draft: P) => void): this {
+    const backup = cloneValue(this._props);
+    const previousSnapshot = this.#snapshot;
+    const wasOwned = this.#owned?.has(this._props) === true;
     const result = applyCowDraft(this._props, this.#owned, producer);
     this._props = result.root;
     this.#owned = result.owned;
-    if (result.wrote) this.#snapshot = undefined;
+    if (result.wrote) {
+      this.#snapshot = undefined;
+      const Ctor = this.constructor as unknown as EntityConstructor;
+      const parsed = validate(Ctor.schema, this._props);
+      if (!parsed.ok) {
+        this._props = backup;
+        this.#owned = wasOwned ? new WeakSet([backup]) : undefined;
+        this.#snapshot = previousSnapshot;
+        throw validationError(
+          `hexok: ${Ctor.key} validation failed`,
+          parsed.issues,
+        );
+      }
+    }
     return this;
   }
 
@@ -164,19 +186,6 @@ export abstract class Entity<P extends object> {
     data?: unknown,
   ): never {
     throwEntityError(this, code, data);
-  }
-
-  /**
-   * Same throw as the static `error`, from an instance. Prefer
-   * `Incident.error('ALREADY_CLOSED')` when you want the code checked
-   * against `static errors` at compile time.
-   */
-  error(code: string, data?: unknown): never {
-    const Ctor = this.constructor as unknown as {
-      errors: ErrorMap;
-      key: string;
-    };
-    throwEntityError(Ctor, code, data);
   }
 
   /**
@@ -261,10 +270,10 @@ function instantiate<T extends EntityConstructor>(
 ): T['prototype'] {
   const parsed = validate(Ctor.schema, value);
   if (!parsed.ok) {
-    throw new CodedError({
-      code: 'VALIDATION',
-      message: `hexok: ${Ctor.key} validation failed`,
-    });
+    throw validationError(
+      `hexok: ${Ctor.key} validation failed`,
+      parsed.issues,
+    );
   }
   const CtorImpl = Ctor as unknown as new (props: unknown) => T['prototype'];
   return new CtorImpl(parsed.value);

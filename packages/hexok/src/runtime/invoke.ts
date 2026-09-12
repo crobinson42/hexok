@@ -5,26 +5,55 @@ import {
   type Publish,
   type UseCaseClass,
 } from '../app/index.js';
-import { CodedError, type Infer, validate } from '../core/index.js';
+import { type Infer, validate, validationError } from '../core/index.js';
 import type {
   AnyEventCatalog,
   Envelope,
   EventAdapter,
   PortToken,
 } from '../domain/index.js';
-import { wrapEvent } from './envelope.js';
+import { tracingCtx, wrapEvent } from './envelope.js';
 import type { Handler, Interceptor } from './interceptor.js';
-import type { RpcMiddleware } from './middleware.js';
+import type { ApiMiddleware } from './middleware.js';
 
 export type InvokeDeps = {
   ports: Map<PortToken<unknown>, unknown>;
   catalogs: Map<AnyEventCatalog, EventAdapter>;
   interceptors: Interceptor[];
-  middleware: RpcMiddleware[];
+  middleware: ApiMiddleware[];
   defaultCtx: unknown;
   onFlush?: (envelope: Envelope) => void;
   channels?: Record<string, unknown>;
+  ctxFrom?: (args: {
+    request: Request;
+    ctx: unknown;
+  }) => unknown | Promise<unknown>;
+  started: { value: boolean };
+  handlerKeys: Set<string>;
 };
+
+const START_REQUIRED = 'hexok: start() before handlers can receive events';
+
+function assertHandlersStarted(
+  deps: InvokeDeps,
+  publishes: readonly AnyEventCatalog[] | undefined,
+): void {
+  if (deps.started.value || publishes === undefined) return;
+  for (const catalog of publishes) {
+    for (const eventClass of catalog.list()) {
+      if (deps.handlerKeys.has(`${catalog.key}:${eventClass.key}`)) {
+        throw new Error(START_REQUIRED);
+      }
+    }
+  }
+}
+
+function assertEnvelopeStarted(deps: InvokeDeps, envelope: Envelope): void {
+  if (deps.started.value) return;
+  if (deps.handlerKeys.has(`${envelope.catalog}:${envelope.key}`)) {
+    throw new Error(START_REQUIRED);
+  }
+}
 
 type SharedInvoke = {
   ctx: unknown;
@@ -49,15 +78,13 @@ async function runNested(
   shared: SharedInvoke,
   run: (ctor: ApiUseCaseCtor, input: unknown) => Promise<unknown>,
 ): Promise<unknown> {
+  assertHandlersStarted(deps, ctor.publishes);
   const parsed = validate(ctor.input, input);
   if (!parsed.ok) {
-    throw new CodedError({
-      code: 'VALIDATION',
-      message: 'Validation failed',
-    });
+    throw validationError('Validation failed', parsed.issues);
   }
   const publish: Publish = ((event: Parameters<Publish>[0]) => {
-    queue.push(wrapEvent(event, ctor.publishes ?? []));
+    queue.push(wrapEvent(event, ctor.publishes ?? [], tracingCtx(shared.ctx)));
   }) as Publish;
   const ctx = {
     input: parsed.value as Infer<typeof ctor.input>,
@@ -77,14 +104,12 @@ export async function invokeApi(
   ctor: ApiUseCaseCtor,
   input: unknown,
   deps: InvokeDeps,
-  opts?: { ctx?: unknown; signal?: AbortSignal },
+  opts?: { ctx?: unknown; signal?: AbortSignal; request?: Request },
 ): Promise<unknown> {
+  assertHandlersStarted(deps, ctor.publishes);
   const parsed = validate(ctor.input, input);
   if (!parsed.ok) {
-    throw new CodedError({
-      code: 'VALIDATION',
-      message: 'Validation failed',
-    });
+    throw validationError('Validation failed', parsed.issues);
   }
   const queue: Envelope[] = [];
   const shared: SharedInvoke = {
@@ -93,7 +118,7 @@ export async function invokeApi(
   };
   const run = nestedRun(deps, queue, shared);
   const publish: Publish = ((event: Parameters<Publish>[0]) => {
-    queue.push(wrapEvent(event, ctor.publishes ?? []));
+    queue.push(wrapEvent(event, ctor.publishes ?? [], tracingCtx(shared.ctx)));
   }) as Publish;
 
   const ports = aliasPorts(ctor.ports, deps.ports);
@@ -116,8 +141,9 @@ export async function invokeApi(
   handler = wrapMiddleware(
     ctor,
     handler,
-    [...deps.middleware, ...(ctor.middleware ?? [])] as RpcMiddleware[],
+    [...deps.middleware, ...(ctor.middleware ?? [])] as ApiMiddleware[],
     errors,
+    opts?.request,
   );
 
   try {
@@ -141,9 +167,12 @@ export async function invokeEvent(
     ctx: opts?.ctx ?? deps.defaultCtx,
     signal: opts?.signal ?? new AbortController().signal,
   };
+  assertHandlersStarted(deps, ctor.publishes);
   const run = nestedRun(deps, queue, shared);
   const publish: Publish = ((event: Parameters<Publish>[0]) => {
-    queue.push(wrapEvent(event, ctor.publishes ?? []));
+    queue.push(
+      wrapEvent(event, ctor.publishes ?? [], tracingCtx(shared.ctx, envelope)),
+    );
   }) as Publish;
   const ports = aliasPorts(ctor.ports ?? {}, deps.ports);
   const errors = errorFactories(ctor.errors ?? {});
@@ -228,8 +257,9 @@ function wrapDispatch(
 function wrapMiddleware(
   ctor: ApiUseCaseCtor,
   handler: Handler,
-  middleware: RpcMiddleware[],
+  middleware: ApiMiddleware[],
   errors: { [code: string]: (data?: unknown) => never },
+  request?: Request,
 ): Handler {
   let current = handler;
   for (let i = middleware.length - 1; i >= 0; i--) {
@@ -247,6 +277,7 @@ function wrapMiddleware(
         next: () => inner(ctx),
         errors,
         path: ctor.key,
+        ...(request !== undefined ? { request } : {}),
       });
     };
   }
@@ -285,6 +316,7 @@ export async function publishNow(
   envelope: Envelope,
   deps: InvokeDeps,
 ): Promise<void> {
+  assertEnvelopeStarted(deps, envelope);
   await flush([envelope], deps);
 }
 

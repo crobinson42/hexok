@@ -166,7 +166,7 @@ function users(store: Map<string, Actor>): Users {
 describe('EventChannel', () => {
   it('joins, routes to matching sessions, and omits ctx on the wire', async () => {
     const presence = InMemoryChannel.create<Actor>();
-    const app = App.from({ post: PostNote })
+    const app = App.test({ post: PostNote })
       .provide(Users, users(new Map([['ada', ada]])))
       .bind(ClientEvents, InMemoryBus.create())
       .route(ClientChannel, presence)
@@ -193,7 +193,7 @@ describe('EventChannel', () => {
   });
 
   it('rejects a forbidden join', async () => {
-    const app = App.from({ post: PostNote })
+    const app = App.test({ post: PostNote })
       .provide(Users, users(new Map()))
       .bind(ClientEvents, InMemoryBus.create())
       .route(ClientChannel, InMemoryChannel.create<Actor>())
@@ -211,7 +211,7 @@ describe('EventChannel', () => {
   it('refreshes claims and ejects when refresh returns eject', async () => {
     const store = new Map<string, Actor>([['ada', ada]]);
     const presence = InMemoryChannel.create<Actor>();
-    const app = App.from({ post: PostNote, refresh: RefreshUser })
+    const app = App.test({ post: PostNote, refresh: RefreshUser })
       .provide(Users, users(store))
       .bind(ClientEvents, InMemoryBus.create())
       .route(ClientChannel, presence)
@@ -235,7 +235,7 @@ describe('EventChannel', () => {
 
   it('ejects every connection for a user', async () => {
     const presence = InMemoryChannel.create<Actor>();
-    const app = App.from({ post: PostNote, kick: KickUser })
+    const app = App.test({ post: PostNote, kick: KickUser })
       .provide(Users, users(new Map()))
       .bind(ClientEvents, InMemoryBus.create())
       .route(ClientChannel, presence)
@@ -255,7 +255,7 @@ describe('EventChannel', () => {
   });
 
   it('types build as unrouted when a use case declares the channel', () => {
-    const builder = App.from({ kick: KickUser })
+    const builder = App.test({ kick: KickUser })
       .provide(Users, users(new Map()))
       .bind(ClientEvents, InMemoryBus.create());
     expectTypeOf(
@@ -278,7 +278,7 @@ describe('EventChannel', () => {
       }
       async route(): Promise<void> {}
     }
-    const builder = App.from({ post: PostNote }).provide(
+    const builder = App.test({ post: PostNote }).provide(
       Users,
       users(new Map()),
     );

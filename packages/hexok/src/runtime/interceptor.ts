@@ -52,7 +52,7 @@ export interface Interceptor {
   readonly key: string;
   /** Wrap API and event `execute`. Nested `run` does not re-enter this hook. */
   aroundUseCase?(uc: UseCaseClass, next: Handler): Handler;
-  /** Wrap a provided port impl once at `build`. Per-call wrapping belongs in `aroundUseCase`. */
+  /** Wrap a provided port impl once at `build`. First registered is outer, same as the other hooks. */
   aroundAdapter?(port: PortToken<unknown>, impl: unknown): unknown;
   /** Wrap catalog publish after execute returns. Swallowing `next()` drops the event. */
   aroundPublish?(envelope: Envelope, next: () => Promise<void>): Promise<void>;
@@ -64,7 +64,7 @@ export interface Interceptor {
   ): Promise<void>;
 }
 
-/** Throw if a port impl is labeled Transactional/RequestScoped but missing `bindTo`/`fork`. Call from `aroundAdapter`. */
+/** Throw if a port impl is missing `bindTo`/`fork`. `provide()` calls this when the token flags the capability. */
 export function requireCapability(
   token: PortToken<unknown>,
   impl: unknown,

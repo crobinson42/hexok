@@ -184,6 +184,29 @@ describe('Entity', () => {
     expect(incident.closedAt).toEqual(now);
   });
 
+  it('set re-validates and throws VALIDATION with issues', () => {
+    const incident = Incident.open('1');
+    try {
+      incident.set((draft) => {
+        draft.status = 'nope' as 'open';
+      });
+      expect.unreachable();
+    } catch (error) {
+      expect(error).toBeInstanceOf(CodedError);
+      expect(error).toMatchObject({ code: 'VALIDATION' });
+      expect(
+        (error as CodedError).data as { issues: { message: string }[] },
+      ).toEqual(
+        expect.objectContaining({
+          issues: expect.arrayContaining([
+            expect.objectContaining({ message: expect.any(String) }),
+          ]),
+        }),
+      );
+    }
+    expect(incident.status).toBe('open');
+  });
+
   it('close throws ALREADY_CLOSED', () => {
     const now = new Date('2026-01-01T00:00:00Z');
     const incident = Incident.open('1');
@@ -260,9 +283,6 @@ describe('Entity', () => {
       // @ts-expect-error NOPE is not a declared incident error
       Incident.error('NOPE'),
     ).toThrow('hexok: undeclared error "NOPE" on Incident');
-    expect(() => Incident.open('1').error('NOPE')).toThrow(
-      'hexok: undeclared error "NOPE" on Incident',
-    );
   });
 
   it('restore does not snapshot; original is undefined while clean', () => {

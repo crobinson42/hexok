@@ -7,16 +7,16 @@ import type {
 type Consumer = (envelope: Envelope, ctx: QueueConsumeCtx) => Promise<void>;
 
 /**
- * In-process queue. `consume` dispatches with attempt; ack/nack are no-ops.
- * `stop()` clears consumers.
+ * In-process queue. `nack` (or a throw) redelivers with `attempt + 1` up to
+ * `maxAttempts` (default 3). `stop()` clears consumers.
  */
 export class InMemoryQueue implements QueueAdapter {
   readonly kind = 'queue' as const;
-  /** Envelopes passed to `publish`, in order. */
+  /** Envelopes passed to `publish`, in order (one entry per publish, not per attempt). */
   readonly published: Envelope[] = [];
   #consumers = new Map<string, Map<string, Consumer>>();
-  /** `attempt` passed to consumers on the next `publish`. Not a retry counter. */
-  attempts = 1;
+  /** Stop redelivering after this many attempts. */
+  maxAttempts = 3;
 
   /** Empty queue. Pass to `.bind(catalog, InMemoryQueue.create())`. */
   static create(): InMemoryQueue {
@@ -29,19 +29,38 @@ export class InMemoryQueue implements QueueAdapter {
     const groups = this.#consumers.get(envelope.key);
     if (!groups) return;
     for (const consumer of groups.values()) {
-      let acked = false;
-      const ctx: QueueConsumeCtx = {
-        attempt: this.attempts,
-        ack: async () => {
-          acked = true;
-        },
-        nack: async () => {
-          acked = false;
-        },
-      };
-      await consumer(envelope, ctx);
-      void acked;
+      await this.#deliver(envelope, consumer, 1);
     }
+  }
+
+  async #deliver(
+    envelope: Envelope,
+    consumer: Consumer,
+    attempt: number,
+  ): Promise<void> {
+    let outcome: 'ack' | 'nack' | 'none' = 'none';
+    let thrown: unknown;
+    const ctx: QueueConsumeCtx = {
+      attempt,
+      ack: async () => {
+        outcome = 'ack';
+      },
+      nack: async () => {
+        outcome = 'nack';
+      },
+    };
+    try {
+      await consumer(envelope, ctx);
+    } catch (error) {
+      thrown = error;
+      if (outcome === 'none') outcome = 'nack';
+    }
+    if (outcome !== 'nack') return;
+    if (attempt < this.maxAttempts) {
+      await this.#deliver(envelope, consumer, attempt + 1);
+      return;
+    }
+    if (thrown !== undefined) throw thrown;
   }
 
   /** Register the consumer for `key`+`group`. Later calls replace that group. */

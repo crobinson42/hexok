@@ -18,4 +18,18 @@ describe('Port', () => {
   it('PortType extracts the interface', () => {
     expectTypeOf<PortType<typeof Clock>>().toEqualTypeOf<Clock>();
   });
+
+  it('defaults capability flags to false', () => {
+    expect(Clock.capabilities).toEqual({
+      transactional: false,
+      requestScoped: false,
+    });
+    expect(Object.isFrozen(Clock.capabilities)).toBe(true);
+  });
+
+  it('stores capability flags', () => {
+    const Tx = Port.token<Clock>('TxClock', { transactional: true });
+    expect(Tx.capabilities.transactional).toBe(true);
+    expect(Tx.capabilities.requestScoped).toBe(false);
+  });
 });

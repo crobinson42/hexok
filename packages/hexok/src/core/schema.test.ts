@@ -34,10 +34,16 @@ describe('validate', () => {
     expect(result).toEqual({ ok: true, value: { id: '1' } });
   });
 
-  it('collapses issues to VALIDATION', () => {
-    const schema = schemaOf<string>(() => ({ issues: [{ message: 'nope' }] }));
+  it('keeps issues on a VALIDATION fail', () => {
+    const schema = schemaOf<string>(() => ({
+      issues: [{ message: 'nope', path: ['id'] }],
+    }));
     const result = validate(schema, 1);
-    expect(result).toEqual({ ok: false, code: 'VALIDATION' });
+    expect(result).toEqual({
+      ok: false,
+      code: 'VALIDATION',
+      issues: [{ message: 'nope', path: ['id'] }],
+    });
   });
 
   it('throws when the schema validate is async', () => {

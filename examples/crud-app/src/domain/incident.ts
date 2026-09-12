@@ -37,7 +37,7 @@ export class Incident extends Entity<IncidentProps> {
   }
 
   close(now: Date): this {
-    if (this.props.status === 'closed') this.error('ALREADY_CLOSED');
+    if (this.props.status === 'closed') Incident.error('ALREADY_CLOSED');
     return this.set((draft) => {
       draft.status = 'closed';
       draft.closedAt = now;

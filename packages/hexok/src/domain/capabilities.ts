@@ -1,6 +1,7 @@
 /**
  * Optional adapter capabilities. Intersect these with a port interface.
- * Interceptors may call `requireCapability` from `aroundAdapter` to check `bindTo` / `fork`.
+ * Pass `{ transactional: true }` / `{ requestScoped: true }` to `Port.token`
+ * so `provide()` throws if the impl is missing `bindTo` / `fork`.
  *
  * ```ts
  * class PgIncidentRepo implements IncidentRepository, Transactional<IncidentRepository> {

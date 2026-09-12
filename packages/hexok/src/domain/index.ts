@@ -32,4 +32,9 @@ export {
   type EventPayload,
   type EventWithCtx,
 } from './event.js';
-export { Port, PortToken, type PortType } from './port.js';
+export {
+  Port,
+  type PortCapabilities,
+  PortToken,
+  type PortType,
+} from './port.js';

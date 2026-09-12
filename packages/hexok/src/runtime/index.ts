@@ -19,7 +19,7 @@ export {
   type Interceptor,
   requireCapability,
 } from './interceptor.js';
-export type { RpcMiddleware } from './middleware.js';
+export type { ApiMiddleware, RpcMiddleware } from './middleware.js';
 export {
   deriveRpc,
   type RpcContract,

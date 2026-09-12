@@ -37,20 +37,74 @@ type OnInCatalog<C> = C extends {
     : `hexok: EventUseCase "${Key}" static on is not in catalog`
   : C;
 
+type HasLiteralKey<C> = C extends { key: infer K extends string }
+  ? string extends K
+    ? false
+    : true
+  : false;
+
+type IsWideArray<T> = T extends readonly unknown[]
+  ? number extends T['length']
+    ? true
+    : false
+  : false;
+
+type CheckAsConst<C, Field extends string, Kind extends string> = [C] extends [
+  string,
+]
+  ? C
+  : Field extends keyof C
+    ? undefined extends C[Field]
+      ? C
+      : IsWideArray<C[Field]> extends true
+        ? `hexok: ${Kind} "${KeyOf<C>}" static ${Field} must be \`as const\``
+        : C
+    : C;
+
+type CheckApiShape<C> =
+  HasLiteralKey<C> extends false
+    ? `hexok: ApiUseCase "${KeyOf<C>}" is missing static key`
+    : C extends { input: StandardSchemaV1 }
+      ? C extends { output: StandardSchemaV1 }
+        ? C extends { ports: Record<string, PortToken<unknown>> }
+          ? C
+          : `hexok: ApiUseCase "${KeyOf<C>}" is missing static ports`
+        : `hexok: ApiUseCase "${KeyOf<C>}" is missing static output`
+      : `hexok: ApiUseCase "${KeyOf<C>}" is missing static input`;
+
+type CheckQueueGroup<C> = [C] extends [string]
+  ? C
+  : C extends { catalog: { kind: 'queue' } }
+    ? C extends { group: string }
+      ? C
+      : `hexok: EventUseCase "${KeyOf<C>}" is missing static group`
+    : C;
+
+type CheckEventShape<C> =
+  HasLiteralKey<C> extends false
+    ? `hexok: EventUseCase "${KeyOf<C>}" is missing static key`
+    : C extends { on: { readonly key: string } }
+      ? C extends { catalog: AnyEventCatalog }
+        ? CheckQueueGroup<OnInCatalog<C>>
+        : `hexok: EventUseCase "${KeyOf<C>}" is missing static catalog`
+      : `hexok: EventUseCase "${KeyOf<C>}" is missing static on`;
+
 /**
  * Per-entry diagnostic for `App.from` / `App.test`. Missing statics become a
  * `hexok:` sentence instead of a UseCaseClass union dump.
  */
 export type CheckUseCase<C> = C extends { trigger: 'api' }
-  ? C extends { ports: Record<string, PortToken<unknown>> }
-    ? C
-    : `hexok: ApiUseCase "${KeyOf<C>}" is missing static ports`
+  ? CheckAsConst<
+      CheckAsConst<CheckApiShape<C>, 'publishes', 'ApiUseCase'>,
+      'channels',
+      'ApiUseCase'
+    >
   : C extends { trigger: 'event' }
-    ? C extends { on: { readonly key: string } }
-      ? C extends { catalog: AnyEventCatalog }
-        ? OnInCatalog<C>
-        : `hexok: EventUseCase "${KeyOf<C>}" is missing static catalog`
-      : `hexok: EventUseCase "${KeyOf<C>}" is missing static on`
+    ? CheckAsConst<
+        CheckAsConst<CheckEventShape<C>, 'publishes', 'EventUseCase'>,
+        'channels',
+        'EventUseCase'
+      >
     : `hexok: "${KeyOf<C>}" must extend ApiUseCase or EventUseCase`;
 
 /** Named map of use-case classes passed to `App.from`. */
@@ -105,8 +159,6 @@ export interface EventUseCaseCtor {
   readonly channels?: readonly EventChannelCtor[];
   /** Declared refusals. */
   readonly errors?: ErrorMap;
-  /** Same constructor field as API use cases; event dispatch does not run it. */
-  readonly middleware?: readonly unknown[];
   readonly prototype: { execute(ctx: never): Promise<void> };
 }
 

@@ -17,7 +17,11 @@ import {
   type ClientConnection,
   WebSocketChannel,
 } from '../infra/client-event-bus/index.js';
-import { createHandler } from './http.js';
+import {
+  contextFromRequest,
+  createHandler,
+  rpcKeyFromRequest,
+} from './http.js';
 import {
   memoryApiKeys,
   memoryUserCredentials,
@@ -60,11 +64,14 @@ export function createApi() {
     .bind(ClientEvents, clientBus)
     .route(ClientChannel, presence)
     .ctx<AppContext>({})
+    .ctxFrom(({ request, ctx }) =>
+      contextFromRequest(rpcKeyFromRequest(request), request, token, ctx),
+    )
     .build();
 
   return {
     app,
-    fetch: createHandler(app, token),
+    fetch: createHandler(app),
     clientBus,
     accept: (connection: ClientConnection, request: Request) =>
       acceptClient(connection, request, token, app.channels.client),

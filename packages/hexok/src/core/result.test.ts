@@ -12,6 +12,15 @@ describe('ok / fail', () => {
     expect(result).toEqual({ ok: false, code: 'ALREADY_CLOSED' });
   });
 
+  it('attaches schema issues on fail', () => {
+    const result = fail('VALIDATION', [{ message: 'id required' }]);
+    expect(result).toEqual({
+      ok: false,
+      code: 'VALIDATION',
+      issues: [{ message: 'id required' }],
+    });
+  });
+
   it('infers a closed error union from a ternary', () => {
     const closed = true;
     const next = { id: '1' };

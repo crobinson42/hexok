@@ -23,9 +23,9 @@ export function createFetchHandler(
         404,
       );
     }
-    let body: { input?: unknown; ctx?: unknown } = {};
+    let body: { input?: unknown } = {};
     try {
-      body = (await request.json()) as { input?: unknown; ctx?: unknown };
+      body = (await request.json()) as { input?: unknown };
     } catch {
       return json(
         {
@@ -36,8 +36,12 @@ export function createFetchHandler(
       );
     }
     try {
+      const ctx = deps.ctxFrom
+        ? await deps.ctxFrom({ request, ctx: deps.defaultCtx })
+        : deps.defaultCtx;
       const output = await invokeApi(ctor, body.input, deps, {
-        ctx: body.ctx ?? deps.defaultCtx,
+        ctx,
+        request,
       });
       return json({ ok: true, output });
     } catch (error) {

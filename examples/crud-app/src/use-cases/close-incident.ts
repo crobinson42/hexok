@@ -24,7 +24,7 @@ export class CloseIncident extends ApiUseCase {
     clock: Clock,
   };
 
-  static publishes = [DomainEvents];
+  static publishes = [DomainEvents] as const;
 
   async execute({
     input,

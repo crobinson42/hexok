@@ -93,6 +93,23 @@ describe('wrapEvent', () => {
     );
   });
 
+  it('copies correlationId and causationId from request ctx', () => {
+    const envelope = wrapEvent(new DomainNote({ text: 'a' }), publishes, {
+      correlationId: 'corr',
+      causationId: 'cause',
+    });
+    expect(envelope.correlationId).toBe('corr');
+    expect(envelope.causationId).toBe('cause');
+  });
+
+  it('does not overwrite tracing ids on a passed-through envelope', () => {
+    const existing = wrapEvent(new DomainNote({ text: 'a' }), publishes, {
+      correlationId: 'keep',
+    });
+    const passed = wrapEvent(existing, publishes, { correlationId: 'new' });
+    expect(passed.correlationId).toBe('keep');
+  });
+
   it('does not copy ctx for catalogs that did not declare .ctx()', () => {
     class NoteWithCtx extends DomainEvent {
       static readonly key = 'note.extra';

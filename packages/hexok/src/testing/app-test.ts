@@ -15,6 +15,7 @@ import type {
 } from '../domain/index.js';
 import {
   type AdapterFor,
+  type ApiMiddleware,
   type AppBuilder,
   type AppInstance,
   type ChannelKindError,
@@ -24,7 +25,6 @@ import {
   type Interceptor,
   type MissingMessages,
   type NestedClient,
-  type RpcMiddleware,
   App as RuntimeApp,
 } from '../runtime/index.js';
 
@@ -164,8 +164,29 @@ export class TestAppBuilder<
     return new TestAppBuilder(next, this.#published);
   }
 
-  /** Register RPC middleware on the inner runtime builder. */
-  use(middleware: RpcMiddleware): this {
+  /** Set HTTP request context from the `Request`. Same as runtime `.ctxFrom`. */
+  ctxFrom(
+    fn: (args: { request: Request; ctx: Ctx }) => Ctx | Promise<Ctx>,
+  ): this {
+    this.#inner.ctxFrom(fn);
+    return this;
+  }
+
+  /** Provide a factory from `Adapter.of` by calling `create(...deps)`. */
+  adapt<I, Deps extends unknown[]>(
+    factory: {
+      token: [PortToken<I>] extends [Provided]
+        ? DuplicatePortError
+        : PortToken<I>;
+      create: (...deps: Deps) => I;
+    },
+    ...deps: Deps
+  ): TestAppBuilder<Bag, Provided | PortToken<I>, Bound, Ctx, Routed> {
+    return this.provide(factory.token, factory.create(...deps));
+  }
+
+  /** Register API middleware on the inner runtime builder. */
+  use(middleware: ApiMiddleware): this {
     this.#inner.use(middleware);
     return this;
   }
@@ -216,9 +237,7 @@ export class TestAppBuilder<
  * ```
  */
 export const App = {
-  /** Same as `hexok/runtime` `App.from` — no `published` capture. Prefer `test`. */
-  from: RuntimeApp.from,
-  /** Start a test graph. The built app has `published` and `as`. */
+  /** Start a test graph. The built app has `published` and `as`. Production composition is `hexok/runtime` `App.from`. */
   test: TestAppBuilder.test,
 };
 

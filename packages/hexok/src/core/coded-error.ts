@@ -1,3 +1,5 @@
+import type { StandardSchemaV1 } from './standard-schema.js';
+
 /**
  * Thrown by entity refusals and use-case error factories.
  * Carries `code`, optional `message`, and optional `data`.
@@ -25,4 +27,16 @@ export class CodedError<C extends string = string> extends Error {
       this.data = args.data;
     }
   }
+}
+
+/** `VALIDATION` refusal. `data.issues` is the Standard Schema issue list when present. */
+export function validationError(
+  message: string,
+  issues?: readonly StandardSchemaV1.Issue[],
+): CodedError<'VALIDATION'> {
+  return new CodedError({
+    code: 'VALIDATION',
+    message,
+    ...(issues !== undefined ? { data: { issues } } : {}),
+  });
 }

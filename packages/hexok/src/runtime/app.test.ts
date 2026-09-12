@@ -325,6 +325,129 @@ describe('App invoke', () => {
     expect(body.error.status).toBe(404);
   });
 
+  it('ignores client-supplied body.ctx', async () => {
+    class EchoCtx extends ApiUseCase {
+      static readonly key = 'echo.ctx';
+      static readonly input = z.object({});
+      static readonly output = z.unknown();
+      static readonly errors = {} as const;
+      static readonly ports = { clock: Clock };
+      async execute({ ctx }: ExecuteCtx<typeof EchoCtx>) {
+        return ctx;
+      }
+    }
+    const app = App.from({ echo: EchoCtx })
+      .provide(Clock, clock)
+      .ctx({ actor: 'server' })
+      .build();
+    const response = await app.router.fetch(
+      new Request('http://app/rpc/echo/ctx', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          input: {},
+          ctx: { actor: 'spoof' },
+        }),
+      }),
+    );
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({
+      ok: true,
+      output: { actor: 'server' },
+    });
+  });
+
+  it('sets HTTP ctx from ctxFrom', async () => {
+    class EchoCtx extends ApiUseCase {
+      static readonly key = 'echo.ctx';
+      static readonly input = z.object({});
+      static readonly output = z.unknown();
+      static readonly errors = {} as const;
+      static readonly ports = { clock: Clock };
+      async execute({ ctx }: ExecuteCtx<typeof EchoCtx>) {
+        return ctx;
+      }
+    }
+    const app = App.from({ echo: EchoCtx })
+      .provide(Clock, clock)
+      .ctx({ actor: 'anon' })
+      .ctxFrom(({ request, ctx }) => ({
+        ...ctx,
+        actor: request.headers.get('x-actor') ?? ctx.actor,
+      }))
+      .build();
+    const response = await app.router.fetch(
+      new Request('http://app/rpc/echo/ctx', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', 'x-actor': 'ada' },
+        body: JSON.stringify({ input: {} }),
+      }),
+    );
+    expect(await response.json()).toEqual({
+      ok: true,
+      output: { actor: 'ada' },
+    });
+  });
+
+  it('includes field issues on HTTP VALIDATION', async () => {
+    const app = App.from({ close: CloseIncident })
+      .provide(IncidentRepository, repo([]))
+      .provide(Clock, clock)
+      .bind(DomainEvents, memoryBus())
+      .build();
+    const response = await app.router.fetch(
+      new Request('http://app/rpc/incident/close', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ input: { id: 1 } }),
+      }),
+    );
+    expect(response.status).toBe(400);
+    const body = (await response.json()) as {
+      ok: boolean;
+      error: { code: string; data?: { issues: unknown[] } };
+    };
+    expect(body.error.code).toBe('VALIDATION');
+    expect(body.error.data?.issues?.length).toBeGreaterThan(0);
+  });
+
+  it('throws from provide when a transactional token is missing bindTo', () => {
+    const TxClock = Port.token<Clock>('TxClock', { transactional: true });
+    expect(() =>
+      App.from({ stamp: StampTime }).provide(TxClock, clock),
+    ).toThrow(
+      'hexok: TxClock is transactional but the adapter does not implement Transactional',
+    );
+  });
+
+  it('throws when publishing before start() if handlers exist', async () => {
+    const app = App.from({ close: CloseIncident, notify: NotifyOnClose })
+      .provide(IncidentRepository, repo([{ id: '1', status: 'open' }]))
+      .provide(Clock, clock)
+      .bind(DomainEvents, memoryBus())
+      .build();
+    await expect(app.local.incident.close({ id: '1' })).rejects.toThrow(
+      'hexok: start() before handlers can receive events',
+    );
+    await app.start();
+    await expect(app.local.incident.close({ id: '1' })).resolves.toMatchObject({
+      id: '1',
+      status: 'closed',
+    });
+    await app.stop();
+  });
+
+  it('nests rpc routes by use-case key', () => {
+    const app = App.from({ close: CloseIncident })
+      .provide(IncidentRepository, repo([]))
+      .provide(Clock, clock)
+      .bind(DomainEvents, memoryBus())
+      .build();
+    expect(app.rpc.incident.close.path).toBe('/rpc/incident/close');
+    expect(app.rpc.incident.close.method).toBe('POST');
+    expect(app.rpc.routes['incident.close']?.path).toBe('/rpc/incident/close');
+  });
+
   it('maps unknown error codes to HTTP 409', async () => {
     const app = App.from({ close: CloseIncident })
       .provide(IncidentRepository, repo([{ id: 'boom', status: 'open' }]))

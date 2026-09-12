@@ -9,6 +9,10 @@ type CrudKeys = 'get' | 'save' | 'list' | 'delete';
 
 type ExtraKeys<I> = Exclude<keyof I, CrudKeys | 'bindTo' | 'fork'>;
 
+type ExtraOption<I> = [ExtraKeys<I>] extends [never]
+  ? unknown
+  : { extra: Pick<I, ExtraKeys<I>> };
+
 type RepoEntity<I> = I extends {
   get: (id: string) => Promise<infer E>;
 }
@@ -22,9 +26,7 @@ type EntityKey<E> = E extends { toProps(): infer P }
   : string;
 
 type AssertCrud<I> = 'get' | 'save' extends keyof I
-  ? ExtraKeys<I> extends never
-    ? I
-    : `hexok: InMemoryRepository cannot fake extra methods; write a custom fake`
+  ? I
   : `hexok: InMemoryRepository.of expects a CRUD repository port`;
 
 /**
@@ -51,18 +53,21 @@ export class InMemoryRepository<E extends Entity<Record<string, unknown>>>
     }
   }
 
-  /** Fake a CRUD port. `keyBy` is the entity prop used as the map key; `seed` is cloned in. */
+  /** Fake a CRUD port. Extra methods beyond get/save/list/delete go in `extra`. */
   static of<I>(
     _token: [AssertCrud<I>] extends [I] ? PortToken<I> : AssertCrud<I>,
     options: {
       keyBy: EntityKey<RepoEntity<I>>;
       seed?: RepoEntity<I>[];
-    },
+    } & ExtraOption<I>,
   ): I {
     const repo = new InMemoryRepository(
       options.keyBy,
       (options.seed ?? []) as Entity<Record<string, unknown>>[],
     );
+    if ('extra' in options && options.extra !== undefined) {
+      return Object.assign(repo, options.extra) as unknown as I;
+    }
     return repo as unknown as I;
   }
 

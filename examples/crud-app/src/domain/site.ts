@@ -36,7 +36,7 @@ export class Site extends Entity<SiteProps> {
       this.props.address.city === city &&
       this.props.address.region === region
     ) {
-      this.error('SAME_ADDRESS');
+      Site.error('SAME_ADDRESS');
     }
 
     this.set((draft) => {

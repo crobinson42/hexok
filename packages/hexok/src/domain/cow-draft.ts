@@ -113,6 +113,11 @@ export function frozenSnapshot<T>(value: T): T {
   return deepFreeze(deepClone(value));
 }
 
+/** Unfrozen deep clone of plain objects, arrays, and `Date`. */
+export function cloneValue<T>(value: T): T {
+  return deepClone(value);
+}
+
 function deepClone<T>(value: T): T {
   if (value instanceof Date) return new Date(value.getTime()) as T;
   if (Array.isArray(value)) {

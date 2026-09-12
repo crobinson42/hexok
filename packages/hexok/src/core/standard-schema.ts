@@ -36,7 +36,7 @@ export declare namespace StandardSchemaV1 {
     readonly issues: ReadonlyArray<Issue>;
   }
 
-  /** One validation problem. Hexok `validate` discards these and returns `'VALIDATION'`. */
+  /** One validation problem. Hexok `validate` copies these onto the fail arm. */
   export interface Issue {
     readonly message: string;
     readonly path?: ReadonlyArray<PropertyKey | PathSegment> | undefined;

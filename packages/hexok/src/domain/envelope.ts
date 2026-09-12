@@ -23,11 +23,11 @@ export type Envelope<
   occurredAt: Date;
   /** Catalog ctx when `.ctx()` was declared; omitted otherwise. */
   ctx?: Ctx;
-  /** Optional tracing id shared across a conversation. */
+  /** Copied from request ctx when that field is a string. */
   correlationId?: string;
-  /** Optional id of the event that caused this one. */
+  /** Copied from request ctx when that field is a string. */
   causationId?: string;
-  /** Adapter-reserved fields. Hexok writes `{}`. */
+  /** Adapter/interceptor scratch. Hexok writes `{}`; domain code should not. */
   meta: Record<string, unknown>;
 };
 

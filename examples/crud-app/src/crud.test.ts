@@ -4,6 +4,7 @@ import { createApp } from './create-app.js';
 describe('crud-app', () => {
   it('create / get / list / update / close via app.local', async () => {
     const { app } = createApp();
+    await app.start();
     const created = await app.local.incident.create({
       id: '2',
       title: 'New',
@@ -23,6 +24,7 @@ describe('crud-app', () => {
 
   it('ALREADY_CLOSED / NOT_FOUND / DUPLICATE codes', async () => {
     const { app } = createApp();
+    await app.start();
     await app.local.incident.close({ id: '1' });
     await expect(app.local.incident.close({ id: '1' })).rejects.toMatchObject({
       code: 'ALREADY_CLOSED',
@@ -37,6 +39,7 @@ describe('crud-app', () => {
 
   it('close publishes; second close does not', async () => {
     const { app } = createApp();
+    await app.start();
     await app.local.incident.close({ id: '1' });
     expect(app.published).toHaveLength(1);
     expect(app.published[0]?.key).toBe('incident.closed');
@@ -46,20 +49,22 @@ describe('crud-app', () => {
     expect(app.published).toHaveLength(1);
   });
 
-  it('notify does not run until start()', async () => {
+  it('publish throws before start() when handlers exist', async () => {
     const { app, notifier } = createApp();
-    await app.local.incident.close({ id: '1' });
+    await expect(app.local.incident.close({ id: '1' })).rejects.toThrow(
+      'hexok: start() before handlers can receive events',
+    );
     expect(notifier.sent).toHaveLength(0);
     await app.start();
-    await app.local.incident.create({ id: '3', title: 'later' });
-    await app.local.incident.close({ id: '3' });
+    await app.local.incident.close({ id: '1' });
     expect(notifier.sent).toHaveLength(1);
-    expect(notifier.sent[0]?.id).toBe('3');
+    expect(notifier.sent[0]?.id).toBe('1');
     await app.stop();
   });
 
   it('HTTP POST /rpc/incident/close', async () => {
     const { app } = createApp();
+    await app.start();
     const response = await app.router.fetch(
       new Request('http://app/rpc/incident/close', {
         method: 'POST',

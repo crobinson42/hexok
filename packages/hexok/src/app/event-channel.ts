@@ -53,24 +53,19 @@ export abstract class EventChannel {
   abstract route(ctx: never): Promise<void>;
 
   /**
-   * Throw a `CodedError` for a code in `static errors`.
-   * Prefer `errors.CODE()` in join/refresh for typed factories.
-   */
-  error(code: string, data?: unknown): never {
-    const def = (this.constructor as { errors?: ErrorMap }).errors?.[code];
-    throw new CodedError({
-      code,
-      message: def?.message ?? code,
-      ...(data !== undefined ? { data } : {}),
-    });
-  }
-
-  /**
-   * Same one-liner as `if (!result.ok) throw this.error(result.code)`.
+   * Same one-liner as `if (!result.ok) throw new CodedError({ code: result.code })`.
    * For `validate` / custom Results. Entity methods throw themselves.
    */
   unwrap<T, E extends string>(result: Result<T, E>): T {
-    if (!result.ok) this.error(result.code);
+    if (!result.ok) {
+      throw new CodedError({
+        code: result.code,
+        message: result.code,
+        ...(result.issues !== undefined
+          ? { data: { issues: result.issues } }
+          : {}),
+      });
+    }
     return result.value;
   }
 }

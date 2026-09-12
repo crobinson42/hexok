@@ -68,16 +68,19 @@ const app = App.from(useCases)
   .provide(Clock, clock)
   .bind(DomainEvents, bus)
   .ctx<AppContext>({ requestId: 'boot' })
+  .ctxFrom(({ request, ctx }) => ctx)
   .build()
 
+await app.start()
 await app.local.incident.close({ id: '1' })
-await app.start() // event handlers do not run until start()
 await app.stop()
 ```
 
 `build()` is not callable until every required port and catalog is provided — at compile time and at runtime.
 
-HTTP: `POST /rpc/incident/close` with `{ input: { id: '1' } }`.
+Call `start()` before use cases that publish to catalogs with handlers.
+
+HTTP: `POST /rpc/incident/close` with `{ input: { id: '1' } }`. Request context is `.ctx()` / `.ctxFrom(({ request, ctx }) => ctx)` — never `body.ctx`.
 
 ## Test
 

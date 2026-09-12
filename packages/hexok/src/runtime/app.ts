@@ -44,9 +44,9 @@ import type {
 } from './completeness.js';
 import { startHandlers, stopAdapters } from './events.js';
 import { createFetchHandler } from './http.js';
-import type { Interceptor } from './interceptor.js';
+import { type Interceptor, requireCapability } from './interceptor.js';
 import { type InvokeDeps, invokeApi, publishNow } from './invoke.js';
-import type { RpcMiddleware } from './middleware.js';
+import type { ApiMiddleware } from './middleware.js';
 import { deriveRpc, type RpcContract } from './rpc.js';
 
 /** Built app: in-process client, HTTP RPC, event lifecycle, and routed channels. */
@@ -71,8 +71,8 @@ export type AppInstance<
   start(): Promise<void>;
   /** Stop channel and event adapters. Safe to call more than once. */
   stop(): Promise<void>;
-  /** Flat RPC catalog: each API route has `method: 'POST'` and a `/rpc/...` path. */
-  readonly rpc: RpcContract;
+  /** Nested RPC catalog (`rpc.incident.close.path`) plus flat `routes`. */
+  readonly rpc: RpcContract<Bag>;
 };
 
 /** Adapter `bind` expects for a catalog kind. */
@@ -112,8 +112,12 @@ export class AppBuilder<
   readonly #bound = new Map<AnyEventCatalog, EventAdapter>();
   readonly #routed = new Map<AnyEventCatalog, RoutedChannel>();
   readonly #interceptors: Interceptor[] = [];
-  readonly #middleware: RpcMiddleware[] = [];
+  readonly #middleware: ApiMiddleware[] = [];
   #defaultCtx: unknown;
+  #ctxFrom?: (args: {
+    request: Request;
+    ctx: unknown;
+  }) => unknown | Promise<unknown>;
 
   private constructor(useCases: Bag) {
     this.#useCases = useCases;
@@ -141,6 +145,22 @@ export class AppBuilder<
       if (existing.key === port.key && existing !== port) {
         throw new Error(`hexok: two tokens share the key "${port.key}"`);
       }
+    }
+    if (port.capabilities.transactional) {
+      requireCapability(
+        port as PortToken<unknown>,
+        impl,
+        'bindTo',
+        'Transactional',
+      );
+    }
+    if (port.capabilities.requestScoped) {
+      requireCapability(
+        port as PortToken<unknown>,
+        impl,
+        'fork',
+        'RequestScoped',
+      );
     }
     this.#provided.set(port as PortToken<unknown>, impl);
     return this as unknown as AppBuilder<
@@ -228,13 +248,43 @@ export class AppBuilder<
     return this as unknown as AppBuilder<Bag, Provided, Bound, C, Routed>;
   }
 
-  /** Register RPC middleware. Runs around API `execute` only — not event handlers or nested `run`. */
-  use(middleware: RpcMiddleware): this {
+  /**
+   * Set HTTP request context from the `Request`. `body.ctx` is ignored.
+   * Call `.ctx<C>()` first so `ctx` is typed. `local` still uses `.ctx()` / per-call `{ ctx }`.
+   */
+  ctxFrom(
+    fn: (args: { request: Request; ctx: Ctx }) => Ctx | Promise<Ctx>,
+  ): this {
+    this.#ctxFrom = fn as (args: {
+      request: Request;
+      ctx: unknown;
+    }) => unknown | Promise<unknown>;
+    return this;
+  }
+
+  /**
+   * Provide a factory from `Adapter.of` by calling `create(...deps)`.
+   * Same as `.provide(factory.token, factory.create(...deps))`.
+   */
+  adapt<I, Deps extends unknown[]>(
+    factory: {
+      token: [PortToken<I>] extends [Provided]
+        ? DuplicatePortError
+        : PortToken<I>;
+      create: (...deps: Deps) => I;
+    },
+    ...deps: Deps
+  ): AppBuilder<Bag, Provided | PortToken<I>, Bound, Ctx, Routed> {
+    return this.provide(factory.token, factory.create(...deps));
+  }
+
+  /** Register API middleware. Runs around `local` and HTTP `execute` — not event handlers or nested `run`. */
+  use(middleware: ApiMiddleware): this {
     this.#middleware.push(middleware);
     return this;
   }
 
-  /** Register an interceptor. First registered is outermost for execute/publish. Duplicate `key` throws. */
+  /** Register an interceptor. First registered is outer for execute, adapter, publish, and dispatch. Duplicate `key` throws. */
   intercept(interceptor: Interceptor): this {
     if (this.#interceptors.some((item) => item.key === interceptor.key)) {
       throw new Error(`hexok: duplicate interceptor key "${interceptor.key}"`);
@@ -262,8 +312,9 @@ export class AppBuilder<
     const adapted = new Map<PortToken<unknown>, unknown>();
     for (const [token, impl] of this.#provided) {
       let current: unknown = impl;
-      for (const interceptor of this.#interceptors) {
-        if (interceptor.aroundAdapter) {
+      for (let i = this.#interceptors.length - 1; i >= 0; i--) {
+        const interceptor = this.#interceptors[i];
+        if (interceptor?.aroundAdapter) {
           current = interceptor.aroundAdapter(token, current);
         }
       }
@@ -297,7 +348,7 @@ export class AppBuilder<
     }
 
     const catalog = deriveContract(this.#useCases);
-    const rpc = deriveRpc(catalog);
+    const rpc = deriveRpc<Bag>(catalog);
 
     const channelHandles: Record<string, unknown> = {};
     for (const [cat, routed] of this.#routed) {
@@ -309,6 +360,9 @@ export class AppBuilder<
       );
     }
 
+    const started = { value: false };
+    const handlerKeys = new Set(eventHandlers.keys());
+
     const deps = (): InvokeDeps => ({
       ports: adapted,
       catalogs: this.#bound,
@@ -316,6 +370,9 @@ export class AppBuilder<
       middleware: this.#middleware,
       defaultCtx: this.#defaultCtx,
       channels: channelHandles,
+      started,
+      handlerKeys,
+      ...(this.#ctxFrom !== undefined ? { ctxFrom: this.#ctxFrom } : {}),
     });
 
     const local = nestByKey(
@@ -326,8 +383,6 @@ export class AppBuilder<
       ]),
     ) as NestedClient<Bag, Ctx>;
 
-    let started = false;
-
     const instance: AppInstance<Bag, Ctx, Routed> = {
       contract: nestedContract(catalog) as DerivedContract<Bag>,
       rpc,
@@ -337,16 +392,16 @@ export class AppBuilder<
       channels: channelHandles as ChannelGateways<Routed>,
       publish: (envelope) => publishNow(envelope, deps()),
       start: async () => {
-        if (started) throw new Error('hexok: start() called twice');
-        started = true;
+        if (started.value) throw new Error('hexok: start() called twice');
+        started.value = true;
         await startHandlers(this.#bound, eventHandlers, deps());
         startChannels(this.#routed, this.#bound);
       },
       stop: async () => {
         await stopChannelAdapters(this.#routed);
-        if (!started) return;
+        if (!started.value) return;
         await stopAdapters(this.#bound);
-        started = false;
+        started.value = false;
       },
     };
     return instance;

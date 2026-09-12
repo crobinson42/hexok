@@ -1,3 +1,4 @@
+import { CodedError } from 'hexok/core';
 import type { AppContext } from '../app/context.js';
 import type { AuthTokenService } from '../app/ports/services/auth-token.js';
 
@@ -8,75 +9,35 @@ export const publicRoutes = new Set([
   'user.setupCredentials',
 ]);
 
-export function createHandler(
-  app: { router: { fetch: (request: Request) => Promise<Response> } },
-  token: AuthTokenService,
-): (request: Request) => Promise<Response> {
-  return async (request) => {
-    const url = new URL(request.url);
-    if (request.method !== 'POST' || !url.pathname.startsWith('/rpc/')) {
-      return app.router.fetch(request);
-    }
-
-    const key = url.pathname.slice('/rpc/'.length).split('/').join('.');
-
-    let body: { input?: unknown } = {};
-    try {
-      body = (await request.json()) as { input?: unknown };
-    } catch {
-      return json(
-        {
-          ok: false,
-          error: { code: 'VALIDATION', status: 400, message: 'Invalid JSON' },
-        },
-        400,
-      );
-    }
-
-    const ctx = await contextFromRequest(key, request, token);
-    if (ctx === null) {
-      return json(
-        {
-          ok: false,
-          error: {
-            code: 'UNAUTHORIZED',
-            status: 401,
-            message: 'Unauthorized',
-          },
-        },
-        401,
-      );
-    }
-
-    return app.router.fetch(
-      new Request(request.url, {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ input: body.input, ctx }),
-      }),
-    );
-  };
+export function createHandler(app: {
+  router: { fetch: (request: Request) => Promise<Response> };
+}): (request: Request) => Promise<Response> {
+  return (request) => app.router.fetch(request);
 }
 
-async function contextFromRequest(
+export async function contextFromRequest(
   key: string,
   request: Request,
   token: AuthTokenService,
-): Promise<AppContext | null> {
-  if (publicRoutes.has(key)) return {};
+  ctx: AppContext,
+): Promise<AppContext> {
+  if (publicRoutes.has(key)) return ctx;
 
   const header = request.headers.get('authorization') ?? '';
   const raw = header.startsWith('Bearer ')
     ? header.slice('Bearer '.length)
     : '';
   const actor = raw ? await token.verify(raw) : null;
-  if (!actor) return null;
-  return { actor };
+  if (!actor) {
+    throw new CodedError({
+      code: 'UNAUTHORIZED',
+      message: 'Unauthorized',
+    });
+  }
+  return { ...ctx, actor };
 }
 
-function json(body: unknown, status: number): Response {
-  return new Response(JSON.stringify(body), {
-    status,
-    headers: { 'content-type': 'application/json' },
-  });
+export function rpcKeyFromRequest(request: Request): string {
+  const url = new URL(request.url);
+  return url.pathname.slice('/rpc/'.length).split('/').join('.');
 }

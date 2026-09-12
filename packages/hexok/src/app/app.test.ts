@@ -93,6 +93,37 @@ class MissingPorts extends ApiUseCase {
   }
 }
 
+class MissingInput extends ApiUseCase {
+  static readonly key = 'missing.input';
+  static readonly output = z.object({});
+  static readonly errors = {} as const;
+  static readonly ports = { clock: Clock };
+  async execute(): Promise<unknown> {
+    return {};
+  }
+}
+
+class WidePublishes extends ApiUseCase {
+  static readonly key = 'wide.publishes';
+  static readonly input = z.object({});
+  static readonly output = z.object({});
+  static readonly errors = {} as const;
+  static readonly ports = { clock: Clock };
+  static readonly publishes = [DomainEvents];
+  async execute(): Promise<unknown> {
+    return {};
+  }
+}
+
+const Jobs = new EventCatalog('jobs', { kind: 'queue' }).event(IncidentClosed);
+
+class MissingGroup extends EventUseCase {
+  static readonly key = 'missing.group';
+  static readonly on = IncidentClosed;
+  static readonly catalog = Jobs;
+  async execute(): Promise<void> {}
+}
+
 class MissingOn extends EventUseCase {
   static readonly key = 'missing.on';
   static readonly catalog = DomainEvents;
@@ -177,6 +208,15 @@ describe('CheckUseCase', () => {
     expectTypeOf<
       CheckUseCase<typeof MissingCatalog>
     >().toEqualTypeOf<`hexok: EventUseCase "missing.catalog" is missing static catalog`>();
+    expectTypeOf<
+      CheckUseCase<typeof MissingInput>
+    >().toEqualTypeOf<`hexok: ApiUseCase "missing.input" is missing static input`>();
+    expectTypeOf<
+      CheckUseCase<typeof MissingGroup>
+    >().toEqualTypeOf<`hexok: EventUseCase "missing.group" is missing static group`>();
+    expectTypeOf<
+      CheckUseCase<typeof WidePublishes>
+    >().toEqualTypeOf<`hexok: ApiUseCase "wide.publishes" static publishes must be \`as const\``>();
     expectTypeOf<CheckUseCase<typeof CloseIncident>>().toEqualTypeOf<
       typeof CloseIncident
     >();

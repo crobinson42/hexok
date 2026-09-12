@@ -16,5 +16,12 @@ export interface ErrorDef {
   data?: StandardSchemaV1;
 }
 
-/** `static errors` bag. Declare `as const satisfies ErrorMap` so keys stay a finite union. */
+/** `static errors` bag. Prefer `defineErrors({ ... })` so keys stay a finite union. */
 export type ErrorMap = Record<string, ErrorDef>;
+
+/** Infer error-code keys from an object literal. Use for `static readonly errors`. */
+export function defineErrors<const M extends Record<string, ErrorDef>>(
+  map: M,
+): M {
+  return map;
+}

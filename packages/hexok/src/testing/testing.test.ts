@@ -1,6 +1,7 @@
 import { describe, expect, expectTypeOf, it } from 'vitest';
 import { Entity, Port } from '../domain/index.js';
 import { TestAppBuilder, type TestAppInstance } from './app-test.js';
+import { InMemoryQueue } from './in-memory-queue.js';
 import { InMemoryRepository } from './in-memory-repository.js';
 
 interface Clock {
@@ -92,10 +93,69 @@ describe('InMemoryRepository', () => {
     void Clock;
   });
 
+  it('requires extra methods on the options object', () => {
+    interface RichRepo {
+      get(id: string): Promise<Thing | null>;
+      save(entity: Thing): Promise<void>;
+      findByEmail(email: string): Promise<Thing | null>;
+    }
+    expectTypeOf<
+      Parameters<typeof InMemoryRepository.of<RichRepo>>[1]
+    >().toMatchTypeOf<{
+      keyBy: 'id';
+      seed?: Thing[];
+      extra: { findByEmail: RichRepo['findByEmail'] };
+    }>();
+  });
+
   it('types seed as the repository entity and keyBy as a prop key', () => {
     expectTypeOf(InMemoryRepository.of<ThingRepository>)
       .parameter(1)
       .toEqualTypeOf<{ keyBy: 'id'; seed?: Thing[] }>();
+  });
+});
+
+describe('InMemoryQueue', () => {
+  it('redelivers on nack up to maxAttempts', async () => {
+    const queue = InMemoryQueue.create();
+    queue.maxAttempts = 3;
+    const attempts: number[] = [];
+    queue.consume('job', 'workers', async (_envelope, ctx) => {
+      attempts.push(ctx.attempt);
+      if (ctx.attempt < 3) {
+        await ctx.nack();
+        return;
+      }
+      await ctx.ack();
+    });
+    await queue.publish({
+      key: 'job',
+      payload: {},
+      catalog: 'jobs',
+      kind: 'queue',
+      occurredAt: new Date(),
+      meta: {},
+    });
+    expect(attempts).toEqual([1, 2, 3]);
+    expect(queue.published).toHaveLength(1);
+  });
+
+  it('rethrows after maxAttempts when the consumer throws', async () => {
+    const queue = InMemoryQueue.create();
+    queue.maxAttempts = 2;
+    queue.consume('job', 'workers', async () => {
+      throw new Error('boom');
+    });
+    await expect(
+      queue.publish({
+        key: 'job',
+        payload: {},
+        catalog: 'jobs',
+        kind: 'queue',
+        occurredAt: new Date(),
+        meta: {},
+      }),
+    ).rejects.toThrow('boom');
   });
 });
 

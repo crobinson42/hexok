@@ -1,11 +1,11 @@
 import type { PortToken } from '../domain/index.js';
 
 /**
- * Typed factory holder. Composition still receives the **impl**, not this object.
+ * Typed factory holder. Pass the **impl** to `provide`, or use `App.adapt(factory, ...deps)`.
  *
  * ```ts
  * const factory = Adapter.of(IncidentRepository, (db: Pool) => new PgIncidentRepo(db))
- * const app = App.from(useCases).provide(IncidentRepository, factory.create(pool))
+ * const app = App.from(useCases).adapt(factory, pool)
  * ```
  */
 export const Adapter = {

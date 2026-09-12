@@ -7,8 +7,8 @@ import type {
 import type { EventChannelCtor } from './types.js';
 
 /**
- * Event handler. Mutually exclusive with `ApiUseCase`. Queue catalogs
- * require `static group`.
+ * Event handler. Mutually exclusive with ExternalUseCase and InternalUseCase.
+ * Queue catalogs require `static group`.
  *
  * ```ts
  * class NotifyOnClose extends EventUseCase {

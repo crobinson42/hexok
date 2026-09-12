@@ -1,35 +1,35 @@
 ---
 title: Contract
-description: Transport-neutral catalog derived from API use-case classes.
+description: Transport-neutral catalog derived from external use-case classes.
 sidebar:
   order: 5
 ---
 
 ```ts
 import {
+  type CatalogEntry,
   type DerivedContract,
   deriveContract,
   nestByKey,
   type UseCaseContract,
-  type UseCaseRoute,
 } from 'hexok/app'
 ```
 
-Event use cases and `internal: true` are omitted. Duplicate `key` throws.
+Event use cases and InternalUseCase are omitted. Duplicate `key` throws.
 
 ## Exports
 
 | Name | Kind | Notes |
 | --- | --- | --- |
-| `UseCaseRoute` | type | `{ key, input, output, errors }` |
-| `UseCaseContract` | type | `{ routes: Record<string, UseCaseRoute> }` |
-| `DerivedContract<Bag>` | type | Nested by use-case `key` (`incident.close` → `{ incident: { close } }`). |
+| `CatalogEntry` | type | `{ key, input, output, errors }` — wide runtime catalog row. |
+| `UseCaseContract` | type | `{ entries: Record<string, CatalogEntry> }` |
+| `DerivedContract<Bag>` | type | Nested by use-case `key` (`incident.close` → `{ incident: { close } }`). Leaf types stay the subclass schemas, not `CatalogEntry`. |
 | `deriveContract(useCases)` | function | Build a `UseCaseContract` from a use-case class map. |
 | `nestByKey(entries)` | function | Nest dotted keys (`incident.close` → `{ incident: { close } }`). |
 
 ```ts
 const contract = deriveContract({ close: CloseIncident })
-contract.routes['incident.close']
+contract.entries['incident.close']
 ```
 
 `AppInstance.contract` is the nested `DerivedContract`. [`deriveRpc`](/api/runtime/rpc/) attaches `POST /rpc/...` paths.
@@ -40,6 +40,7 @@ contract.routes['incident.close']
 
 ## Related
 
-- [ApiUseCase](/api/app/api-use-case/)
+- [ExternalUseCase](/api/app/external-use-case/)
+- [InternalUseCase](/api/app/internal-use-case/)
 - [deriveRpc](/api/runtime/rpc/)
 - [AppInstance.contract](/api/runtime/app/)

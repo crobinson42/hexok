@@ -1,9 +1,9 @@
 import { describe, expect, expectTypeOf, it } from 'vitest';
 import { z } from 'zod';
 import {
-  ApiUseCase,
   EventChannel,
   type ExecuteCtx,
+  ExternalUseCase,
   type JoinCtx,
   type RefreshCtx,
   type RouteCtx,
@@ -78,7 +78,7 @@ class ClientChannel extends EventChannel {
   }
 }
 
-class PostNote extends ApiUseCase {
+class PostNote extends ExternalUseCase {
   static readonly key = 'note.post';
   static readonly input = z.object({
     text: z.string(),
@@ -95,7 +95,7 @@ class PostNote extends ApiUseCase {
   }
 }
 
-class KickUser extends ApiUseCase {
+class KickUser extends ExternalUseCase {
   static readonly key = 'note.kick';
   static readonly input = z.object({ userId: z.string() });
   static readonly output = z.object({});
@@ -109,7 +109,7 @@ class KickUser extends ApiUseCase {
   }
 }
 
-class RefreshUser extends ApiUseCase {
+class RefreshUser extends ExternalUseCase {
   static readonly key = 'note.refresh';
   static readonly input = z.object({ userId: z.string() });
   static readonly output = z.object({});

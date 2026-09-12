@@ -2,7 +2,7 @@
 title: EventChannel
 description: Catalog-scoped delivery policy. Join, refresh, and route are app authority.
 sidebar:
-  order: 3
+  order: 7
 ---
 
 ```ts

@@ -8,7 +8,11 @@ import type {
   EventPayload,
 } from '../domain/index.js';
 import type { ChannelProps } from './event-channel.js';
-import type { ApiUseCaseCtor, ErrorFactories, ResolvedPorts } from './types.js';
+import type {
+  CallableUseCaseCtor,
+  ErrorFactories,
+  ResolvedPorts,
+} from './types.js';
 
 /**
  * `publish` **enqueues**. The runtime flushes only if `execute` returns.
@@ -30,13 +34,13 @@ type AllowedEventInstance<C> = C extends { publishes: readonly (infer Cat)[] }
 /** `publish` when `static publishes` is declared — only those catalog events. */
 export type PublishFor<C> = (event: AllowedEventInstance<C>) => void;
 
-/** Nested API call. Shares ctx, signal, and the parent publish queue. */
-export type Run = <U extends ApiUseCaseCtor>(
+/** Nested callable invocation. Shares ctx, signal, and the parent publish queue. */
+export type Run = <U extends CallableUseCaseCtor>(
   useCase: U,
   input: Infer<U['input']>,
 ) => Promise<Infer<U['output']>>;
 
-/** Argument to `ApiUseCase.execute`. Typed from the subclass statics. */
+/** Argument to `ExternalUseCase.execute` and `InternalUseCase.execute`. Typed from the subclass statics. */
 export type ExecuteCtx<C, Ctx = unknown> = {
   /** Validated `static input`. */
   input: C extends { input: infer S extends StandardSchemaV1 }
@@ -58,7 +62,7 @@ export type ExecuteCtx<C, Ctx = unknown> = {
   publish: C extends { publishes: readonly unknown[] }
     ? PublishFor<C>
     : Publish;
-  /** Invoke another API use case with the same ctx, signal, and publish queue. */
+  /** Invoke an ExternalUseCase or InternalUseCase with the same ctx, signal, and publish queue. */
   run: Run;
   /** Presence handles for `static channels`, keyed by catalog key. */
   channels: ChannelProps<C>;
@@ -115,7 +119,7 @@ export type EventCtx<C, Ctx = unknown> = {
   publish: C extends { publishes: readonly unknown[] }
     ? PublishFor<C>
     : Publish;
-  /** Invoke an API use case with the same ctx, signal, and publish queue. */
+  /** Invoke an ExternalUseCase or InternalUseCase with the same ctx, signal, and publish queue. */
   run: Run;
   /** Presence handles for `static channels`, keyed by catalog key. */
   channels: ChannelProps<C>;

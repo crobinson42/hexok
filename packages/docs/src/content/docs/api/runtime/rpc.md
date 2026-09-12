@@ -1,6 +1,6 @@
 ---
 title: RPC
-description: POST /rpc paths derived from API use-case keys.
+description: POST /rpc paths derived from external use-case keys.
 sidebar:
   order: 4
 ---
@@ -14,9 +14,9 @@ import { deriveRpc, type RpcContract, type RpcRoute, rpcPath } from 'hexok/runti
 | Name | Kind | Notes |
 | --- | --- | --- |
 | `rpcPath(key)` | function | `'incident.close'` → `'/rpc/incident/close'` |
-| `RpcRoute` | type | `UseCaseRoute` plus `method: 'POST'` and `path`. |
+| `RpcRoute` | type | `CatalogEntry` plus `method: 'POST'` and `path`. |
 | `RpcContract<Bag>` | type | Flat `routes` plus nested keys (`rpc.incident.close.path`). |
-| `deriveRpc(contract)` | function | Attach `POST /rpc/...` paths to each API route and nest by use-case key. |
+| `deriveRpc(contract)` | function | Attach `POST /rpc/...` paths to each external catalog entry and nest by use-case key. |
 
 ```ts
 rpcPath('incident.close') // '/rpc/incident/close'

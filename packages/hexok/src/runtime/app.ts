@@ -1,5 +1,4 @@
 import {
-  type ApiUseCaseCtor,
   type AsUseCaseBag,
   type ChannelSession,
   type CheckUseCase,
@@ -7,8 +6,10 @@ import {
   deriveContract,
   type EventChannelCtor,
   type EventUseCaseCtor,
-  isApiUseCase,
+  type ExternalUseCaseCtor,
   isEventUseCase,
+  isExternalUseCase,
+  isInternalUseCase,
   nestByKey,
   type UseCaseBag,
   type UseCaseClass,
@@ -45,7 +46,7 @@ import type {
 import { startHandlers, stopAdapters } from './events.js';
 import { createFetchHandler } from './http.js';
 import { type Interceptor, requireCapability } from './interceptor.js';
-import { type InvokeDeps, invokeApi, publishNow } from './invoke.js';
+import { type InvokeDeps, invokeExternal, publishNow } from './invoke.js';
 import type { ApiMiddleware } from './middleware.js';
 import { deriveRpc, type RpcContract } from './rpc.js';
 
@@ -55,7 +56,7 @@ export type AppInstance<
   Ctx = unknown,
   Routed = never,
 > = {
-  /** Nested API contract (`incident.close` → `contract.incident.close`). Event and `internal` use cases are omitted. */
+  /** Nested API contract (`incident.close` → `contract.incident.close`). Event and internal use cases are omitted (`trigger !== 'external'`). */
   contract: DerivedContract<Bag>;
   /** `fetch` handler for `POST /rpc/...`. Event handlers still require `start()`. */
   router: { fetch: (request: Request) => Promise<Response> };
@@ -278,7 +279,7 @@ export class AppBuilder<
     return this.provide(factory.token, factory.create(...deps));
   }
 
-  /** Register API middleware. Runs around `local` and HTTP `execute` — not event handlers or nested `run`. */
+  /** Register middleware around external `execute` (`local` and HTTP) — not event handlers or nested `run`. */
   use(middleware: ApiMiddleware): this {
     this.#middleware.push(middleware);
     return this;
@@ -325,13 +326,19 @@ export class AppBuilder<
       routed.ports = resolveChannelPorts(routed.ctor, adapted);
     }
 
-    const api = new Map<string, ApiUseCaseCtor>();
+    const catalog = deriveContract(this.#useCases);
+    const rpc = deriveRpc<Bag>(catalog);
+
+    const external = new Map<string, ExternalUseCaseCtor>();
     const eventHandlers = new Map<string, EventUseCaseCtor[]>();
     const handlersView: Record<string, Record<string, EventUseCaseCtor[]>> = {};
 
     for (const ctor of Object.values(this.#useCases) as UseCaseClass[]) {
-      if (isApiUseCase(ctor)) {
-        if (!ctor.internal) api.set(ctor.key, ctor);
+      if (isExternalUseCase(ctor)) {
+        external.set(ctor.key, ctor);
+        continue;
+      }
+      if (isInternalUseCase(ctor)) {
         continue;
       }
       if (isEventUseCase(ctor)) {
@@ -346,9 +353,6 @@ export class AppBuilder<
         handlersView[ctor.catalog.key] = byCatalog;
       }
     }
-
-    const catalog = deriveContract(this.#useCases);
-    const rpc = deriveRpc<Bag>(catalog);
 
     const channelHandles: Record<string, unknown> = {};
     for (const [cat, routed] of this.#routed) {
@@ -376,17 +380,17 @@ export class AppBuilder<
     });
 
     const local = nestByKey(
-      [...api.entries()].map(([key, ctor]) => [
+      [...external.entries()].map(([key, ctor]) => [
         key,
         (input: unknown, opts?: { ctx?: Ctx; signal?: AbortSignal }) =>
-          invokeApi(ctor, input, deps(), opts),
+          invokeExternal(ctor, input, deps(), opts),
       ]),
     ) as NestedClient<Bag, Ctx>;
 
     const instance: AppInstance<Bag, Ctx, Routed> = {
       contract: nestedContract(catalog) as DerivedContract<Bag>,
       rpc,
-      router: { fetch: createFetchHandler(api, deps()) },
+      router: { fetch: createFetchHandler(external, deps()) },
       local,
       handlers: handlersView,
       channels: channelHandles as ChannelGateways<Routed>,
@@ -515,5 +519,5 @@ export const App = {
 };
 
 function nestedContract(catalog: UseCaseContract): Record<string, unknown> {
-  return nestByKey(Object.entries(catalog.routes));
+  return nestByKey(Object.entries(catalog.entries));
 }

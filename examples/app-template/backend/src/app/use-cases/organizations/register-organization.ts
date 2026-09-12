@@ -1,4 +1,4 @@
-import { ApiUseCase, type ExecuteCtx } from 'hexok/app';
+import { type ExecuteCtx, ExternalUseCase } from 'hexok/app';
 import { z } from 'zod';
 import {
   Organization,
@@ -13,7 +13,7 @@ import {
 import { OrganizationRepository } from '../../ports/repos/organizations.js';
 import { CreateUser } from '../users/create-user.js';
 
-export class RegisterOrganization extends ApiUseCase {
+export class RegisterOrganization extends ExternalUseCase {
   static readonly key = 'organization.register';
 
   static input = z.object({

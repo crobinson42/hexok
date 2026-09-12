@@ -1,4 +1,4 @@
-import { ApiUseCase, type ExecuteCtx } from 'hexok/app';
+import { type ExecuteCtx, ExternalUseCase } from 'hexok/app';
 import { z } from 'zod';
 import {
   UserCredentials,
@@ -9,7 +9,7 @@ import { UserCredentialsCreated } from '../../../domain/events/domain/user-crede
 import { UserCredentialsRepository } from '../../ports/repos/user-credentials.js';
 import { UserRepository } from '../../ports/repos/users.js';
 
-export class SetupUserCredentials extends ApiUseCase {
+export class SetupUserCredentials extends ExternalUseCase {
   static readonly key = 'user.setupCredentials';
 
   static input = z.object({

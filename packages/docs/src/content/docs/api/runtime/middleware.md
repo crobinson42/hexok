@@ -9,7 +9,7 @@ sidebar:
 import type { ApiMiddleware, RpcMiddleware } from 'hexok/runtime'
 ```
 
-Register with [`App.use`](/api/runtime/app/). Per-use-case middleware is `static middleware` on [`ApiUseCase`](/api/app/api-use-case/), after app-level `App.use`.
+Register with [`App.use`](/api/runtime/app/). Onion around **external** `execute` (`local` and HTTP). Does not run for event handlers or nested `run`.
 
 ```ts
 type ApiMiddleware<Ctx = unknown> = (args: {
@@ -50,4 +50,4 @@ App.from(useCases).use(withTiming)
 
 - [App.use](/api/runtime/app/)
 - [Interceptor](/api/runtime/interceptor/)
-- [ApiUseCase](/api/app/api-use-case/)
+- [ExternalUseCase](/api/app/external-use-case/)

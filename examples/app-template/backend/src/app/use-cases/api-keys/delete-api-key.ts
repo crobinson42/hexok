@@ -1,4 +1,4 @@
-import { ApiUseCase, type ExecuteCtx } from 'hexok/app';
+import { type ExecuteCtx, ExternalUseCase } from 'hexok/app';
 import { z } from 'zod';
 import { ApiKeyDeleted } from '../../../domain/events/domain/api-key.js';
 import { DomainEvents } from '../../../domain/events/domain/catalog.js';
@@ -10,7 +10,7 @@ import {
 } from '../../events/client/catalog.js';
 import { ApiKeyRepository } from '../../ports/repos/api-keys.js';
 
-export class DeleteApiKey extends ApiUseCase {
+export class DeleteApiKey extends ExternalUseCase {
   static readonly key = 'apiKey.delete';
 
   static input = z.object({

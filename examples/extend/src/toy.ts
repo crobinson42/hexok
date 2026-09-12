@@ -1,4 +1,4 @@
-import { ApiUseCase, type ExecuteCtx } from 'hexok/app';
+import { type ExecuteCtx, ExternalUseCase } from 'hexok/app';
 import type { Infer } from 'hexok/core';
 import type { RequestScoped, Transactional, UnitOfWork } from 'hexok/domain';
 import { DomainEvent, EventCatalog, Port } from 'hexok/domain';
@@ -31,7 +31,7 @@ export const RequestIds = Port.token<RequestIds & RequestScoped<RequestIds>>(
   { requestScoped: true },
 );
 
-export class Charge extends ApiUseCase {
+export class Charge extends ExternalUseCase {
   static readonly key = 'ledger.charge';
   static readonly policy = 'ledger:charge';
   static readonly input = z.object({ amount: z.number() });

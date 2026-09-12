@@ -1,4 +1,4 @@
-import { ApiUseCase, type ExecuteCtx } from 'hexok/app';
+import { type ExecuteCtx, ExternalUseCase } from 'hexok/app';
 import { z } from 'zod';
 import { DomainEvents, IncidentClosed } from '../domain/events.js';
 import { Incident, incidentSchema } from '../domain/incident.js';
@@ -7,7 +7,7 @@ import { Clock, IncidentRepository } from '../ports.js';
 /**
  * load → decide (entity) → save → publish → return
  */
-export class CloseIncident extends ApiUseCase {
+export class CloseIncident extends ExternalUseCase {
   static readonly key = 'incident.close';
 
   static input = z.object({ id: z.string() });

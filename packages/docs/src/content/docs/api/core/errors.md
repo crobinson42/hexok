@@ -31,7 +31,7 @@ const errors = defineErrors({
 })
 ```
 
-Use for `static readonly errors` on [Entity](/api/domain/entity/), [ApiUseCase](/api/app/api-use-case/), [EventUseCase](/api/app/event-use-case/), and [EventChannel](/api/app/event-channel/).
+Use for `static readonly errors` on [Entity](/api/domain/entity/), [ExternalUseCase](/api/app/external-use-case/), [InternalUseCase](/api/app/internal-use-case/), [EventUseCase](/api/app/event-use-case/), and [EventChannel](/api/app/event-channel/).
 
 ## Related
 

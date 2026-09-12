@@ -12,7 +12,7 @@ export type Infer<S extends StandardSchemaV1> = NonNullable<
  * Failures are `'VALIDATION'` plus Standard Schema `issues`. Entity
  * `create` / `parse` / `set` / `validate()` throw that as `CodedError`.
  * `restore` does not run the schema.
- * Async schemas belong at the RPC boundary and throw.
+ * Async schemas belong at the application edge and throw.
  *
  * ```ts
  * const parsed = validate(Incident.schema, body)
@@ -25,7 +25,7 @@ export function validate<S extends StandardSchemaV1>(
 ): Result<Infer<S>, 'VALIDATION'> {
   const result = schema['~standard'].validate(value);
   if (isPromise(result)) {
-    throw new Error('hexok: async schemas belong at the RPC boundary');
+    throw new Error('hexok: async schemas belong at the application edge');
   }
   if (result.issues) {
     return fail('VALIDATION', result.issues);

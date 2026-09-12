@@ -1,4 +1,4 @@
-import { ApiUseCase, type ExecuteCtx } from 'hexok/app';
+import { type ExecuteCtx, InternalUseCase } from 'hexok/app';
 import { z } from 'zod';
 import { User, userSchema } from '../../../domain/entities/user.js';
 import { DomainEvents } from '../../../domain/events/domain/catalog.js';
@@ -10,9 +10,8 @@ import {
 import { UserRepository } from '../../ports/repos/users.js';
 import { EmailService } from '../../ports/services/email.js';
 
-export class CreateUser extends ApiUseCase {
+export class CreateUser extends InternalUseCase {
   static readonly key = 'user.create';
-  static readonly internal = true;
 
   static input = z.object({
     id: z.string(),

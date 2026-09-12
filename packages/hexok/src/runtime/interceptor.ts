@@ -13,11 +13,11 @@ export type HandlerCtx = {
   signal: AbortSignal;
   /** Enqueue an event. Flushed only if `execute` returns. */
   publish(event: unknown): void;
-  /** Invoke another API use case without re-entering interceptors or RPC middleware. */
+  /** Invoke an ExternalUseCase or InternalUseCase without re-entering interceptors or App.use middleware. */
   run?(useCase: unknown, input: unknown): Promise<unknown>;
   /** Parsed API input. Absent on event handlers. */
   input?: unknown;
-  /** Envelope for event handlers. Absent on API use cases. */
+  /** Envelope for event handlers. Absent on external and internal use cases. */
   event?: unknown;
   /** Queue delivery attempt. Set only for queue handlers. */
   attempt?: number;
@@ -50,13 +50,13 @@ export type Handler = (ctx: HandlerCtx) => Promise<unknown>;
 export interface Interceptor {
   /** Unique registration id. Duplicate keys throw. */
   readonly key: string;
-  /** Wrap API and event `execute`. Nested `run` does not re-enter this hook. */
+  /** Wrap external, internal, and event `execute`. Nested `run` does not re-enter this hook. */
   aroundUseCase?(uc: UseCaseClass, next: Handler): Handler;
   /** Wrap a provided port impl once at `build`. First registered is outer, same as the other hooks. */
   aroundAdapter?(port: PortToken<unknown>, impl: unknown): unknown;
   /** Wrap catalog publish after execute returns. Swallowing `next()` drops the event. */
   aroundPublish?(envelope: Envelope, next: () => Promise<void>): Promise<void>;
-  /** Wrap one event-handler invocation. API use cases never call this hook. */
+  /** Wrap one event-handler invocation. External and internal use cases never call this hook. */
   aroundDispatch?(
     envelope: Envelope,
     uc: UseCaseClass,

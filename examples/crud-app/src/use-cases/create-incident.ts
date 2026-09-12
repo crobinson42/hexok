@@ -1,10 +1,10 @@
-import { ApiUseCase, type ExecuteCtx } from 'hexok/app';
+import { type ExecuteCtx, ExternalUseCase } from 'hexok/app';
 import { z } from 'zod';
 import { DomainEvents, IncidentOpened } from '../domain/events.js';
 import { Incident, incidentSchema } from '../domain/incident.js';
 import { Clock, IncidentRepository } from '../ports.js';
 
-export class CreateIncident extends ApiUseCase {
+export class CreateIncident extends ExternalUseCase {
   static readonly key = 'incident.create';
   static input = z.object({ id: z.string(), title: z.string() });
 

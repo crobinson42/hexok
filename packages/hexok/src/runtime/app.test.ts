@@ -1,10 +1,10 @@
 import { describe, expect, expectTypeOf, it } from 'vitest';
 import { z } from 'zod';
 import {
-  ApiUseCase,
   type EventCtx,
   EventUseCase,
   type ExecuteCtx,
+  ExternalUseCase,
 } from '../app/index.js';
 import type { BusAdapter, QueueAdapter } from '../domain/index.js';
 import {
@@ -43,7 +43,7 @@ const DomainEvents = new EventCatalog('domain', { kind: 'bus' }).event(
   IncidentClosed,
 );
 
-class CloseIncident extends ApiUseCase {
+class CloseIncident extends ExternalUseCase {
   static readonly key = 'incident.close';
   static readonly input = z.object({ id: z.string() });
   static readonly output = z.object({ id: z.string(), status: z.string() });
@@ -107,7 +107,7 @@ function repo(seed: { id: string; status: string }[]) {
 
 const clock: Clock = { now: () => new Date('2026-01-01T00:00:00Z') };
 
-class StampTime extends ApiUseCase {
+class StampTime extends ExternalUseCase {
   static readonly key = 'clock.stamp';
   static readonly input = z.object({});
   static readonly output = z.object({ now: z.date() });
@@ -221,7 +221,7 @@ describe('App invoke', () => {
       ClientNote,
     );
 
-    class PostNote extends ApiUseCase {
+    class PostNote extends ExternalUseCase {
       static readonly key = 'note.post';
       static readonly input = z.object({ text: z.string() });
       static readonly output = z.object({});
@@ -326,7 +326,7 @@ describe('App invoke', () => {
   });
 
   it('ignores client-supplied body.ctx', async () => {
-    class EchoCtx extends ApiUseCase {
+    class EchoCtx extends ExternalUseCase {
       static readonly key = 'echo.ctx';
       static readonly input = z.object({});
       static readonly output = z.unknown();
@@ -358,7 +358,7 @@ describe('App invoke', () => {
   });
 
   it('sets HTTP ctx from ctxFrom', async () => {
-    class EchoCtx extends ApiUseCase {
+    class EchoCtx extends ExternalUseCase {
       static readonly key = 'echo.ctx';
       static readonly input = z.object({});
       static readonly output = z.unknown();

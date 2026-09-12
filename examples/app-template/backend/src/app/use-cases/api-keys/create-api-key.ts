@@ -1,4 +1,4 @@
-import { ApiUseCase, type ExecuteCtx } from 'hexok/app';
+import { type ExecuteCtx, ExternalUseCase } from 'hexok/app';
 import { z } from 'zod';
 import { ApiKey, apiKeySchema } from '../../../domain/entities/api-key.js';
 import { ApiKeyCreated } from '../../../domain/events/domain/api-key.js';
@@ -12,7 +12,7 @@ import {
 import { ApiKeyRepository } from '../../ports/repos/api-keys.js';
 import { UserRepository } from '../../ports/repos/users.js';
 
-export class CreateApiKey extends ApiUseCase {
+export class CreateApiKey extends ExternalUseCase {
   static readonly key = 'apiKey.create';
 
   static input = z.object({

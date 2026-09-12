@@ -60,7 +60,7 @@ describe('validate', () => {
     };
 
     expect(() => validate(asyncSchema, 'x')).toThrow(
-      'hexok: async schemas belong at the RPC boundary',
+      'hexok: async schemas belong at the application edge',
     );
   });
 });

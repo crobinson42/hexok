@@ -61,16 +61,16 @@ type CheckAsConst<C, Field extends string, Kind extends string> = [C] extends [
         : C
     : C;
 
-type CheckApiShape<C> =
+type CheckCallableShape<C, Kind extends string> =
   HasLiteralKey<C> extends false
-    ? `hexok: ApiUseCase "${KeyOf<C>}" is missing static key`
+    ? `hexok: ${Kind} "${KeyOf<C>}" is missing static key`
     : C extends { input: StandardSchemaV1 }
       ? C extends { output: StandardSchemaV1 }
         ? C extends { ports: Record<string, PortToken<unknown>> }
           ? C
-          : `hexok: ApiUseCase "${KeyOf<C>}" is missing static ports`
-        : `hexok: ApiUseCase "${KeyOf<C>}" is missing static output`
-      : `hexok: ApiUseCase "${KeyOf<C>}" is missing static input`;
+          : `hexok: ${Kind} "${KeyOf<C>}" is missing static ports`
+        : `hexok: ${Kind} "${KeyOf<C>}" is missing static output`
+      : `hexok: ${Kind} "${KeyOf<C>}" is missing static input`;
 
 type CheckQueueGroup<C> = [C] extends [string]
   ? C
@@ -93,19 +93,35 @@ type CheckEventShape<C> =
  * Per-entry diagnostic for `App.from` / `App.test`. Missing statics become a
  * `hexok:` sentence instead of a UseCaseClass union dump.
  */
-export type CheckUseCase<C> = C extends { trigger: 'api' }
+export type CheckUseCase<C> = C extends { trigger: 'external' }
   ? CheckAsConst<
-      CheckAsConst<CheckApiShape<C>, 'publishes', 'ApiUseCase'>,
+      CheckAsConst<
+        CheckCallableShape<C, 'ExternalUseCase'>,
+        'publishes',
+        'ExternalUseCase'
+      >,
       'channels',
-      'ApiUseCase'
+      'ExternalUseCase'
     >
-  : C extends { trigger: 'event' }
+  : C extends { trigger: 'internal' }
     ? CheckAsConst<
-        CheckAsConst<CheckEventShape<C>, 'publishes', 'EventUseCase'>,
+        CheckAsConst<
+          CheckCallableShape<C, 'InternalUseCase'>,
+          'publishes',
+          'InternalUseCase'
+        >,
         'channels',
-        'EventUseCase'
+        'InternalUseCase'
       >
-    : `hexok: "${KeyOf<C>}" must extend ApiUseCase or EventUseCase`;
+    : C extends { trigger: 'event' }
+      ? CheckAsConst<
+          CheckAsConst<CheckEventShape<C>, 'publishes', 'EventUseCase'>,
+          'channels',
+          'EventUseCase'
+        >
+      : C extends { trigger: 'api' }
+        ? `hexok: ApiUseCase was renamed to ExternalUseCase; composition-only use cases extend InternalUseCase — delete static internal`
+        : `hexok: "${KeyOf<C>}" must extend ExternalUseCase, InternalUseCase, or EventUseCase`;
 
 /** Named map of use-case classes passed to `App.from`. */
 export type UseCaseBag = Record<string, UseCaseClass>;
@@ -113,13 +129,16 @@ export type UseCaseBag = Record<string, UseCaseClass>;
 /** Keep a checked bag's specific classes; do not intersect with UseCaseBag. */
 export type AsUseCaseBag<Bag> = Bag extends UseCaseBag ? Bag : UseCaseBag;
 
-/** An API or event use-case constructor. */
-export type UseCaseClass = ApiUseCaseCtor | EventUseCaseCtor;
+/** An external, internal, or event use-case constructor. */
+export type UseCaseClass =
+  | ExternalUseCaseCtor
+  | InternalUseCaseCtor
+  | EventUseCaseCtor;
 
-/** Constructor shape of an `ApiUseCase` subclass. */
-export interface ApiUseCaseCtor {
-  readonly trigger: 'api';
-  /** Dotted RPC path (`incident.close`). */
+/** Constructor shape of an ExternalUseCase or InternalUseCase subclass. */
+export interface CallableUseCaseCtor {
+  readonly trigger: 'external' | 'internal';
+  /** Use-case id (`incident.close`). Unique among the callable family. */
   readonly key: string;
   /** Request Standard Schema. */
   readonly input: StandardSchemaV1;
@@ -133,12 +152,29 @@ export interface ApiUseCaseCtor {
   readonly publishes?: readonly AnyEventCatalog[];
   /** Channels available as `channels` on execute ctx. */
   readonly channels?: readonly EventChannelCtor[];
-  /** Per-use-case RPC middleware, after app-level `App.use`. */
-  readonly middleware?: readonly unknown[];
-  /** When true, omitted from contract, HTTP RPC, and `app.local`. */
-  readonly internal?: boolean;
   readonly prototype: { execute(ctx: never): Promise<unknown> };
 }
+
+/** Constructor shape of an `ExternalUseCase` subclass. */
+export interface ExternalUseCaseCtor extends CallableUseCaseCtor {
+  readonly trigger: 'external';
+}
+
+/** Constructor shape of an `InternalUseCase` subclass. */
+export interface InternalUseCaseCtor extends CallableUseCaseCtor {
+  readonly trigger: 'internal';
+}
+
+export type ExternalKeyOf<C> = C extends {
+  trigger: 'external';
+  key: infer Key extends string;
+}
+  ? Key
+  : never;
+
+export type ExternalKeysOf<Bag> = {
+  [K in keyof Bag]: ExternalKeyOf<Bag[K]>;
+}[keyof Bag];
 
 /** Constructor shape of an `EventUseCase` subclass. */
 export interface EventUseCaseCtor {
@@ -185,7 +221,23 @@ export function isEventUseCase(ctor: UseCaseClass): ctor is EventUseCaseCtor {
   return ctor.trigger === 'event';
 }
 
-/** True when `ctor.trigger === 'api'`. */
-export function isApiUseCase(ctor: UseCaseClass): ctor is ApiUseCaseCtor {
-  return ctor.trigger === 'api';
+/** True when `ctor.trigger === 'external'`. */
+export function isExternalUseCase(
+  ctor: UseCaseClass,
+): ctor is ExternalUseCaseCtor {
+  return ctor.trigger === 'external';
+}
+
+/** True when `ctor.trigger === 'internal'`. */
+export function isInternalUseCase(
+  ctor: UseCaseClass,
+): ctor is InternalUseCaseCtor {
+  return ctor.trigger === 'internal';
+}
+
+/** True when `ctor.trigger` is `'external'` or `'internal'`. */
+export function isCallableUseCase(
+  ctor: UseCaseClass,
+): ctor is CallableUseCaseCtor {
+  return ctor.trigger === 'external' || ctor.trigger === 'internal';
 }

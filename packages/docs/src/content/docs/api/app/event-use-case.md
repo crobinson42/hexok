@@ -1,8 +1,8 @@
 ---
 title: EventUseCase
-description: Event handler. Mutually exclusive with ApiUseCase.
+description: Event handler. Mutually exclusive with ExternalUseCase and InternalUseCase.
 sidebar:
-  order: 2
+  order: 3
 ---
 
 ```ts
@@ -54,4 +54,5 @@ class NotifyOnClose extends EventUseCase {
 - [EventCtx](/api/app/execute-ctx/)
 - [DomainEvent](/api/domain/domain-event/)
 - [EventCatalog](/api/domain/event-catalog/)
-- [ApiUseCase](/api/app/api-use-case/)
+- [ExternalUseCase](/api/app/external-use-case/)
+- [InternalUseCase](/api/app/internal-use-case/)

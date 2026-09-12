@@ -1,7 +1,8 @@
 import {
-  type ApiUseCaseCtor,
   type EventUseCaseCtor,
+  type ExternalUseCaseCtor,
   errorFactories,
+  isCallableUseCase,
   type Publish,
   type UseCaseClass,
 } from '../app/index.js';
@@ -64,20 +65,23 @@ function nestedRun(
   deps: InvokeDeps,
   queue: Envelope[],
   shared: SharedInvoke,
-): (ctor: ApiUseCaseCtor, input: unknown) => Promise<unknown> {
-  const run = (ctor: ApiUseCaseCtor, input: unknown) =>
+): (ctor: UseCaseClass, input: unknown) => Promise<unknown> {
+  const run = (ctor: UseCaseClass, input: unknown) =>
     runNested(ctor, input, deps, queue, shared, run);
   return run;
 }
 
 async function runNested(
-  ctor: ApiUseCaseCtor,
+  ctor: UseCaseClass,
   input: unknown,
   deps: InvokeDeps,
   queue: Envelope[],
   shared: SharedInvoke,
-  run: (ctor: ApiUseCaseCtor, input: unknown) => Promise<unknown>,
+  run: (ctor: UseCaseClass, input: unknown) => Promise<unknown>,
 ): Promise<unknown> {
+  if (!isCallableUseCase(ctor)) {
+    throw new Error('hexok: run() requires ExternalUseCase or InternalUseCase');
+  }
   assertHandlersStarted(deps, ctor.publishes);
   const parsed = validate(ctor.input, input);
   if (!parsed.ok) {
@@ -100,8 +104,8 @@ async function runNested(
   return instance.execute(ctx as never) as Promise<unknown>;
 }
 
-export async function invokeApi(
-  ctor: ApiUseCaseCtor,
+export async function invokeExternal(
+  ctor: ExternalUseCaseCtor,
   input: unknown,
   deps: InvokeDeps,
   opts?: { ctx?: unknown; signal?: AbortSignal; request?: Request },
@@ -141,7 +145,7 @@ export async function invokeApi(
   handler = wrapMiddleware(
     ctor,
     handler,
-    [...deps.middleware, ...(ctor.middleware ?? [])] as ApiMiddleware[],
+    deps.middleware,
     errors,
     opts?.request,
   );
@@ -255,7 +259,7 @@ function wrapDispatch(
 }
 
 function wrapMiddleware(
-  ctor: ApiUseCaseCtor,
+  ctor: ExternalUseCaseCtor,
   handler: Handler,
   middleware: ApiMiddleware[],
   errors: { [code: string]: (data?: unknown) => never },

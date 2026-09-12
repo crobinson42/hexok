@@ -1,19 +1,8 @@
 import type { UseCaseBag } from '../app/index.js';
+import type { PathTo, UnionToIntersection } from '../app/nest.js';
 import type { Infer, StandardSchemaV1 } from '../core/index.js';
 
-type PathTo<Path extends string, V> = Path extends `${infer Head}.${infer Rest}`
-  ? { readonly [K in Head]: PathTo<Rest, V> }
-  : { readonly [K in Path]: V };
-
-type UnionToIntersection<U> = (
-  U extends unknown
-    ? (k: U) => void
-    : never
-) extends (k: infer I) => void
-  ? I
-  : never;
-
-type ApiCall<C, Ctx> = C extends {
+type ExternalCall<C, Ctx> = C extends {
   input: infer Input extends StandardSchemaV1;
   output: infer Output extends StandardSchemaV1;
 }
@@ -24,17 +13,15 @@ type ApiCall<C, Ctx> = C extends {
   : never;
 
 /**
- * In-process client nested by use-case key. Event handlers are omitted.
+ * In-process client nested by use-case key. Event and internal use cases are omitted.
  */
 export type NestedClient<Bag extends UseCaseBag, Ctx> = UnionToIntersection<
   {
-    [K in keyof Bag]: Bag[K] extends { trigger: 'api'; internal: true }
-      ? never
-      : Bag[K] extends {
-            trigger: 'api';
-            key: infer Id extends string;
-          }
-        ? PathTo<Id, ApiCall<Bag[K], Ctx>>
-        : never;
+    [K in keyof Bag]: Bag[K] extends {
+      trigger: 'external';
+      key: infer Id extends string;
+    }
+      ? PathTo<Id, ExternalCall<Bag[K], Ctx>>
+      : never;
   }[keyof Bag]
 >;

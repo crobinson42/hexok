@@ -1,12 +1,12 @@
 ---
-title: ApiUseCase
-description: Request/response application use case.
+title: ExternalUseCase
+description: Public request/response application use case.
 sidebar:
   order: 1
 ---
 
 ```ts
-import { ApiUseCase } from 'hexok/app'
+import { ExternalUseCase } from 'hexok/app'
 ```
 
 Declare static `key`, `input`, `output`, `errors`, `ports`. Implement `execute`.
@@ -15,16 +15,14 @@ Declare static `key`, `input`, `output`, `errors`, `ports`. Implement `execute`.
 
 | Name | Type | Notes |
 | --- | --- | --- |
-| `trigger` | `'api'` | Discriminator for `App.from` / `isApiUseCase`. Do not override. |
-| `key` | `string` | Dotted RPC path (`incident.close`). Unique among API use cases. |
+| `trigger` | `'external'` | Discriminator for `App.from` / `isExternalUseCase`. Do not override. |
+| `key` | `string` | Use-case id (`incident.close`). Unique among the callable family. |
 | `input` | `StandardSchemaV1` | Request schema. Validated before `execute`. |
 | `output` | `StandardSchemaV1` | Success schema. Types `execute`, `run`, and the contract. |
 | `errors` | `ErrorMap` | Declared refusals. Keys become `errors.CODE()` on `ExecuteCtx`. |
 | `ports` | `Record<string, PortToken>` | Port tokens keyed by the alias used in `execute`. |
-| `internal` | `boolean` | When true, omitted from contract, HTTP RPC, and `app.local`. Still in completeness. |
 | `publishes` | `readonly AnyEventCatalog[]` | Catalogs this use case may `publish` to. Use `as const`. |
 | `channels` | `readonly EventChannelCtor[]` | Channels available as `channels` on execute ctx. Use `as const`. |
-| `middleware` | `readonly unknown[]` | RPC middleware for this use case, after app-level `App.use`. |
 
 Without `as const` on `publishes` / `channels`, catalog keys widen.
 
@@ -38,7 +36,7 @@ Without `as const` on `publishes` / `channels`, catalog keys widen.
 ## Example
 
 ```ts
-class CloseIncident extends ApiUseCase {
+class CloseIncident extends ExternalUseCase {
   static readonly key = 'incident.close'
   static readonly input = z.object({ id: z.string() })
   static readonly output = Incident.schema
@@ -59,6 +57,7 @@ class CloseIncident extends ApiUseCase {
 
 ## Related
 
+- [InternalUseCase](/api/app/internal-use-case/)
 - [ExecuteCtx](/api/app/execute-ctx/)
 - [EventUseCase](/api/app/event-use-case/)
 - [App](/api/runtime/app/)

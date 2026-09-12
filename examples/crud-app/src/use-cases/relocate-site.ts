@@ -1,9 +1,9 @@
-import { ApiUseCase, type ExecuteCtx } from 'hexok/app';
+import { type ExecuteCtx, ExternalUseCase } from 'hexok/app';
 import { z } from 'zod';
 import { Site, siteSchema } from '../domain/site.js';
 import { SiteRepository } from '../ports.js';
 
-export class RelocateSite extends ApiUseCase {
+export class RelocateSite extends ExternalUseCase {
   static readonly key = 'site.relocate';
 
   static input = z.object({

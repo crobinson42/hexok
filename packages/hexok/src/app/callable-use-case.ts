@@ -3,29 +3,13 @@ import type { AnyEventCatalog, PortToken } from '../domain/index.js';
 import type { EventChannelCtor } from './types.js';
 
 /**
- * Request/response application use case. Declare static `key`, `input`, `output`, `errors`, `ports`.
- *
- * ```ts
- * class CloseIncident extends ApiUseCase {
- *   static readonly key = 'incident.close'
- *   static readonly input = z.object({ id: z.string() })
- *   static readonly output = Incident.schema
- *   static readonly errors = { NOT_FOUND: { message: 'Incident not found' } } as const
- *   static readonly ports = { incidents: IncidentRepository }
- *   async execute({ input, ports, errors }: ExecuteCtx<typeof CloseIncident>) {
- *     const incident = await ports.incidents.get(input.id)
- *     if (!incident) throw errors.NOT_FOUND()
- *     return incident.toProps()
- *   }
- * }
- * ```
+ * Request/response base for ExternalUseCase and InternalUseCase.
+ * Do not declare `trigger` here — each sibling sets a distinct literal.
+ * Not re-exported from hexok/app; application authors extend ExternalUseCase
+ * or InternalUseCase.
  */
-export abstract class ApiUseCase {
-  /** Discriminator for `App.from` / `isApiUseCase`. Do not override. */
-  static readonly trigger = 'api' as const;
-  /** When true, omitted from contract, HTTP RPC, and `app.local`. Still in completeness. */
-  static readonly internal?: boolean;
-  /** Dotted RPC path (`incident.close`). Must be unique among API use cases. */
+export abstract class CallableUseCase {
+  /** Use-case id (`incident.close`). Unique among the callable family. */
   static readonly key: string;
   /** Request Standard Schema. Validated before `execute`. */
   static readonly input: unknown;
@@ -39,8 +23,6 @@ export abstract class ApiUseCase {
   static readonly publishes?: readonly AnyEventCatalog[];
   /** `static channels = [ClientChannel] as const` — without `as const`, catalog keys widen. */
   static readonly channels?: readonly EventChannelCtor[];
-  /** RPC middleware for this use case, after app-level `App.use`. */
-  static readonly middleware?: readonly unknown[];
 
   protected constructor() {}
 

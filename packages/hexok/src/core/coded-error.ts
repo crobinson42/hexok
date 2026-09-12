@@ -9,7 +9,7 @@ import type { StandardSchemaV1 } from './standard-schema.js';
  * ```
  */
 export class CodedError<C extends string = string> extends Error {
-  /** Machine-readable refusal code. Catch and switch on this; HTTP maps it to a status. */
+  /** Machine-readable refusal code. Catch and switch on this; a runtime transport may map it to a status. */
   readonly code: C;
   /** Optional payload. Set only when the constructor received `data`. */
   readonly data?: unknown;

@@ -1,4 +1,4 @@
-/** Onion around API `execute` (`local` and HTTP). Does not run for event handlers or nested `run`. */
+/** Onion around external `execute` (`local` and HTTP). Does not run for event handlers or nested `run`. */
 export type ApiMiddleware<Ctx = unknown> = (args: {
   /** Request context (`ctx` on the use case). */
   context: Ctx;

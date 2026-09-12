@@ -7,15 +7,19 @@ sidebar:
 
 ```ts
 import {
-  type ApiUseCaseCtor,
   type AsUseCaseBag,
+  type CallableUseCaseCtor,
   type CheckUseCase,
   type ErrorFactories,
   errorFactories,
   type EventChannelCtor,
   type EventUseCaseCtor,
-  isApiUseCase,
+  type ExternalUseCaseCtor,
+  type InternalUseCaseCtor,
+  isCallableUseCase,
   isEventUseCase,
+  isExternalUseCase,
+  isInternalUseCase,
   type ResolvedPorts,
   type UseCaseBag,
   type UseCaseClass,
@@ -26,17 +30,21 @@ import {
 
 | Name | Notes |
 | --- | --- |
-| `isApiUseCase(ctor)` | True when `ctor.trigger === 'api'`. |
+| `isExternalUseCase(ctor)` | True when `ctor.trigger === 'external'`. |
+| `isInternalUseCase(ctor)` | True when `ctor.trigger === 'internal'`. |
+| `isCallableUseCase(ctor)` | True when `ctor.trigger` is `'external'` or `'internal'`. |
 | `isEventUseCase(ctor)` | True when `ctor.trigger === 'event'`. |
 
 ## Constructor shapes
 
 | Name | Notes |
 | --- | --- |
-| `ApiUseCaseCtor` | Constructor shape of an `ApiUseCase` subclass. |
+| `CallableUseCaseCtor` | Constructor shape of an ExternalUseCase or InternalUseCase subclass. |
+| `ExternalUseCaseCtor` | Constructor shape of an `ExternalUseCase` subclass. |
+| `InternalUseCaseCtor` | Constructor shape of an `InternalUseCase` subclass. |
 | `EventUseCaseCtor` | Constructor shape of an `EventUseCase` subclass. |
 | `EventChannelCtor` | Constructor shape of an `EventChannel` subclass. |
-| `UseCaseClass` | `ApiUseCaseCtor \| EventUseCaseCtor` |
+| `UseCaseClass` | `ExternalUseCaseCtor \| InternalUseCaseCtor \| EventUseCaseCtor` |
 | `UseCaseBag` | `Record<string, UseCaseClass>` passed to `App.from`. |
 | `AsUseCaseBag<Bag>` | Keep a checked bag's specific classes. |
 | `CheckUseCase<C>` | Per-entry diagnostic for `App.from` / `App.test`. Missing statics become a `hexok:` sentence. |
@@ -60,7 +68,8 @@ throw errors.NOT_FOUND()
 
 ## Related
 
-- [ApiUseCase](/api/app/api-use-case/)
+- [ExternalUseCase](/api/app/external-use-case/)
+- [InternalUseCase](/api/app/internal-use-case/)
 - [EventUseCase](/api/app/event-use-case/)
 - [EventChannel](/api/app/event-channel/)
 - [ErrorMap](/api/core/errors/)

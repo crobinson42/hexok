@@ -1,10 +1,9 @@
-export { ApiUseCase } from './api-use-case.js';
 export {
+  type CatalogEntry,
   type DerivedContract,
   deriveContract,
   nestByKey,
   type UseCaseContract,
-  type UseCaseRoute,
 } from './contract.js';
 export { errorFactories } from './error-factory.js';
 export {
@@ -24,15 +23,21 @@ export type {
   PublishFor,
   Run,
 } from './execute-ctx.js';
+export { ExternalUseCase } from './external-use-case.js';
+export { InternalUseCase } from './internal-use-case.js';
 export {
-  type ApiUseCaseCtor,
   type AsUseCaseBag,
+  type CallableUseCaseCtor,
   type CheckUseCase,
   type ErrorFactories,
   type EventChannelCtor,
   type EventUseCaseCtor,
-  isApiUseCase,
+  type ExternalUseCaseCtor,
+  type InternalUseCaseCtor,
+  isCallableUseCase,
   isEventUseCase,
+  isExternalUseCase,
+  isInternalUseCase,
   type ResolvedPorts,
   type UseCaseBag,
   type UseCaseClass,

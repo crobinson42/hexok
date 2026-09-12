@@ -1,10 +1,10 @@
-import type { ApiUseCaseCtor } from '../app/index.js';
+import type { ExternalUseCaseCtor } from '../app/index.js';
 import { CodedError } from '../core/index.js';
 import { httpStatus } from './http-status.js';
-import { type InvokeDeps, invokeApi } from './invoke.js';
+import { type InvokeDeps, invokeExternal } from './invoke.js';
 
 export function createFetchHandler(
-  apiUseCases: Map<string, ApiUseCaseCtor>,
+  externalUseCases: Map<string, ExternalUseCaseCtor>,
   deps: InvokeDeps,
 ): (request: Request) => Promise<Response> {
   return async (request: Request): Promise<Response> => {
@@ -16,7 +16,7 @@ export function createFetchHandler(
       );
     }
     const key = url.pathname.slice('/rpc/'.length).split('/').join('.');
-    const ctor = apiUseCases.get(key);
+    const ctor = externalUseCases.get(key);
     if (ctor === undefined) {
       return json(
         { ok: false, error: { code: 'NOT_FOUND', status: 404, message: key } },
@@ -39,7 +39,7 @@ export function createFetchHandler(
       const ctx = deps.ctxFrom
         ? await deps.ctxFrom({ request, ctx: deps.defaultCtx })
         : deps.defaultCtx;
-      const output = await invokeApi(ctor, body.input, deps, {
+      const output = await invokeExternal(ctor, body.input, deps, {
         ctx,
         request,
       });

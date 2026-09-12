@@ -37,7 +37,7 @@ Start composition from a map of use-case classes. Each entry is checked by `Chec
 | `ctx<C>(defaults?)` | Set the default request context for `local`, HTTP, and event handlers. Per-call `ctx` overrides it. |
 | `ctxFrom(fn)` | Set HTTP request context from the `Request`. `body.ctx` is ignored. Call `.ctx<C>()` first so `ctx` is typed. |
 | `adapt(factory, ...deps)` | `provide(factory.token, factory.create(...deps))`. |
-| `use(middleware)` | Register API middleware. Runs around `local` and HTTP `execute` — not event handlers or nested `run`. |
+| `use(middleware)` | Register middleware around external `execute` (`local` and HTTP) — not event handlers or nested `run`. |
 | `intercept(interceptor)` | Register an interceptor. First registered is outer. Duplicate `key` throws. |
 | `build` | Complete the graph. Incomplete builders expose `build` as the missing port/catalog/channel message (not callable). |
 
@@ -49,7 +49,7 @@ Start composition from a map of use-case classes. Each entry is checked by `Chec
 | --- | --- |
 | `local` | In-process nested client. Same keys as `contract`. Call `local.incident.close(input, { ctx, signal }?)`. |
 | `router.fetch` | `fetch` handler for `POST /rpc/...`. Event handlers still require `start()`. |
-| `contract` | Nested API contract (`incident.close` → `contract.incident.close`). Event and `internal` use cases are omitted. |
+| `contract` | Nested API contract (`incident.close` → `contract.incident.close`). Event and internal use cases are omitted (`trigger !== 'external'`). |
 | `rpc` | Nested RPC catalog (`rpc.incident.close.path`) plus flat `routes`. |
 | `handlers` | Event use-case constructors grouped by catalog key then event key. They subscribe only after `start()`. |
 | `channels` | Routed channel gateways keyed by catalog key. Routing starts on `start()`. |
@@ -92,7 +92,8 @@ await app.stop()
 
 ## Related
 
-- [ApiUseCase](/api/app/api-use-case/)
+- [ExternalUseCase](/api/app/external-use-case/)
+- [InternalUseCase](/api/app/internal-use-case/)
 - [Interceptor](/api/runtime/interceptor/)
 - [ApiMiddleware](/api/runtime/middleware/)
 - [deriveRpc](/api/runtime/rpc/)

@@ -2,7 +2,7 @@ import type { Infer, StandardSchemaV1 } from '../core/index.js';
 
 /**
  * Domain events are classes. Construction types the payload;
- * validation happens at the use-case / RPC edge, not in the constructor.
+ * validation happens at the use-case edge, not in the constructor.
  *
  * ```ts
  * class IncidentClosed extends DomainEvent {
@@ -17,7 +17,7 @@ import type { Infer, StandardSchemaV1 } from '../core/index.js';
 export abstract class DomainEvent<P = unknown> {
   /** Dotted event name, e.g. `'incident.closed'`. Declare on each subclass. */
   static readonly key: string;
-  /** Standard Schema for the payload, applied at the use-case / RPC edge. */
+  /** Standard Schema for the payload, applied at the use-case edge. */
   static readonly schema: StandardSchemaV1;
   /** Event body. Typed by the subclass constructor; not validated here. */
   abstract readonly payload: P;
@@ -27,7 +27,7 @@ export abstract class DomainEvent<P = unknown> {
 export type EventClass<P = never> = {
   /** Dotted event name, e.g. `'incident.closed'`. */
   readonly key: string;
-  /** Standard Schema for the payload, applied at the use-case / RPC edge. */
+  /** Standard Schema for the payload, applied at the use-case edge. */
   readonly schema: StandardSchemaV1;
   new (payload: P, ...args: never[]): DomainEvent<unknown>;
 };

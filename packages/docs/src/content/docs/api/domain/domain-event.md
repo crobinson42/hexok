@@ -1,6 +1,6 @@
 ---
 title: DomainEvent
-description: Event class. Construction types the payload; validation runs at the use-case / RPC edge.
+description: Event class. Construction types the payload; validation runs at the use-case edge.
 sidebar:
   order: 3
 ---
@@ -21,7 +21,7 @@ Subclass with `key`, `schema`, and a typed `payload`. The constructor does not v
 | Name | Type | Notes |
 | --- | --- | --- |
 | `key` | `string` | Dotted event name, e.g. `'incident.closed'`. |
-| `schema` | `StandardSchemaV1` | Payload schema, applied at the use-case / RPC edge. |
+| `schema` | `StandardSchemaV1` | Payload schema, applied at the use-case edge. |
 
 ## Instance
 

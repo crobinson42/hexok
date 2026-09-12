@@ -17,7 +17,7 @@ Import from a layer. There is no root barrel — that keeps the public API align
 
 ```ts
 import { Entity } from 'hexok/domain'
-import { ApiUseCase } from 'hexok/app'
+import { ExternalUseCase } from 'hexok/app'
 import { App } from 'hexok/runtime'
 import { App as TestApp, InMemoryRepository } from 'hexok/testing'
 ```
@@ -26,7 +26,7 @@ import { App as TestApp, InMemoryRepository } from 'hexok/testing'
 | --- | --- |
 | `hexok/core` | `Result`, Standard Schema V1, `ErrorMap` |
 | `hexok/domain` | `Entity`, `DeepReadonly`, `Port`, `EventCatalog`, `DomainEvent` |
-| `hexok/app` | `ApiUseCase`, `EventUseCase`, contract derivation |
+| `hexok/app` | `ExternalUseCase`, `InternalUseCase`, `EventUseCase`, contract derivation |
 | `hexok/infra` | `Mapper` (entity ↔ row), `Adapter.of` |
 | `hexok/runtime` | `App.from` composition, completeness, interceptors, local client, HTTP |
 | `hexok/testing` | Test-only: `App.test`, in-memory repo/bus/queue/channel, `published` |
@@ -36,7 +36,7 @@ Docs site: `npm run dev -w @hexok/docs`.
 ## Write a use case
 
 ```ts
-class CloseIncident extends ApiUseCase {
+class CloseIncident extends ExternalUseCase {
   static readonly key = 'incident.close'
   static readonly input = z.object({ id: z.string() })
   static readonly output = Incident.schema

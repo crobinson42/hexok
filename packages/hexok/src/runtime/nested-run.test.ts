@@ -1,10 +1,11 @@
 import { describe, expect, expectTypeOf, it } from 'vitest';
 import { z } from 'zod';
 import {
-  ApiUseCase,
   type EventCtx,
   EventUseCase,
   type ExecuteCtx,
+  ExternalUseCase,
+  InternalUseCase,
 } from '../app/index.js';
 import {
   DomainEvent,
@@ -63,9 +64,8 @@ const DomainEvents = new EventCatalog('domain', { kind: 'bus' })
   .event(UserCreated)
   .event(HandlerMark);
 
-class CreateUser extends ApiUseCase {
+class CreateUser extends InternalUseCase {
   static readonly key = 'user.create';
-  static readonly internal = true;
   static readonly input = z.object({
     id: z.string(),
     organizationId: z.string(),
@@ -97,7 +97,7 @@ class CreateUser extends ApiUseCase {
   }
 }
 
-class InviteUser extends ApiUseCase {
+class InviteUser extends ExternalUseCase {
   static readonly key = 'user.invite';
   static readonly input = z.object({
     id: z.string(),
@@ -130,7 +130,7 @@ class InviteUser extends ApiUseCase {
   }
 }
 
-class RegisterOrganization extends ApiUseCase {
+class RegisterOrganization extends ExternalUseCase {
   static readonly key = 'organization.register';
   static readonly input = z.object({
     organization: z.object({ id: z.string(), name: z.string() }),
@@ -172,7 +172,7 @@ class RegisterOrganization extends ApiUseCase {
   }
 }
 
-class RunInvite extends ApiUseCase {
+class RunInvite extends ExternalUseCase {
   static readonly key = 'organization.invite';
   static readonly input = RegisterOrganization.input;
   static readonly output = RegisterOrganization.output;
@@ -195,7 +195,7 @@ class RunInvite extends ApiUseCase {
   }
 }
 
-class ForwardUser extends ApiUseCase {
+class ForwardUser extends ExternalUseCase {
   static readonly key = 'user.forward';
   static readonly input = z.object({ raw: z.unknown() });
   static readonly output = CreateUser.output;
@@ -507,7 +507,7 @@ describe('nested run', () => {
     await failApp.stop();
   });
 
-  it('nested run does not re-enter aroundUseCase (or RPC middleware)', async () => {
+  it('nested run does not re-enter aroundUseCase (or App.use middleware)', async () => {
     let useCaseCalls = 0;
     let middlewareCalls = 0;
     const app = App.from({

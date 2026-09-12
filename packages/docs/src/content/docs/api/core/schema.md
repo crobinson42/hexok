@@ -28,7 +28,7 @@ if (!parsed.ok) return parsed
 
 Failures are `{ ok: false, code: 'VALIDATION', issues }`. Entity `create` / `parse` / `set` / `validate()` throw that as `CodedError`. `restore` does not run the schema.
 
-An async schema (`validate` returning a Promise) throws `Error('hexok: async schemas belong at the RPC boundary')`.
+An async schema (`validate` returning a Promise) throws `Error('hexok: async schemas belong at the application edge')`.
 
 ## Related
 

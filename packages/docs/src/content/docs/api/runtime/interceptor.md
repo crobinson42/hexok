@@ -21,10 +21,10 @@ Register with [`App.intercept`](/api/runtime/app/). First registered is **outer*
 | Member | Notes |
 | --- | --- |
 | `key` | Unique registration id. |
-| `aroundUseCase?(uc, next)` | Wrap API and event `execute`. Nested `run` does not re-enter this hook. |
+| `aroundUseCase?(uc, next)` | Wrap external, internal, and event `execute`. Nested `run` does not re-enter this hook. |
 | `aroundAdapter?(port, impl)` | Wrap a provided port impl once at `build`. |
 | `aroundPublish?(envelope, next)` | Wrap catalog publish after execute returns. Swallowing `next()` drops the event. |
-| `aroundDispatch?(envelope, uc, next)` | Wrap one event-handler invocation. API use cases never call this hook. |
+| `aroundDispatch?(envelope, uc, next)` | Wrap one event-handler invocation. External and internal use cases never call this hook. |
 
 Publish flushes after the use-case onion.
 
@@ -39,9 +39,9 @@ Publish flushes after the use-case onion.
 | `errors` | Error factories from the use-case error map. |
 | `signal` | Abort signal for this invocation. |
 | `publish(event)` | Enqueue an event. Flushed only if `execute` returns. |
-| `run?(useCase, input)` | Invoke another API use case without re-entering interceptors or RPC middleware. |
+| `run?(useCase, input)` | Invoke an ExternalUseCase or InternalUseCase without re-entering interceptors or `App.use` middleware. |
 | `input?` | Parsed API input. Absent on event handlers. |
-| `event?` | Envelope for event handlers. Absent on API use cases. |
+| `event?` | Envelope for event handlers. Absent on external and internal use cases. |
 | `attempt?` | Queue delivery attempt. Set only for queue handlers. |
 
 ```ts

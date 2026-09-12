@@ -37,4 +37,4 @@ Use-case `unwrap` throws `CodedError` from a fail arm. Entity methods throw `Cod
 
 - [validate](/api/core/schema/)
 - [CodedError](/api/core/coded-error/)
-- [ApiUseCase.unwrap](/api/app/api-use-case/)
+- [ExternalUseCase.unwrap](/api/app/external-use-case/)

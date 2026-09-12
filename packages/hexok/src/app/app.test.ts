@@ -7,12 +7,13 @@ import {
   EventCatalog,
   Port,
 } from '../domain/index.js';
-import { ApiUseCase } from './api-use-case.js';
 import { deriveContract } from './contract.js';
 import { errorFactories } from './error-factory.js';
 import { EventUseCase } from './event-use-case.js';
 import type { EventCtx, ExecuteCtx, Publish } from './execute-ctx.js';
-import type { CheckUseCase } from './types.js';
+import { ExternalUseCase } from './external-use-case.js';
+import { InternalUseCase } from './internal-use-case.js';
+import { type CheckUseCase, isInternalUseCase } from './types.js';
 
 interface IncidentRepository {
   get(id: string): Promise<{ id: string } | null>;
@@ -46,7 +47,7 @@ const DomainEvents = new EventCatalog('domain', { kind: 'bus' }).event(
   IncidentClosed,
 );
 
-class CloseIncident extends ApiUseCase {
+class CloseIncident extends ExternalUseCase {
   static readonly key = 'incident.close';
   static readonly input = z.object({ id: z.string() });
   static readonly output = z.object({ id: z.string(), status: z.string() });
@@ -83,7 +84,7 @@ class NotifyOnClose extends EventUseCase {
   async execute(_ctx: EventCtx<typeof NotifyOnClose>): Promise<void> {}
 }
 
-class MissingPorts extends ApiUseCase {
+class MissingPorts extends ExternalUseCase {
   static readonly key = 'missing.ports';
   static readonly input = z.object({});
   static readonly output = z.object({});
@@ -93,7 +94,7 @@ class MissingPorts extends ApiUseCase {
   }
 }
 
-class MissingInput extends ApiUseCase {
+class MissingInput extends ExternalUseCase {
   static readonly key = 'missing.input';
   static readonly output = z.object({});
   static readonly errors = {} as const;
@@ -103,7 +104,7 @@ class MissingInput extends ApiUseCase {
   }
 }
 
-class WidePublishes extends ApiUseCase {
+class WidePublishes extends ExternalUseCase {
   static readonly key = 'wide.publishes';
   static readonly input = z.object({});
   static readonly output = z.object({});
@@ -136,7 +137,7 @@ class MissingCatalog extends EventUseCase {
   async execute(): Promise<void> {}
 }
 
-class StampTime extends ApiUseCase {
+class StampTime extends ExternalUseCase {
   static readonly key = 'clock.stamp';
   static readonly input = z.object({});
   static readonly output = z.object({ now: z.date() });
@@ -147,7 +148,7 @@ class StampTime extends ApiUseCase {
   }
 }
 
-class EmptyPublishes extends ApiUseCase {
+class EmptyPublishes extends ExternalUseCase {
   static readonly key = 'empty.publishes';
   static readonly input = z.object({});
   static readonly output = z.object({});
@@ -188,7 +189,7 @@ class Loose extends EventUseCase {
 describe('use-case constructors', () => {
   it('are protected so callers go through App.from', () => {
     const _typeChecks = () => {
-      // @ts-expect-error ApiUseCase constructor is protected
+      // @ts-expect-error ExternalUseCase constructor is protected
       new CloseIncident();
       // @ts-expect-error EventUseCase constructor is protected
       new NotifyOnClose();
@@ -201,7 +202,7 @@ describe('CheckUseCase', () => {
   it('names missing static ports, on, and catalog', () => {
     expectTypeOf<
       CheckUseCase<typeof MissingPorts>
-    >().toEqualTypeOf<`hexok: ApiUseCase "missing.ports" is missing static ports`>();
+    >().toEqualTypeOf<`hexok: ExternalUseCase "missing.ports" is missing static ports`>();
     expectTypeOf<
       CheckUseCase<typeof MissingOn>
     >().toEqualTypeOf<`hexok: EventUseCase "missing.on" is missing static on`>();
@@ -210,16 +211,26 @@ describe('CheckUseCase', () => {
     >().toEqualTypeOf<`hexok: EventUseCase "missing.catalog" is missing static catalog`>();
     expectTypeOf<
       CheckUseCase<typeof MissingInput>
-    >().toEqualTypeOf<`hexok: ApiUseCase "missing.input" is missing static input`>();
+    >().toEqualTypeOf<`hexok: ExternalUseCase "missing.input" is missing static input`>();
     expectTypeOf<
       CheckUseCase<typeof MissingGroup>
     >().toEqualTypeOf<`hexok: EventUseCase "missing.group" is missing static group`>();
     expectTypeOf<
       CheckUseCase<typeof WidePublishes>
-    >().toEqualTypeOf<`hexok: ApiUseCase "wide.publishes" static publishes must be \`as const\``>();
+    >().toEqualTypeOf<`hexok: ExternalUseCase "wide.publishes" static publishes must be \`as const\``>();
     expectTypeOf<CheckUseCase<typeof CloseIncident>>().toEqualTypeOf<
       typeof CloseIncident
     >();
+    expectTypeOf<
+      CheckUseCase<typeof MissingInternalPorts>
+    >().toEqualTypeOf<`hexok: InternalUseCase "missing.internalPorts" is missing static ports`>();
+    expectTypeOf<CheckUseCase<typeof InternalStamp>>().toEqualTypeOf<
+      typeof InternalStamp
+    >();
+    expect(isInternalUseCase(InternalStamp)).toBe(true);
+    expectTypeOf<
+      CheckUseCase<typeof LeftoverApi>
+    >().toEqualTypeOf<`hexok: ApiUseCase was renamed to ExternalUseCase; composition-only use cases extend InternalUseCase — delete static internal`>();
   });
 
   it('rejects static on that is not in the catalog Events', () => {
@@ -312,8 +323,45 @@ describe('errorFactories', () => {
   });
 });
 
-class InternalStamp extends ApiUseCase {
+class InternalStamp extends InternalUseCase {
   static readonly key = 'clock.internalStamp';
+  static readonly input = z.object({});
+  static readonly output = z.object({});
+  static readonly errors = {} as const;
+  static readonly ports = { clock: Clock };
+  async execute() {
+    return {};
+  }
+}
+
+class InternalClose extends InternalUseCase {
+  static readonly key = 'incident.close';
+  static readonly input = z.object({ id: z.string() });
+  static readonly output = z.object({});
+  static readonly errors = {} as const;
+  static readonly ports = { clock: Clock };
+  async execute() {
+    return {};
+  }
+}
+
+class MissingInternalPorts extends InternalUseCase {
+  static readonly key = 'missing.internalPorts';
+  static readonly input = z.object({});
+  static readonly output = z.object({});
+  static readonly errors = {} as const;
+  async execute(): Promise<unknown> {
+    return {};
+  }
+}
+
+class LeftoverApi {
+  static readonly trigger = 'api' as const;
+  static readonly key = 'leftover.api';
+}
+
+class DeadInternal extends ExternalUseCase {
+  static readonly key = 'dead.internal';
   static readonly internal = true;
   static readonly input = z.object({});
   static readonly output = z.object({});
@@ -324,36 +372,35 @@ class InternalStamp extends ApiUseCase {
   }
 }
 
-class InternalClose extends ApiUseCase {
-  static readonly key = 'incident.close';
-  static readonly internal = true;
-  static readonly input = z.object({ id: z.string() });
-  static readonly output = z.object({});
-  static readonly errors = {} as const;
-  static readonly ports = { clock: Clock };
-  async execute() {
-    return {};
-  }
-}
-
 describe('deriveContract', () => {
-  it('nests API use cases and skips event handlers', () => {
+  it('nests external use cases and skips event handlers', () => {
     const contract = deriveContract({
       close: CloseIncident,
       notify: NotifyOnClose,
     });
-    expect(Object.keys(contract.routes)).toEqual(['incident.close']);
-    expect(contract.routes['incident.close']?.key).toBe('incident.close');
-    expect(contract.routes['incident.notifyOnClose']).toBeUndefined();
+    expect(Object.keys(contract.entries)).toEqual(['incident.close']);
+    expect(contract.entries['incident.close']?.key).toBe('incident.close');
+    expect(contract.entries['incident.notifyOnClose']).toBeUndefined();
   });
 
-  it('skips internal api use cases', () => {
+  it('skips InternalUseCase', () => {
     const contract = deriveContract({
       close: CloseIncident,
       stamp: InternalStamp,
     });
-    expect(Object.keys(contract.routes)).toEqual(['incident.close']);
-    expect(contract.routes['clock.internalStamp']).toBeUndefined();
+    expect(Object.keys(contract.entries)).toEqual(['incident.close']);
+    expect(contract.entries['clock.internalStamp']).toBeUndefined();
+  });
+
+  it('does not hide ExternalUseCase that still sets static internal', () => {
+    const contract = deriveContract({
+      close: CloseIncident,
+      dead: DeadInternal,
+    });
+    expect(Object.keys(contract.entries).sort()).toEqual([
+      'dead.internal',
+      'incident.close',
+    ]);
   });
 
   it('throws on duplicate key', () => {

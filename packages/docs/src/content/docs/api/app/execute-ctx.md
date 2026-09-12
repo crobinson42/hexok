@@ -1,6 +1,6 @@
 ---
 title: ExecuteCtx
-description: Typed argument to ApiUseCase.execute and EventUseCase.execute.
+description: Typed argument to ExternalUseCase.execute, InternalUseCase.execute, and EventUseCase.execute.
 sidebar:
   order: 4
 ---
@@ -19,7 +19,7 @@ Typed from the subclass statics.
 
 ## ExecuteCtx
 
-Argument to `ApiUseCase.execute`.
+Argument to `ExternalUseCase.execute` and `InternalUseCase.execute`.
 
 | Field | Notes |
 | --- | --- |
@@ -29,7 +29,7 @@ Argument to `ApiUseCase.execute`.
 | `errors` | Factories from `static errors`. Throw `errors.NOT_FOUND()`. |
 | `signal` | Abort signal for this invocation. |
 | `publish` | Enqueue a catalog event. Flushed only if `execute` returns. |
-| `run` | Invoke another API use case with the same ctx, signal, and publish queue. Nested `run` does not re-enter interceptors or RPC middleware. |
+| `run` | Invoke an ExternalUseCase or InternalUseCase with the same ctx, signal, and publish queue. Nested `run` does not re-enter interceptors or `App.use`. |
 | `channels` | Presence handles for `static channels`, keyed by catalog key. |
 
 ```ts
@@ -61,13 +61,14 @@ async execute({ event, ports }: EventCtx<typeof NotifyOnClose>) {
 | --- | --- |
 | `Publish` | `(event: DomainEvent) => void` or `(envelope: Envelope) => void`. |
 | `PublishFor<C>` | `publish` when `static publishes` is declared — only those catalog events. |
-| `Run` | `<U extends ApiUseCaseCtor>(useCase: U, input: Infer<U['input']>) => Promise<Infer<U['output']>>` |
+| `Run` | `<U extends CallableUseCaseCtor>(useCase: U, input: Infer<U['input']>) => Promise<Infer<U['output']>>` |
 
 A throw from `execute` drops the publish queue.
 
 ## Related
 
-- [ApiUseCase](/api/app/api-use-case/)
+- [ExternalUseCase](/api/app/external-use-case/)
+- [InternalUseCase](/api/app/internal-use-case/)
 - [EventUseCase](/api/app/event-use-case/)
 - [Envelope](/api/domain/envelope/)
 - [ChannelControl](/api/app/event-channel/)

@@ -54,7 +54,7 @@ The compile-time type of `.build()` names a missing port by its use-case alias (
 
 ## Related
 
-- [Capabilities](/api/domain/capabilities/)
-- [Adapter](/api/infra/adapter/)
-- [App.provide](/api/runtime/app/)
-- [requireCapability](/api/runtime/interceptor/)
+- [Capabilities](/hexok/api/domain/capabilities/)
+- [Adapter](/hexok/api/infra/adapter/)
+- [App.provide](/hexok/api/runtime/app/)
+- [requireCapability](/hexok/api/runtime/interceptor/)

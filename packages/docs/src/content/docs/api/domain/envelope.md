@@ -82,7 +82,7 @@ Work queue. One consumer in a group; ack/nack; `attempt`.
 
 ## Related
 
-- [EventCatalog](/api/domain/event-catalog/)
-- [wrapEvent](/api/runtime/wrap-event/)
-- [InMemoryBus](/api/testing/in-memory-bus/)
-- [InMemoryQueue](/api/testing/in-memory-queue/)
+- [EventCatalog](/hexok/api/domain/event-catalog/)
+- [wrapEvent](/hexok/api/runtime/wrap-event/)
+- [InMemoryBus](/hexok/api/testing/in-memory-bus/)
+- [InMemoryQueue](/hexok/api/testing/in-memory-queue/)

@@ -34,5 +34,5 @@ App.from(useCases).adapt(factory, pool)
 
 ## Related
 
-- [Port](/api/domain/port/)
-- [App.adapt](/api/runtime/app/)
+- [Port](/hexok/api/domain/port/)
+- [App.adapt](/hexok/api/runtime/app/)

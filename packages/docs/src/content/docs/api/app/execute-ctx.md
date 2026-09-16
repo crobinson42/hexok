@@ -67,8 +67,8 @@ A throw from `execute` drops the publish queue.
 
 ## Related
 
-- [ExternalUseCase](/api/app/external-use-case/)
-- [InternalUseCase](/api/app/internal-use-case/)
-- [EventUseCase](/api/app/event-use-case/)
-- [Envelope](/api/domain/envelope/)
-- [ChannelControl](/api/app/event-channel/)
+- [ExternalUseCase](/hexok/api/app/external-use-case/)
+- [InternalUseCase](/hexok/api/app/internal-use-case/)
+- [EventUseCase](/hexok/api/app/event-use-case/)
+- [Envelope](/hexok/api/domain/envelope/)
+- [ChannelControl](/hexok/api/app/event-channel/)

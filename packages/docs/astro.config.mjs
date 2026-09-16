@@ -3,6 +3,8 @@ import { defineConfig } from 'astro/config';
 import starlightLinksValidator from 'starlight-links-validator';
 
 export default defineConfig({
+  site: 'https://crobinson42.github.io',
+  base: '/hexok',
   integrations: [
     starlight({
       title: 'Hexok',

@@ -9,7 +9,7 @@ sidebar:
 import { InternalUseCase } from 'hexok/app'
 ```
 
-Same execute shape as [ExternalUseCase](/api/app/external-use-case/). Omitted from `deriveContract`, `app.contract`, `app.local`, and HTTP. Still in completeness. Invocable via `ctx.run`.
+Same execute shape as [ExternalUseCase](/hexok/api/app/external-use-case/). Omitted from `deriveContract`, `app.contract`, `app.local`, and HTTP. Still in completeness. Invocable via `ctx.run`.
 
 Declare static `key`, `input`, `output`, `errors`, `ports`. Implement `execute`.
 
@@ -52,7 +52,7 @@ Call it from an external use case with `run(CreateUser, input)`. Nested `run` sh
 
 ## Related
 
-- [ExternalUseCase](/api/app/external-use-case/)
-- [ExecuteCtx](/api/app/execute-ctx/)
-- [EventUseCase](/api/app/event-use-case/)
-- [App](/api/runtime/app/)
+- [ExternalUseCase](/hexok/api/app/external-use-case/)
+- [ExecuteCtx](/hexok/api/app/execute-ctx/)
+- [EventUseCase](/hexok/api/app/event-use-case/)
+- [App](/hexok/api/runtime/app/)

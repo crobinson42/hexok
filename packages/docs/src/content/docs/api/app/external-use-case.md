@@ -57,8 +57,8 @@ class CloseIncident extends ExternalUseCase {
 
 ## Related
 
-- [InternalUseCase](/api/app/internal-use-case/)
-- [ExecuteCtx](/api/app/execute-ctx/)
-- [EventUseCase](/api/app/event-use-case/)
-- [App](/api/runtime/app/)
-- [deriveContract](/api/app/contract/)
+- [InternalUseCase](/hexok/api/app/internal-use-case/)
+- [ExecuteCtx](/hexok/api/app/execute-ctx/)
+- [EventUseCase](/hexok/api/app/event-use-case/)
+- [App](/hexok/api/runtime/app/)
+- [deriveContract](/hexok/api/app/contract/)

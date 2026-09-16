@@ -73,6 +73,6 @@ DomainEvents.incident.closed
 
 ## Related
 
-- [DomainEvent](/api/domain/domain-event/)
-- [Envelope](/api/domain/envelope/)
-- [App.bind](/api/runtime/app/)
+- [DomainEvent](/hexok/api/domain/domain-event/)
+- [Envelope](/hexok/api/domain/envelope/)
+- [App.bind](/hexok/api/runtime/app/)

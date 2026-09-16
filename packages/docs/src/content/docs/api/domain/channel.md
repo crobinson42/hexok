@@ -9,7 +9,7 @@ sidebar:
 import type { ChannelAdapter, ChannelConnection } from 'hexok/domain'
 ```
 
-Does not interpret routing hints or session claims. [EventChannel](/api/app/event-channel/) owns join, refresh, and route.
+Does not interpret routing hints or session claims. [EventChannel](/hexok/api/app/event-channel/) owns join, refresh, and route.
 
 ## ChannelConnection
 
@@ -39,6 +39,6 @@ App.from(useCases).route(ClientChannel, adapter)
 
 ## Related
 
-- [EventChannel](/api/app/event-channel/)
-- [App.route](/api/runtime/app/)
-- [InMemoryChannel](/api/testing/in-memory-channel/)
+- [EventChannel](/hexok/api/app/event-channel/)
+- [App.route](/hexok/api/runtime/app/)
+- [InMemoryChannel](/hexok/api/testing/in-memory-channel/)

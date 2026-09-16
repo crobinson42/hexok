@@ -35,6 +35,6 @@ await app.publish(envelope)
 
 ## Related
 
-- [Envelope](/api/domain/envelope/)
-- [DomainEvent](/api/domain/domain-event/)
-- [EventCatalog](/api/domain/event-catalog/)
+- [Envelope](/hexok/api/domain/envelope/)
+- [DomainEvent](/hexok/api/domain/domain-event/)
+- [EventCatalog](/hexok/api/domain/event-catalog/)

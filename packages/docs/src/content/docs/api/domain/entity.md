@@ -80,7 +80,7 @@ const restored = Incident.restore({ id: '1', status: 'open' })
 
 ## Related
 
-- [CodedError](/api/core/coded-error/)
-- [ErrorMap](/api/core/errors/)
-- [Mapper](/api/infra/mapper/)
-- [InMemoryRepository](/api/testing/in-memory-repository/)
+- [CodedError](/hexok/api/core/coded-error/)
+- [ErrorMap](/hexok/api/core/errors/)
+- [Mapper](/hexok/api/infra/mapper/)
+- [InMemoryRepository](/hexok/api/testing/in-memory-repository/)

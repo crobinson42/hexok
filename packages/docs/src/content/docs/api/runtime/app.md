@@ -92,9 +92,9 @@ await app.stop()
 
 ## Related
 
-- [ExternalUseCase](/api/app/external-use-case/)
-- [InternalUseCase](/api/app/internal-use-case/)
-- [Interceptor](/api/runtime/interceptor/)
-- [ApiMiddleware](/api/runtime/middleware/)
-- [deriveRpc](/api/runtime/rpc/)
-- [App.test](/api/testing/app/)
+- [ExternalUseCase](/hexok/api/app/external-use-case/)
+- [InternalUseCase](/hexok/api/app/internal-use-case/)
+- [Interceptor](/hexok/api/runtime/interceptor/)
+- [ApiMiddleware](/hexok/api/runtime/middleware/)
+- [deriveRpc](/hexok/api/runtime/rpc/)
+- [App.test](/hexok/api/testing/app/)

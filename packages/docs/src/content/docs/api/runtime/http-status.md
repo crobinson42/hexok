@@ -30,6 +30,6 @@ httpStatus('ALREADY_CLOSED') // 409
 
 ## Related
 
-- [CodedError](/api/core/coded-error/)
-- [App.router](/api/runtime/app/)
-- [RPC](/api/runtime/rpc/)
+- [CodedError](/hexok/api/core/coded-error/)
+- [App.router](/hexok/api/runtime/app/)
+- [RPC](/hexok/api/runtime/rpc/)

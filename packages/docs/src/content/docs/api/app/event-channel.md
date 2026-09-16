@@ -17,7 +17,7 @@ import {
 } from 'hexok/app'
 ```
 
-Presence I/O is a [`ChannelAdapter`](/api/domain/channel/) passed to `.route()`. The catalog must be a bus.
+Presence I/O is a [`ChannelAdapter`](/hexok/api/domain/channel/) passed to `.route()`. The catalog must be a bus.
 
 ## Statics
 
@@ -72,6 +72,6 @@ class ClientChannel extends EventChannel {
 
 ## Related
 
-- [ChannelAdapter](/api/domain/channel/)
-- [App.route](/api/runtime/app/)
-- [ExecuteCtx.channels](/api/app/execute-ctx/)
+- [ChannelAdapter](/hexok/api/domain/channel/)
+- [App.route](/hexok/api/runtime/app/)
+- [ExecuteCtx.channels](/hexok/api/app/execute-ctx/)

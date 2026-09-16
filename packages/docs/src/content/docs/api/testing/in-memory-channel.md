@@ -9,7 +9,7 @@ sidebar:
 import { InMemoryChannel } from 'hexok/testing'
 ```
 
-Implements [`ChannelAdapter`](/api/domain/channel/).
+Implements [`ChannelAdapter`](/hexok/api/domain/channel/).
 
 ## Statics
 
@@ -36,6 +36,6 @@ Implements [`ChannelAdapter`](/api/domain/channel/).
 
 ## Related
 
-- [ChannelAdapter](/api/domain/channel/)
-- [EventChannel](/api/app/event-channel/)
-- [App.test](/api/testing/app/)
+- [ChannelAdapter](/hexok/api/domain/channel/)
+- [EventChannel](/hexok/api/app/event-channel/)
+- [App.test](/hexok/api/testing/app/)

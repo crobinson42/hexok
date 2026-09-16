@@ -35,6 +35,6 @@ Use-case `unwrap` throws `CodedError` from a fail arm. Entity methods throw `Cod
 
 ## Related
 
-- [validate](/api/core/schema/)
-- [CodedError](/api/core/coded-error/)
-- [ExternalUseCase.unwrap](/api/app/external-use-case/)
+- [validate](/hexok/api/core/schema/)
+- [CodedError](/hexok/api/core/coded-error/)
+- [ExternalUseCase.unwrap](/hexok/api/app/external-use-case/)

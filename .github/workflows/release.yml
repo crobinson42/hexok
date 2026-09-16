@@ -4,6 +4,11 @@ on:
   push:
     branches: [main]
   workflow_dispatch:
+    inputs:
+      deploy_docs:
+        description: Deploy docs even if no package was published
+        type: boolean
+        default: false
 
 concurrency: ${{ github.workflow }}-${{ github.ref }}
 
@@ -16,6 +21,8 @@ jobs:
       contents: write
       pull-requests: write
       id-token: write
+    outputs:
+      published: ${{ steps.changesets.outputs.published }}
     steps:
       - uses: actions/checkout@v6
         with:
@@ -32,6 +39,7 @@ jobs:
       - run: npm run build --workspace=hexok
 
       - name: Create release pull request or publish to npm
+        id: changesets
         uses: changesets/action@v1
         with:
           version: npm run version-packages
@@ -43,3 +51,44 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
           NPM_CONFIG_PROVENANCE: true
+
+  build-docs:
+    name: Build docs
+    needs: release
+    if: needs.release.outputs.published == 'true' || (github.event_name == 'workflow_dispatch' && inputs.deploy_docs)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      pages: write
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+
+      - run: corepack enable
+      - run: npm ci
+      - run: npm run build --workspace=@hexok/docs
+
+      - uses: actions/upload-pages-artifact@v5
+        with:
+          path: packages/docs/dist
+
+  deploy-docs:
+    name: Deploy docs
+    needs: build-docs
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v5

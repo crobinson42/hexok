@@ -9,7 +9,7 @@ sidebar:
 import type { ApiMiddleware } from 'hexok/runtime'
 ```
 
-Register with [`App.use`](/api/runtime/app/). Onion around **external** `execute` (`local` and HTTP). Does not run for event handlers or nested `run`.
+Register with [`App.use`](/hexok/api/runtime/app/). Onion around **external** `execute` (`local` and HTTP). Does not run for event handlers or nested `run`.
 
 ```ts
 type ApiMiddleware<Ctx = unknown> = (args: {
@@ -46,6 +46,6 @@ App.from(useCases).use(withTiming)
 
 ## Related
 
-- [App.use](/api/runtime/app/)
-- [Interceptor](/api/runtime/interceptor/)
-- [ExternalUseCase](/api/app/external-use-case/)
+- [App.use](/hexok/api/runtime/app/)
+- [Interceptor](/hexok/api/runtime/interceptor/)
+- [ExternalUseCase](/hexok/api/app/external-use-case/)

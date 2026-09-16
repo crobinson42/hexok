@@ -32,7 +32,7 @@ const contract = deriveContract({ close: CloseIncident })
 contract.entries['incident.close']
 ```
 
-`AppInstance.contract` is the nested `DerivedContract`. [`deriveRpc`](/api/runtime/rpc/) attaches `POST /rpc/...` paths.
+`AppInstance.contract` is the nested `DerivedContract`. [`deriveRpc`](/hexok/api/runtime/rpc/) attaches `POST /rpc/...` paths.
 
 ## Throws
 
@@ -40,7 +40,7 @@ contract.entries['incident.close']
 
 ## Related
 
-- [ExternalUseCase](/api/app/external-use-case/)
-- [InternalUseCase](/api/app/internal-use-case/)
-- [deriveRpc](/api/runtime/rpc/)
-- [AppInstance.contract](/api/runtime/app/)
+- [ExternalUseCase](/hexok/api/app/external-use-case/)
+- [InternalUseCase](/hexok/api/app/internal-use-case/)
+- [deriveRpc](/hexok/api/runtime/rpc/)
+- [AppInstance.contract](/hexok/api/runtime/app/)

@@ -30,6 +30,6 @@ rpc.incident.close.path
 
 ## Related
 
-- [deriveContract](/api/app/contract/)
-- [AppInstance.rpc](/api/runtime/app/)
-- [httpStatus](/api/runtime/http-status/)
+- [deriveContract](/hexok/api/app/contract/)
+- [AppInstance.rpc](/hexok/api/runtime/app/)
+- [httpStatus](/hexok/api/runtime/http-status/)

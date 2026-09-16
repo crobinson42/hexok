@@ -9,7 +9,7 @@ sidebar:
 import { InMemoryRepository } from 'hexok/testing'
 ```
 
-Implements [`CrudRepository`](/api/domain/capabilities/) `{ get, save, list, delete }`. Extra methods beyond those (and `bindTo` / `fork`) go in `extra`.
+Implements [`CrudRepository`](/hexok/api/domain/capabilities/) `{ get, save, list, delete }`. Extra methods beyond those (and `bindTo` / `fork`) go in `extra`.
 
 ## Statics
 
@@ -47,6 +47,6 @@ The type of `of` is `hexok: InMemoryRepository.of expects a CRUD repository port
 
 ## Related
 
-- [CrudRepository](/api/domain/capabilities/)
-- [Entity](/api/domain/entity/)
-- [App.test](/api/testing/app/)
+- [CrudRepository](/hexok/api/domain/capabilities/)
+- [Entity](/hexok/api/domain/entity/)
+- [App.test](/hexok/api/testing/app/)

@@ -9,7 +9,7 @@ sidebar:
 import { InMemoryBus } from 'hexok/testing'
 ```
 
-Implements [`BusAdapter`](/api/domain/envelope/).
+Implements [`BusAdapter`](/hexok/api/domain/envelope/).
 
 ## Statics
 
@@ -33,6 +33,6 @@ Implements [`BusAdapter`](/api/domain/envelope/).
 
 ## Related
 
-- [BusAdapter](/api/domain/envelope/)
-- [App.bind](/api/runtime/app/)
-- [App.test](/api/testing/app/)
+- [BusAdapter](/hexok/api/domain/envelope/)
+- [App.bind](/hexok/api/runtime/app/)
+- [App.test](/hexok/api/testing/app/)

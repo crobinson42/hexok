@@ -14,7 +14,7 @@ import {
 } from 'hexok/runtime'
 ```
 
-Register with [`App.intercept`](/api/runtime/app/). First registered is **outer** for execute, adapter, publish, and dispatch. Duplicate `key` throws.
+Register with [`App.intercept`](/hexok/api/runtime/app/). First registered is **outer** for execute, adapter, publish, and dispatch. Duplicate `key` throws.
 
 ## Interceptor
 
@@ -73,6 +73,6 @@ Throw if a port impl is missing `bindTo` / `fork`. `provide()` calls this when t
 
 ## Related
 
-- [App.intercept](/api/runtime/app/)
-- [ApiMiddleware](/api/runtime/middleware/)
-- [Port](/api/domain/port/)
+- [App.intercept](/hexok/api/runtime/app/)
+- [ApiMiddleware](/hexok/api/runtime/middleware/)
+- [Port](/hexok/api/domain/port/)

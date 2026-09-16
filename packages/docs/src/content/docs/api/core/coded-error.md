@@ -46,6 +46,6 @@ throw validationError('hexok: Incident validation failed', parsed.issues)
 
 ## Related
 
-- [Result](/api/core/result/)
-- [ErrorMap](/api/core/errors/)
-- [httpStatus](/api/runtime/http-status/)
+- [Result](/hexok/api/core/result/)
+- [ErrorMap](/hexok/api/core/errors/)
+- [httpStatus](/hexok/api/runtime/http-status/)

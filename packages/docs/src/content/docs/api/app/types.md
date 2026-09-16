@@ -68,8 +68,8 @@ throw errors.NOT_FOUND()
 
 ## Related
 
-- [ExternalUseCase](/api/app/external-use-case/)
-- [InternalUseCase](/api/app/internal-use-case/)
-- [EventUseCase](/api/app/event-use-case/)
-- [EventChannel](/api/app/event-channel/)
-- [ErrorMap](/api/core/errors/)
+- [ExternalUseCase](/hexok/api/app/external-use-case/)
+- [InternalUseCase](/hexok/api/app/internal-use-case/)
+- [EventUseCase](/hexok/api/app/event-use-case/)
+- [EventChannel](/hexok/api/app/event-channel/)
+- [ErrorMap](/hexok/api/core/errors/)

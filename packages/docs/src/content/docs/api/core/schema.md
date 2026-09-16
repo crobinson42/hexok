@@ -32,6 +32,6 @@ An async schema (`validate` returning a Promise) throws `Error('hexok: async sch
 
 ## Related
 
-- [Result](/api/core/result/)
-- [CodedError](/api/core/coded-error/)
-- [Entity](/api/domain/entity/)
+- [Result](/hexok/api/core/result/)
+- [CodedError](/hexok/api/core/coded-error/)
+- [Entity](/hexok/api/domain/entity/)

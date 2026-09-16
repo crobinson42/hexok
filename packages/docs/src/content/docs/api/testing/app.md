@@ -9,7 +9,7 @@ sidebar:
 import { App, TestAppBuilder, type TestAppInstance } from 'hexok/testing'
 ```
 
-Production composition is [`hexok/runtime` `App.from`](/api/runtime/app/).
+Production composition is [`hexok/runtime` `App.from`](/hexok/api/runtime/app/).
 
 ## App.test
 
@@ -52,8 +52,8 @@ app.as({ requestId: 't1' }).incident.close({ id: '1' })
 
 ## Related
 
-- [App](/api/runtime/app/)
-- [InMemoryRepository](/api/testing/in-memory-repository/)
-- [InMemoryBus](/api/testing/in-memory-bus/)
-- [InMemoryQueue](/api/testing/in-memory-queue/)
-- [InMemoryChannel](/api/testing/in-memory-channel/)
+- [App](/hexok/api/runtime/app/)
+- [InMemoryRepository](/hexok/api/testing/in-memory-repository/)
+- [InMemoryBus](/hexok/api/testing/in-memory-bus/)
+- [InMemoryQueue](/hexok/api/testing/in-memory-queue/)
+- [InMemoryChannel](/hexok/api/testing/in-memory-channel/)

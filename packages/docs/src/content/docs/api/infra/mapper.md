@@ -45,6 +45,6 @@ const entity = IncidentMapper.from(row)
 
 ## Related
 
-- [Entity](/api/domain/entity/)
-- [Result](/api/core/result/)
-- [CodedError](/api/core/coded-error/)
+- [Entity](/hexok/api/domain/entity/)
+- [Result](/hexok/api/core/result/)
+- [CodedError](/hexok/api/core/coded-error/)

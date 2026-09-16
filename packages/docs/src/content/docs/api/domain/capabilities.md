@@ -14,7 +14,7 @@ import type {
 } from 'hexok/domain'
 ```
 
-Pass `{ transactional: true }` / `{ requestScoped: true }` to [`Port.token`](/api/domain/port/) so `provide()` throws if the impl is missing `bindTo` / `fork`.
+Pass `{ transactional: true }` / `{ requestScoped: true }` to [`Port.token`](/hexok/api/domain/port/) so `provide()` throws if the impl is missing `bindTo` / `fork`.
 
 ## Exports
 
@@ -35,10 +35,10 @@ class PgIncidentRepo
 }
 ```
 
-`CrudRepository.save` is where adapters call `entity.commit()` after a successful write. [`InMemoryRepository`](/api/testing/in-memory-repository/) implements this shape.
+`CrudRepository.save` is where adapters call `entity.commit()` after a successful write. [`InMemoryRepository`](/hexok/api/testing/in-memory-repository/) implements this shape.
 
 ## Related
 
-- [Port](/api/domain/port/)
-- [requireCapability](/api/runtime/interceptor/)
-- [InMemoryRepository](/api/testing/in-memory-repository/)
+- [Port](/hexok/api/domain/port/)
+- [requireCapability](/hexok/api/runtime/interceptor/)
+- [InMemoryRepository](/hexok/api/testing/in-memory-repository/)

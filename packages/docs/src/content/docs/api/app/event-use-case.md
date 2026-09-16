@@ -51,8 +51,8 @@ class NotifyOnClose extends EventUseCase {
 
 ## Related
 
-- [EventCtx](/api/app/execute-ctx/)
-- [DomainEvent](/api/domain/domain-event/)
-- [EventCatalog](/api/domain/event-catalog/)
-- [ExternalUseCase](/api/app/external-use-case/)
-- [InternalUseCase](/api/app/internal-use-case/)
+- [EventCtx](/hexok/api/app/execute-ctx/)
+- [DomainEvent](/hexok/api/domain/domain-event/)
+- [EventCatalog](/hexok/api/domain/event-catalog/)
+- [ExternalUseCase](/hexok/api/app/external-use-case/)
+- [InternalUseCase](/hexok/api/app/internal-use-case/)

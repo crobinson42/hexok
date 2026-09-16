@@ -51,7 +51,7 @@ class IncidentClosed extends DomainEvent {
 
 ## Related
 
-- [EventCatalog](/api/domain/event-catalog/)
-- [Envelope](/api/domain/envelope/)
-- [EventUseCase](/api/app/event-use-case/)
-- [wrapEvent](/api/runtime/wrap-event/)
+- [EventCatalog](/hexok/api/domain/event-catalog/)
+- [Envelope](/hexok/api/domain/envelope/)
+- [EventUseCase](/hexok/api/app/event-use-case/)
+- [wrapEvent](/hexok/api/runtime/wrap-event/)

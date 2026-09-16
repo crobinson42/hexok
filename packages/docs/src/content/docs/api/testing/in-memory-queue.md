@@ -9,7 +9,7 @@ sidebar:
 import { InMemoryQueue } from 'hexok/testing'
 ```
 
-Implements [`QueueAdapter`](/api/domain/envelope/). `nack` (or a throw) redelivers with `attempt + 1` up to `maxAttempts` (default 3).
+Implements [`QueueAdapter`](/hexok/api/domain/envelope/). `nack` (or a throw) redelivers with `attempt + 1` up to `maxAttempts` (default 3).
 
 ## Statics
 
@@ -34,6 +34,6 @@ Implements [`QueueAdapter`](/api/domain/envelope/). `nack` (or a throw) redelive
 
 ## Related
 
-- [QueueAdapter](/api/domain/envelope/)
-- [EventUseCase](/api/app/event-use-case/)
-- [App.test](/api/testing/app/)
+- [QueueAdapter](/hexok/api/domain/envelope/)
+- [EventUseCase](/hexok/api/app/event-use-case/)
+- [App.test](/hexok/api/testing/app/)

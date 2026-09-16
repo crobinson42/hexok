@@ -31,10 +31,10 @@ const errors = defineErrors({
 })
 ```
 
-Use for `static readonly errors` on [Entity](/api/domain/entity/), [ExternalUseCase](/api/app/external-use-case/), [InternalUseCase](/api/app/internal-use-case/), [EventUseCase](/api/app/event-use-case/), and [EventChannel](/api/app/event-channel/).
+Use for `static readonly errors` on [Entity](/hexok/api/domain/entity/), [ExternalUseCase](/hexok/api/app/external-use-case/), [InternalUseCase](/hexok/api/app/internal-use-case/), [EventUseCase](/hexok/api/app/event-use-case/), and [EventChannel](/hexok/api/app/event-channel/).
 
 ## Related
 
-- [CodedError](/api/core/coded-error/)
-- [errorFactories](/api/app/types/)
-- [ExecuteCtx.errors](/api/app/execute-ctx/)
+- [CodedError](/hexok/api/core/coded-error/)
+- [errorFactories](/hexok/api/app/types/)
+- [ExecuteCtx.errors](/hexok/api/app/execute-ctx/)

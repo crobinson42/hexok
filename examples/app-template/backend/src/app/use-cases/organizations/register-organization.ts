@@ -11,7 +11,7 @@ import {
   OrganizationCreated as OrganizationCreatedClient,
 } from '../../events/client/catalog.js';
 import { OrganizationRepository } from '../../ports/repos/organizations.js';
-import { CreateUser } from '../users/create-user.js';
+import { CreateUser } from '../users/internal/create-user.js';
 
 export class RegisterOrganization extends ExternalUseCase {
   static readonly key = 'organization.register';

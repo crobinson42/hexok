@@ -2,10 +2,24 @@ import starlight from '@astrojs/starlight';
 import { defineConfig } from 'astro/config';
 import starlightLinksValidator from 'starlight-links-validator';
 
+function reactGrabDev() {
+  return {
+    name: 'react-grab-dev',
+    hooks: {
+      'astro:config:setup': ({ command, injectScript }) => {
+        if (command === 'dev') {
+          injectScript('page', 'import "react-grab";');
+        }
+      },
+    },
+  };
+}
+
 export default defineConfig({
   site: 'https://crobinson42.github.io',
   base: '/hexok',
   integrations: [
+    reactGrabDev(),
     starlight({
       title: 'Hexok',
       description:

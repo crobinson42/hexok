@@ -1,14 +1,14 @@
 import { type ExecuteCtx, InternalUseCase } from 'hexok/app';
 import { z } from 'zod';
-import { User, userSchema } from '../../../domain/entities/user.js';
-import { DomainEvents } from '../../../domain/events/domain/catalog.js';
-import { UserCreated } from '../../../domain/events/domain/user.js';
+import { User, userSchema } from '../../../../domain/entities/user.js';
+import { DomainEvents } from '../../../../domain/events/domain/catalog.js';
+import { UserCreated } from '../../../../domain/events/domain/user.js';
 import {
   ClientEvents,
   UserCreated as UserCreatedClient,
-} from '../../events/client/catalog.js';
-import { UserRepository } from '../../ports/repos/users.js';
-import { EmailService } from '../../ports/services/email.js';
+} from '../../../events/client/catalog.js';
+import { UserRepository } from '../../../ports/repos/users.js';
+import { EmailService } from '../../../ports/services/email.js';
 
 export class CreateUser extends InternalUseCase {
   static readonly key = 'user.create';

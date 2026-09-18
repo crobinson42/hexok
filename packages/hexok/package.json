@@ -1,6 +1,6 @@
 {
   "name": "hexok",
-  "version": "0.0.1",
+  "version": "1.0.0",
   "description": "A TypeScript kit for writing a clean-architecture backend as ordinary classes.",
   "type": "module",
   "license": "MIT",

@@ -5,12 +5,22 @@
   "type": "module",
   "license": "MIT",
   "sideEffects": false,
+  "keywords": [
+    "hexagonal-architecture",
+    "clean-architecture",
+    "ports-and-adapters",
+    "typescript",
+    "ddd",
+    "entity",
+    "use-case",
+    "domain-driven-design"
+  ],
   "repository": {
     "type": "git",
     "url": "git+https://github.com/crobinson42/hexok.git",
     "directory": "packages/hexok"
   },
-  "homepage": "https://github.com/crobinson42/hexok#readme",
+  "homepage": "https://crobinson42.github.io/hexok/",
   "bugs": {
     "url": "https://github.com/crobinson42/hexok/issues"
   },

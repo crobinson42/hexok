@@ -1,5 +1,11 @@
 # hexok
 
+## 1.0.1
+
+### Patch Changes
+
+- [`2e15b21`](https://github.com/crobinson42/hexok/commit/2e15b21fa7314ee9f496c80ac8e99794003cdfc7) Thanks [@crobinson42](https://github.com/crobinson42)! - Add a package README, homepage, and npm keywords pointing at the docs site (https://crobinson42.github.io/hexok/).
+
 ## 1.0.0
 
 ### Major Changes

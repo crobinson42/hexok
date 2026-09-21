@@ -9,7 +9,7 @@ sidebar:
 import { defineErrors, type ErrorDef, type ErrorMap } from 'hexok/core'
 ```
 
-Keys of an error map **are** the error-code union.
+An error map is the declared refusal vocabulary on an entity, use case, or channel. The keys **are** the error-code union. Hexok keeps hexagon errors explicit and typed so you cannot throw an undeclared code.
 
 ## Exports
 

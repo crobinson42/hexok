@@ -9,7 +9,9 @@ sidebar:
 import { type Infer, type StandardSchemaV1, validate } from 'hexok/core'
 ```
 
-Hexok accepts any [Standard Schema V1](https://standardschema.dev) implementation (for example Zod). `hexok/core` vendors the type so it has zero runtime dependencies.
+Schemas are the trust-boundary checks on entity props and use-case input/output. Hexok accepts any [Standard Schema V1](https://standardschema.dev) library (Zod works). Validation is sync; async schemas belong at the application edge.
+
+`hexok/core` vendors the type so it has zero runtime dependencies.
 
 ## Exports
 

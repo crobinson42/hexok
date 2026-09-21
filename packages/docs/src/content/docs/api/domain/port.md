@@ -14,7 +14,7 @@ import {
 } from 'hexok/domain'
 ```
 
-A port is a TypeScript interface plus a token. `App.provide` and `static ports` take the token.
+A port is a contract for something the application needs from the outside world — a repository, a clock, a mailer. You define the interface in domain and a token with `Port.token`. Use cases list those tokens on `static ports`. At boot, infra provides the real implementation with `App.provide`.
 
 ## Port.token
 

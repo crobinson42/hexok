@@ -9,6 +9,8 @@ sidebar:
 import { wrapEvent } from 'hexok/runtime'
 ```
 
+`wrapEvent` turns a domain event into an envelope for a catalog the use case declared in `publishes`, copying tracing ids from request context. Use cases call `publish`; the runtime wraps. An existing envelope is passed through.
+
 ```ts
 function wrapEvent(
   event: DomainEvent | Envelope,

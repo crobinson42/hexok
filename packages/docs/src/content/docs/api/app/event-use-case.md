@@ -9,7 +9,7 @@ sidebar:
 import { EventUseCase } from 'hexok/app'
 ```
 
-Listens to one event class in one catalog. Queue catalogs require `static group`.
+An event use case handles one event from one catalog — notify, update another aggregate, enqueue follow-up work. Handlers subscribe only after `app.start()`. Queue catalogs require `static group`.
 
 ## Statics
 

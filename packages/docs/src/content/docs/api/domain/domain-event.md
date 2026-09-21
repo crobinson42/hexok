@@ -14,7 +14,7 @@ import {
 } from 'hexok/domain'
 ```
 
-Subclass with `key`, `schema`, and a typed `payload`. The constructor does not validate.
+A domain event is a fact that already happened (`IncidentClosed`). Declare it in domain as a class with a dotted `key` and a payload schema. Use cases `publish` it after a successful change. The constructor types the payload; validation runs at the use-case edge.
 
 ## Statics
 

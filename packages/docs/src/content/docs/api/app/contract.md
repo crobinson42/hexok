@@ -15,7 +15,7 @@ import {
 } from 'hexok/app'
 ```
 
-Event use cases and InternalUseCase are omitted. Duplicate `key` throws.
+The contract is the public API of the hexagon, derived from external use cases. Each entry is `key`, `input`, `output`, and `errors`. Runtime nests it as `app.contract` and attaches HTTP paths. Internal and event use cases are omitted. Duplicate `key` throws.
 
 ## Exports
 

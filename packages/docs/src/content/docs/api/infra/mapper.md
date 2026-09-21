@@ -9,7 +9,7 @@ sidebar:
 import { Mapper } from 'hexok/infra'
 ```
 
-Chain `Mapper.for(Entity).to(…).from(…)`.
+A mapper converts an entity to a storage row and back. It lives in infra so domain never sees columns. Chain `Mapper.for(Entity).to(…).from(…)`. Use `restore` for trusted database rows. Use `parse` when the input is untyped (the trust boundary).
 
 ## Statics
 

@@ -9,7 +9,7 @@ sidebar:
 import type { ApiMiddleware } from 'hexok/runtime'
 ```
 
-Register with [`App.use`](/hexok/api/runtime/app/). Onion around **external** `execute` (`local` and HTTP). Does not run for event handlers or nested `run`.
+API middleware wraps public `execute` for `local` and HTTP — timing, logging, reading the request. Register with [`App.use`](/hexok/api/runtime/app/). Event handlers and nested `run` skip it. For adapters, publish, or dispatch, register an [interceptor](/hexok/api/runtime/interceptor/).
 
 ```ts
 type ApiMiddleware<Ctx = unknown> = (args: {

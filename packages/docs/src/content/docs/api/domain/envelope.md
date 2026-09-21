@@ -16,7 +16,7 @@ import type {
 } from 'hexok/domain'
 ```
 
-`kind` is copied from the catalog.
+An envelope is the runtime value that travels on a bus or queue: event key, payload, catalog name, and tracing. This page also defines `BusAdapter` and `QueueAdapter` — the infra ports that carry envelopes. Domain code leaves `meta` alone; Hexok writes `{}`. `kind` is copied from the catalog.
 
 ## Envelope
 

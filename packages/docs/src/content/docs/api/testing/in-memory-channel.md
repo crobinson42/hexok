@@ -9,6 +9,8 @@ sidebar:
 import { InMemoryChannel } from 'hexok/testing'
 ```
 
+An in-process channel adapter for tests. Route an [`EventChannel`](/hexok/api/app/event-channel/) to it and inspect `sent` without WebSockets.
+
 Implements [`ChannelAdapter`](/hexok/api/domain/channel/).
 
 ## Statics

@@ -9,6 +9,8 @@ sidebar:
 import { fail, ok, type Result } from 'hexok/core'
 ```
 
+`Result` is a success-or-code union returned by `validate`. Use it at schema edges. Entity methods and use-case refusals throw `CodedError`. `unwrap` turns a fail arm into a throw.
+
 Discriminated union. `ok` / `fail` collapse the unused arm to `never`.
 
 ```ts

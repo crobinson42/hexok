@@ -26,6 +26,8 @@ import {
 } from 'hexok/app'
 ```
 
+Helpers for composition: constructor shapes, `isExternalUseCase`-style guards, and `errorFactories`. `App.from` uses them to report missing statics as a `hexok:` sentence. Subclass `ExternalUseCase`, `InternalUseCase`, or `EventUseCase` — these types are for the compiler and the runtime.
+
 ## Guards
 
 | Name | Notes |

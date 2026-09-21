@@ -9,7 +9,7 @@ sidebar:
 import type { ChannelAdapter, ChannelConnection } from 'hexok/domain'
 ```
 
-Does not interpret routing hints or session claims. [EventChannel](/hexok/api/app/event-channel/) owns join, refresh, and route.
+A channel adapter is the presence/transport side of live delivery: join, leave, send bytes. Bind it with `App.route`. Who may join and who receives an event is decided by [`EventChannel`](/hexok/api/app/event-channel/) in the app layer. The adapter does not interpret routing hints or session claims.
 
 ## ChannelConnection
 

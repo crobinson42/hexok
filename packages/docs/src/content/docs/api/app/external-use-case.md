@@ -9,6 +9,8 @@ sidebar:
 import { ExternalUseCase } from 'hexok/app'
 ```
 
+An external use case is a public application command. HTTP and `app.local` can call it. It orchestrates: load through ports, ask the entity to change, save, publish, return. The entity owns the rule (`incident.close(now)`). The use case wires the steps.
+
 Declare static `key`, `input`, `output`, `errors`, `ports`. Implement `execute`.
 
 ## Statics

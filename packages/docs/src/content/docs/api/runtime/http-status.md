@@ -9,6 +9,8 @@ sidebar:
 import { httpStatus } from 'hexok/runtime'
 ```
 
+`httpStatus` maps a `CodedError` code to an HTTP status for `router.fetch`. Domain throws codes; the HTTP adapter uses this map. Known codes below; everything else is 409.
+
 ```ts
 function httpStatus(code: string): number
 ```

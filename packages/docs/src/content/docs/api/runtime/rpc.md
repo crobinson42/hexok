@@ -9,6 +9,8 @@ sidebar:
 import { deriveRpc, type RpcContract, type RpcRoute, rpcPath } from 'hexok/runtime'
 ```
 
+RPC turns each external use-case key into an HTTP route: `incident.close` → `POST /rpc/incident/close` with body `{ input }`. This is the driving adapter for the contract. Request context comes from `.ctx()` / `.ctxFrom`.
+
 ## Exports
 
 | Name | Kind | Notes |

@@ -13,7 +13,7 @@ import {
 } from 'hexok/domain'
 ```
 
-Named catalog. Chain `.event(...)` then `.freeze()`. Use-case field: `static publishes = [DomainEvents] as const`.
+An event catalog is a named group of event classes that share a delivery style. `bus` fans out to every subscriber. `queue` delivers to one consumer in a group with ack/nack. Chain `.event(...)` then `.freeze()`, and list it on `static publishes = [DomainEvents] as const`. Runtime binds it to an adapter with `App.bind`.
 
 ## Constructor
 

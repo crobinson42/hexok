@@ -5,6 +5,17 @@ description: A TypeScript kit for writing a clean-architecture backend as ordina
 
 A TypeScript kit for writing a clean-architecture backend as ordinary classes.
 
+Hexok follows hexagonal / onion architecture, split by import path:
+
+- **domain** — entities, ports, and events. The inside of the hexagon. No I/O.
+- **app** — use cases that orchestrate through ports.
+- **infra** — adapters and mappers that implement ports.
+- **runtime** — composition root (`App.from`), interceptors, local client, HTTP.
+- **core** — shared primitives: `Result`, schemas, coded errors.
+- **testing** — the same graph, with in-memory fakes.
+
+The entity owns the rule. The use case orchestrates. Import from a layer; there is no root barrel.
+
 ## Install
 
 ```bash

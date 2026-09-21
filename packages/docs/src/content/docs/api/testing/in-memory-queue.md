@@ -9,6 +9,8 @@ sidebar:
 import { InMemoryQueue } from 'hexok/testing'
 ```
 
+An in-process queue for tests. Bind it to a queue catalog to exercise ack, nack, and retry on event use cases.
+
 Implements [`QueueAdapter`](/hexok/api/domain/envelope/). `nack` (or a throw) redelivers with `attempt + 1` up to `maxAttempts` (default 3).
 
 ## Statics

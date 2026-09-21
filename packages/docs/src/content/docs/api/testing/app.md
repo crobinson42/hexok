@@ -9,7 +9,7 @@ sidebar:
 import { App, TestAppBuilder, type TestAppInstance } from 'hexok/testing'
 ```
 
-Production composition is [`hexok/runtime` `App.from`](/hexok/api/runtime/app/).
+`App.test` is the composition root for tests. Same completeness as [`App.from`](/hexok/api/runtime/app/), plus a `published` log and `as(ctx)`. Wire in-memory adapters and call `local` so tests exercise the hexagon without a database or message bus. Production still boots with [`hexok/runtime` `App.from`](/hexok/api/runtime/app/).
 
 ## App.test
 

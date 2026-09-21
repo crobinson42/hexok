@@ -9,7 +9,7 @@ sidebar:
 import { Adapter } from 'hexok/infra'
 ```
 
-Pass the **impl** to `provide`, or use `App.adapt(factory, ...deps)`. Do not pass the holder to `provide`.
+An adapter is the infra class that implements a domain port — Postgres, a real clock, an HTTP client. `Adapter.of` pairs the port token with a factory. Pass the created **impl** to `App.provide`, or use `App.adapt(factory, ...deps)`.
 
 ## Adapter.of
 

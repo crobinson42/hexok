@@ -14,6 +14,8 @@ import type {
 } from 'hexok/domain'
 ```
 
+Capabilities are optional extra contracts on a port: transactions (`bindTo`), per-request isolation (`fork`), or a CRUD shape. Domain still only sees your port. Flag them on `Port.token` so `provide` checks the impl. `CrudRepository` is the shape [`InMemoryRepository`](/hexok/api/testing/in-memory-repository/) can fake; write your own port for everything else.
+
 Pass `{ transactional: true }` / `{ requestScoped: true }` to [`Port.token`](/hexok/api/domain/port/) so `provide()` throws if the impl is missing `bindTo` / `fork`.
 
 ## Exports

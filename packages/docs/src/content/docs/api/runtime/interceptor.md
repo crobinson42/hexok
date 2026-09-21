@@ -14,7 +14,7 @@ import {
 } from 'hexok/runtime'
 ```
 
-Register with [`App.intercept`](/hexok/api/runtime/app/). First registered is **outer** for execute, adapter, publish, and dispatch. Duplicate `key` throws.
+An interceptor wraps execute, adapters, publish, or dispatch at runtime. Use it for cross-cutting work (auth, unit of work, logging) without putting that in entities or use cases. Register with [`App.intercept`](/hexok/api/runtime/app/). First registered is **outer**. Nested `run` skips `aroundUseCase`. Duplicate `key` throws.
 
 ## Interceptor
 

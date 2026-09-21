@@ -9,7 +9,7 @@ sidebar:
 import { CodedError, validationError } from 'hexok/core'
 ```
 
-Error with a machine-readable `code`, optional `message`, and optional `data`.
+A coded error is a declared refusal with a machine-readable `code`, optional `message`, and optional `data`. Entities and use cases throw these so transports can map the code (HTTP status, logs) without the domain knowing about HTTP. Catch and switch on `code`.
 
 ## Constructor
 

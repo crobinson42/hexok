@@ -9,7 +9,9 @@ sidebar:
 import { Entity, type DeepReadonly, type EntityConstructor } from 'hexok/domain'
 ```
 
-Subclass with typed props. Writes go through `set`. Validation and declared refusals throw `CodedError`.
+An entity is a domain object that holds state and the rules for changing it. In Hexok it is an aggregate: it never talks to the database, never publishes events, and never holds ports. Put methods like `close(now)` on the entity. The use case loads it, calls that method, and saves.
+
+Writes go through `set`. Validation and declared refusals throw `CodedError`.
 
 ## Statics
 

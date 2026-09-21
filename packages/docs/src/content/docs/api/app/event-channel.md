@@ -17,7 +17,7 @@ import {
 } from 'hexok/app'
 ```
 
-Presence I/O is a [`ChannelAdapter`](/hexok/api/domain/channel/) passed to `.route()`. The catalog must be a bus.
+An event channel is application policy for a live bus: who may join, when to eject, who should receive this event. Sockets and send live on a [`ChannelAdapter`](/hexok/api/domain/channel/) passed to `.route()`. The catalog must be a bus.
 
 ## Statics
 

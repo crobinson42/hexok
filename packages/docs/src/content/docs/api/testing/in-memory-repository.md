@@ -9,6 +9,8 @@ sidebar:
 import { InMemoryRepository } from 'hexok/testing'
 ```
 
+A fake repository for tests. Provide it in place of a real CRUD adapter so use-case tests never need a database. It clones on get/save. `save` still calls `commit()`, matching a real adapter.
+
 Implements [`CrudRepository`](/hexok/api/domain/capabilities/) `{ get, save, list, delete }`. Extra methods beyond those (and `bindTo` / `fork`) go in `extra`.
 
 ## Statics

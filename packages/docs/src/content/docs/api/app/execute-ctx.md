@@ -15,7 +15,7 @@ import type {
 } from 'hexok/app'
 ```
 
-Typed from the subclass statics.
+Execute context is what runtime passes into `execute`: validated input, bound ports, error factories, `publish`, and nested `run`. It is typed from the subclass statics. Use cases destructure this bag. Event handlers get `EventCtx` (the envelope plus `attempt`).
 
 ## ExecuteCtx
 

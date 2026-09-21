@@ -17,6 +17,8 @@ import {
 } from 'hexok/runtime'
 ```
 
+`App` is the composition root. `App.from(useCases)` wires ports, catalogs, and channels so domain and app stay free of I/O. `build()` stays uncallable until every required token is provided. Call `start()` before event handlers or channel routing run.
+
 `App.from(useCases)` returns an `AppBuilder`. `build()` returns an `AppInstance`.
 
 ## App.from

@@ -9,6 +9,8 @@ sidebar:
 import { InMemoryBus } from 'hexok/testing'
 ```
 
+An in-process bus for tests. Bind it to a bus catalog and inspect `published`.
+
 Implements [`BusAdapter`](/hexok/api/domain/envelope/).
 
 ## Statics

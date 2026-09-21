@@ -9,7 +9,7 @@ sidebar:
 import { InternalUseCase } from 'hexok/app'
 ```
 
-Same execute shape as [ExternalUseCase](/hexok/api/app/external-use-case/). Omitted from `deriveContract`, `app.contract`, `app.local`, and HTTP. Still in completeness. Invocable via `ctx.run`.
+An internal use case has the same `execute` shape as an [external](/hexok/api/app/external-use-case/) one, and stays private. It remains in completeness and is omitted from `contract`, `local`, and HTTP. Call it with `run(CreateUser, input)` from another use case when you want shared orchestration without a public endpoint.
 
 Declare static `key`, `input`, `output`, `errors`, `ports`. Implement `execute`.
 

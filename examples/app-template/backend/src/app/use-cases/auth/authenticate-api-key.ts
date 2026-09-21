@@ -1,6 +1,7 @@
 import { type ExecuteCtx, ExternalUseCase } from 'hexok/app';
 import { z } from 'zod';
 import { actorSchema } from '../../../domain/schemas/actor.js';
+import { InvalidCredentials } from '../../errors.js';
 import { ApiKeyRepository } from '../../ports/repos/api-keys.js';
 import { AuthTokenService } from '../../ports/services/auth-token.js';
 
@@ -17,8 +18,8 @@ export class AuthenticateApiKey extends ExternalUseCase {
   });
 
   static errors = {
-    INVALID_CREDENTIALS: { message: 'Invalid credentials' },
-  };
+    ...InvalidCredentials,
+  } as const;
 
   static ports = {
     apiKeys: ApiKeyRepository,

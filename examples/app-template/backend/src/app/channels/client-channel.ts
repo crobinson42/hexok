@@ -7,6 +7,7 @@ import {
 import type { Actor } from '../../domain/schemas/actor.js';
 import { actorSchema } from '../../domain/schemas/actor.js';
 import type { ClientEventCtx } from '../context.js';
+import { AuthErrors } from '../errors.js';
 import { ClientEvents } from '../events/client/catalog.js';
 import { UserRepository } from '../ports/repos/users.js';
 
@@ -15,7 +16,7 @@ export class ClientChannel extends EventChannel {
   static readonly ports = { usersRepo: UserRepository };
   static readonly joinInput = actorSchema;
   static readonly errors = {
-    FORBIDDEN: { message: 'Forbidden' },
+    FORBIDDEN: AuthErrors.FORBIDDEN,
   };
 
   async join({ input, errors }: JoinCtx<typeof ClientChannel>): Promise<Actor> {

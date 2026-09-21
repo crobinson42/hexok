@@ -6,6 +6,7 @@ import {
 } from '../../../domain/entities/user-credentials.js';
 import { DomainEvents } from '../../../domain/events/domain/catalog.js';
 import { UserCredentialsCreated } from '../../../domain/events/domain/user-credentials.js';
+import { UserErrors } from '../../errors.js';
 import { UserCredentialsRepository } from '../../ports/repos/user-credentials.js';
 import { UserRepository } from '../../ports/repos/users.js';
 
@@ -21,9 +22,9 @@ export class SetupUserCredentials extends ExternalUseCase {
   static output = userCredentialsSchema;
 
   static errors = {
-    USER_NOT_FOUND: { message: 'User not found' },
+    ...UserErrors,
     CREDENTIALS_EXIST: { message: 'User credentials already exist' },
-  };
+  } as const;
 
   static ports = {
     users: UserRepository,

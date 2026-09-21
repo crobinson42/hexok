@@ -1,5 +1,6 @@
 import { CodedError } from 'hexok/core';
 import type { AppContext } from '../app/context.js';
+import { AuthErrors } from '../app/errors.js';
 import type { AuthTokenService } from '../app/ports/services/auth-token.js';
 
 export const publicRoutes = new Set([
@@ -31,7 +32,7 @@ export async function contextFromRequest(
   if (!actor) {
     throw new CodedError({
       code: 'UNAUTHORIZED',
-      message: 'Unauthorized',
+      message: AuthErrors.UNAUTHORIZED.message,
     });
   }
   return { ...ctx, actor };

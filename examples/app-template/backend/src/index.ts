@@ -10,6 +10,11 @@ export {
 export { requireUser } from './app/auth.js';
 export { ClientChannel } from './app/channels/client-channel.js';
 export type { AppContext } from './app/context.js';
+export {
+  AuthErrors,
+  InvalidCredentials,
+  UserErrors,
+} from './app/errors.js';
 export { ClientEvents } from './app/events/client/catalog.js';
 export {
   ApiKeyRepository,

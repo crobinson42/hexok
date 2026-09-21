@@ -1,6 +1,7 @@
 import { type ExecuteCtx, ExternalUseCase } from 'hexok/app';
 import { z } from 'zod';
 import { actorSchema } from '../../../domain/schemas/actor.js';
+import { InvalidCredentials } from '../../errors.js';
 import { UserCredentialsRepository } from '../../ports/repos/user-credentials.js';
 import { UserRepository } from '../../ports/repos/users.js';
 import { AuthTokenService } from '../../ports/services/auth-token.js';
@@ -20,8 +21,8 @@ export class Login extends ExternalUseCase {
   });
 
   static errors = {
-    INVALID_CREDENTIALS: { message: 'Invalid credentials' },
-  };
+    ...InvalidCredentials,
+  } as const;
 
   static ports = {
     users: UserRepository,

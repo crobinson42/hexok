@@ -5,6 +5,7 @@ import { DomainEvents } from '../../../domain/events/domain/catalog.js';
 import { UserCredentialsUpdated } from '../../../domain/events/domain/user-credentials.js';
 import { requireUser } from '../../auth.js';
 import type { AppContext } from '../../context.js';
+import { AuthErrors } from '../../errors.js';
 import { UserCredentialsRepository } from '../../ports/repos/user-credentials.js';
 
 export class UpdateUserCredentials extends ExternalUseCase {
@@ -18,10 +19,9 @@ export class UpdateUserCredentials extends ExternalUseCase {
   static output = userCredentialsSchema;
 
   static errors = {
-    UNAUTHORIZED: { message: 'Unauthorized' },
-    FORBIDDEN: { message: 'Forbidden' },
+    ...AuthErrors,
     CREDENTIALS_NOT_FOUND: { message: 'User credentials not found' },
-  };
+  } as const;
 
   static ports = {
     userCredentials: UserCredentialsRepository,

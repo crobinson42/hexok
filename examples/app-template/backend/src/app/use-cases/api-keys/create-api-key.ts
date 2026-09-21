@@ -5,6 +5,7 @@ import { ApiKeyCreated } from '../../../domain/events/domain/api-key.js';
 import { DomainEvents } from '../../../domain/events/domain/catalog.js';
 import { requireUser } from '../../auth.js';
 import type { AppContext } from '../../context.js';
+import { AuthErrors, UserErrors } from '../../errors.js';
 import {
   ApiKeyCreated as ApiKeyCreatedClient,
   ClientEvents,
@@ -25,12 +26,11 @@ export class CreateApiKey extends ExternalUseCase {
   static output = apiKeySchema;
 
   static errors = {
-    UNAUTHORIZED: { message: 'Unauthorized' },
-    FORBIDDEN: { message: 'Forbidden' },
-    USER_NOT_FOUND: { message: 'User not found' },
+    ...AuthErrors,
+    ...UserErrors,
     API_KEY_EXISTS: { message: 'API key already exists' },
     ORGANIZATION_NOT_ALLOWED: { message: 'Organization not allowed' },
-  };
+  } as const;
 
   static ports = {
     users: UserRepository,

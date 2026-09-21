@@ -1,15 +1,12 @@
+import type { ErrorFactories } from 'hexok/app';
 import type { Actor } from '../domain/schemas/actor.js';
 import type { AppContext } from './context.js';
-
-type AuthErrors = {
-  UNAUTHORIZED: () => never;
-  FORBIDDEN: () => never;
-};
+import type { AuthErrors } from './errors.js';
 
 export function requireUser(
   ctx: AppContext,
   userId: string,
-  errors: AuthErrors,
+  errors: ErrorFactories<AuthErrors>,
 ): Extract<Actor, { type: 'user' }> {
   const actor = ctx.actor;
   if (!actor) throw errors.UNAUTHORIZED();

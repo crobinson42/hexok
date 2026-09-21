@@ -4,6 +4,7 @@ import { ApiKeyDeleted } from '../../../domain/events/domain/api-key.js';
 import { DomainEvents } from '../../../domain/events/domain/catalog.js';
 import { requireUser } from '../../auth.js';
 import type { AppContext } from '../../context.js';
+import { AuthErrors } from '../../errors.js';
 import {
   ApiKeyDeleted as ApiKeyDeletedClient,
   ClientEvents,
@@ -22,10 +23,9 @@ export class DeleteApiKey extends ExternalUseCase {
   });
 
   static errors = {
-    UNAUTHORIZED: { message: 'Unauthorized' },
-    FORBIDDEN: { message: 'Forbidden' },
+    ...AuthErrors,
     API_KEY_NOT_FOUND: { message: 'API key not found' },
-  };
+  } as const;
 
   static ports = {
     apiKeys: ApiKeyRepository,
@@ -40,8 +40,6 @@ export class DeleteApiKey extends ExternalUseCase {
     publish,
     ctx,
   }: ExecuteCtx<typeof DeleteApiKey, AppContext>) {
-    if (!ctx.actor) throw errors.UNAUTHORIZED();
-
     const apiKey = await ports.apiKeys.get(input.id);
     if (!apiKey) throw errors.API_KEY_NOT_FOUND();
 

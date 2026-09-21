@@ -50,6 +50,7 @@ export class RegisterOrganization extends ExternalUseCase {
     const existingOrganization = await ports.organizations.get(
       input.organization.id,
     );
+
     if (existingOrganization) throw errors.ORGANIZATION_EXISTS();
 
     const organization = Organization.create({

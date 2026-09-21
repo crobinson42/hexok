@@ -8,6 +8,10 @@ export const actorSchema = z.discriminatedUnion('type', [
     organizationIds: z.array(z.string()).min(1),
   }),
   z.object({
+    type: z.literal('system'),
+    organizationIds: z.array(z.string()).min(1),
+  }),
+  z.object({
     type: z.literal('apiKey'),
     apiKeyId: z.string(),
     userId: z.string(),

@@ -104,6 +104,5 @@ Subclass + typed statics + interceptors. See `examples/extend`: authorize, reque
 
 ## Examples
 
-- [`examples/crud-app`](examples/crud-app) — golden path. Read `CloseIncident`.
 - [`examples/extend`](examples/extend) — copy-paste interceptors.
 - [`examples/app-template`](examples/app-template) — Astro client + empty hexok backend.

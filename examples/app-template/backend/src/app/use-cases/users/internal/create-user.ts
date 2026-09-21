@@ -38,7 +38,10 @@ export class CreateUser extends InternalUseCase {
     ports,
     errors,
     publish,
-  }: ExecuteCtx<typeof CreateUser>) {
+      ctx,
+  }: ExecuteCtx<typeof CreateUser, {notReal:number}>) {
+    console.log(ctx.notReal) // this won't exist downstream in the api impl/wiring and we won't get any type errors anywhere
+
     const existingUser = await ports.users.get(input.id);
     if (existingUser) throw errors.USER_EXISTS();
 

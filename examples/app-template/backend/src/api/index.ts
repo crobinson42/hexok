@@ -13,6 +13,7 @@ import { PasswordHasher } from '../app/ports/utilities/password-hasher.js';
 import { useCases } from '../app/use-cases/index.js';
 import { DomainEvents } from '../domain/events/domain/catalog.js';
 import type { Actor } from '../domain/schemas/actor.js';
+import { hmacAuthToken } from '../infra/auth-token/index.js';
 import {
   type ClientConnection,
   WebSocketChannel,
@@ -28,10 +29,10 @@ import {
   memoryUsers,
   stubEmail,
   stubPasswordHasher,
-  stubToken,
 } from './stubs.js';
 import { acceptClient } from './ws.js';
 
+export { HmacAuthToken, hmacAuthToken } from '../infra/auth-token/index.js';
 export type { ClientConnection } from '../infra/client-event-bus/index.js';
 export { WebSocketChannel } from '../infra/client-event-bus/index.js';
 export { createHandler, publicRoutes } from './http.js';
@@ -46,7 +47,7 @@ export {
 export { acceptClient, tokenFromRequest } from './ws.js';
 
 export function createApi() {
-  const token = stubToken();
+  const token = hmacAuthToken.create('app-template-dev-secret');
   const clientBus = InMemoryBus.create();
   const presence = WebSocketChannel.create<Actor>();
   const app = App.from(useCases)
@@ -73,6 +74,7 @@ export function createApi() {
     app,
     fetch: createHandler(app),
     clientBus,
+    token,
     accept: (connection: ClientConnection, request: Request) =>
       acceptClient(connection, request, token, app.channels.client),
   };

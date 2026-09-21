@@ -3,6 +3,8 @@ export {
   type ClientConnection,
   createApi,
   createHandler,
+  HmacAuthToken,
+  hmacAuthToken,
   publicRoutes,
   tokenFromRequest,
   WebSocketChannel,

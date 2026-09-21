@@ -2,7 +2,6 @@
   "files": [],
   "references": [
     { "path": "packages/hexok" },
-    { "path": "examples/crud-app" },
     { "path": "examples/extend" },
     { "path": "examples/app-template/backend" }
   ]

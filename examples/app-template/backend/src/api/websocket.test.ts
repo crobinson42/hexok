@@ -5,7 +5,6 @@ import {
   WebSocketChannel,
 } from '../infra/client-event-bus/index.js';
 import { createApi } from './index.js';
-import { stubToken } from './stubs.js';
 
 function fakeSocket() {
   const listeners = new Set<() => void>();
@@ -59,7 +58,7 @@ describe('createApi websockets', () => {
   });
 
   it('pushes client events from use-cases', async () => {
-    const { app, accept, clientBus } = createApi();
+    const { app, accept, clientBus, token } = createApi();
     await app.start();
     const registered = await app.local.organization.register({
       organization: { id: 'org-1', name: 'Acme' },
@@ -70,19 +69,19 @@ describe('createApi websockets', () => {
       },
     });
 
-    const token = await stubToken().issue(actor);
+    const memberToken = await token.issue(actor);
     const member = fakeSocket();
     const outsider = fakeSocket();
     await accept(
       member,
       new Request('http://app/ws', {
-        headers: { authorization: `Bearer ${token}` },
+        headers: { authorization: `Bearer ${memberToken}` },
       }),
     );
     await accept(
       outsider,
       new Request(
-        `http://app/ws?token=${await stubToken().issue({
+        `http://app/ws?token=${await token.issue({
           type: 'user',
           userId: 'u2',
           organizationIds: ['org-2'],

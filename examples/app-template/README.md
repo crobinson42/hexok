@@ -1,7 +1,3 @@
 # App template
 
-Astro client + empty hexok backend. Scaffold only.
-
-```bash
-npm run dev -w @hexok/app-template
-```
+A well structured backend project that uses hexok framework.

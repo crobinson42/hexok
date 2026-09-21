@@ -11,7 +11,6 @@
   "baseBranch": "main",
   "updateInternalDependencies": "patch",
   "ignore": [
-    "@hexok/crud-app",
     "@hexok/extend",
     "@hexok/docs",
     "@hexok/app-template"

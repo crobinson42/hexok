@@ -1,17 +1,17 @@
-import { type ExecuteCtx, ExternalUseCase } from 'hexok/app';
+import type { ExecuteCtx } from 'hexok/app';
 import { z } from 'zod';
 import { ApiKeyDeleted } from '../../../domain/events/domain/api-key.js';
 import { DomainEvents } from '../../../domain/events/domain/catalog.js';
 import { requireUser } from '../../auth.js';
-import type { AppContext } from '../../context.js';
 import { AuthErrors } from '../../errors.js';
 import {
   ApiKeyDeleted as ApiKeyDeletedClient,
   ClientEvents,
 } from '../../events/client/catalog.js';
+import { UserUseCase } from '../../guards.js';
 import { ApiKeyRepository } from '../../ports/repos/api-keys.js';
 
-export class DeleteApiKey extends ExternalUseCase {
+export class DeleteApiKey extends UserUseCase {
   static readonly key = 'apiKey.delete';
 
   static input = z.object({
@@ -39,7 +39,7 @@ export class DeleteApiKey extends ExternalUseCase {
     errors,
     publish,
     ctx,
-  }: ExecuteCtx<typeof DeleteApiKey, AppContext>) {
+  }: ExecuteCtx<typeof DeleteApiKey>) {
     const apiKey = await ports.apiKeys.get(input.id);
     if (!apiKey) throw errors.API_KEY_NOT_FOUND();
 

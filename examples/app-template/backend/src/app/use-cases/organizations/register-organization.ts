@@ -1,4 +1,4 @@
-import { type ExecuteCtx, ExternalUseCase } from 'hexok/app';
+import type { ExecuteCtx } from 'hexok/app';
 import { z } from 'zod';
 import {
   Organization,
@@ -6,10 +6,11 @@ import {
 } from '../../../domain/entities/organization.js';
 import { DomainEvents } from '../../../domain/events/domain/catalog.js';
 import { OrganizationCreated } from '../../../domain/events/domain/organization.js';
+import { PublicUseCase } from '../../guards.js';
 import { OrganizationRepository } from '../../ports/repos/organizations.js';
 import { CreateUser } from '../users/internal/create-user.js';
 
-export class RegisterOrganization extends ExternalUseCase {
+export class RegisterOrganization extends PublicUseCase {
   static readonly key = 'organization.register';
 
   static input = z.object({

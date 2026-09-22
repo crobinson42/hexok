@@ -1,4 +1,4 @@
-import { type ExecuteCtx, ExternalUseCase } from 'hexok/app';
+import type { ExecuteCtx } from 'hexok/app';
 import { z } from 'zod';
 import {
   UserCredentials,
@@ -7,10 +7,11 @@ import {
 import { DomainEvents } from '../../../domain/events/domain/catalog.js';
 import { UserCredentialsCreated } from '../../../domain/events/domain/user-credentials.js';
 import { UserErrors } from '../../errors.js';
+import { PublicUseCase } from '../../guards.js';
 import { UserCredentialsRepository } from '../../ports/repos/user-credentials.js';
 import { UserRepository } from '../../ports/repos/users.js';
 
-export class SetupUserCredentials extends ExternalUseCase {
+export class SetupUserCredentials extends PublicUseCase {
   static readonly key = 'user.setupCredentials';
 
   static input = z.object({

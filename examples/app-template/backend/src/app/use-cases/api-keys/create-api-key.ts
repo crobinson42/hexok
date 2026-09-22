@@ -1,19 +1,19 @@
-import { type ExecuteCtx, ExternalUseCase } from 'hexok/app';
+import type { ExecuteCtx } from 'hexok/app';
 import { z } from 'zod';
 import { ApiKey, apiKeySchema } from '../../../domain/entities/api-key.js';
 import { ApiKeyCreated } from '../../../domain/events/domain/api-key.js';
 import { DomainEvents } from '../../../domain/events/domain/catalog.js';
 import { requireUser } from '../../auth.js';
-import type { AppContext } from '../../context.js';
 import { AuthErrors, UserErrors } from '../../errors.js';
 import {
   ApiKeyCreated as ApiKeyCreatedClient,
   ClientEvents,
 } from '../../events/client/catalog.js';
+import { UserUseCase } from '../../guards.js';
 import { ApiKeyRepository } from '../../ports/repos/api-keys.js';
 import { UserRepository } from '../../ports/repos/users.js';
 
-export class CreateApiKey extends ExternalUseCase {
+export class CreateApiKey extends UserUseCase {
   static readonly key = 'apiKey.create';
 
   static input = z.object({
@@ -45,7 +45,7 @@ export class CreateApiKey extends ExternalUseCase {
     errors,
     publish,
     ctx,
-  }: ExecuteCtx<typeof CreateApiKey, AppContext>) {
+  }: ExecuteCtx<typeof CreateApiKey>) {
     requireUser(ctx, input.userId, errors);
 
     const user = await ports.users.get(input.userId);

@@ -8,6 +8,7 @@ import type {
   EventPayload,
 } from '../domain/index.js';
 import type { ChannelProps } from './event-channel.js';
+import type { DefinedGuard } from './guard.js';
 import type {
   CallableUseCaseCtor,
   ErrorFactories,
@@ -40,8 +41,70 @@ export type Run = <U extends CallableUseCaseCtor>(
   input: Infer<U['input']>,
 ) => Promise<Infer<U['output']>>;
 
-/** Argument to `ExternalUseCase.execute` and `InternalUseCase.execute`. Typed from the subclass statics. */
-export type ExecuteCtx<C, Ctx = unknown> = {
+type ContextOf<C> = C extends { context: infer Ctx } ? Ctx : unknown;
+
+type KeyOf<C> = C extends { key: infer K extends string }
+  ? string extends K
+    ? 'unknown'
+    : K
+  : 'unknown';
+
+type GuardsOf<C> = C extends { guards: infer G extends readonly unknown[] }
+  ? G
+  : readonly [];
+
+type GuardMismatch<C> =
+  `hexok: "${KeyOf<C>}" guard InCtx does not accept accumulated ctx`;
+
+/** `unknown` and only `unknown` — the no-`declare static context` start. */
+type IsUnknown<T> = [unknown] extends [T]
+  ? [T] extends [unknown]
+    ? true
+    : false
+  : false;
+
+/** Branded guards only. Unbranded literals keep `Acc` (they do not narrow). */
+type WalkGuards<Guards, Acc, C> = [Guards] extends [
+  readonly [infer Head, ...infer Tail],
+]
+  ? Head extends DefinedGuard<infer In, infer Out>
+    ? [Acc] extends [In]
+      ? WalkGuards<Tail, Out, C>
+      : IsUnknown<Acc> extends true
+        ? WalkGuards<Tail, Out, C>
+        : GuardMismatch<C>
+    : WalkGuards<Tail, Acc, C>
+  : Acc;
+
+type GuardChain<C> = WalkGuards<GuardsOf<C>, ContextOf<C>, C>;
+
+type MutuallyAssignable<A, B> = [A] extends [B]
+  ? [B] extends [A]
+    ? true
+    : false
+  : false;
+
+type DeclaredMismatch<C> =
+  `hexok: "${KeyOf<C>}" declared context does not match guard OutCtx`;
+
+/**
+ * Last branded `OutCtx`, or `declare static context` when it matches that Out.
+ * A chain `In` mismatch or a declared/Out mismatch replaces `ctx` with a `hexok:` string.
+ * Otherwise `unknown` when nothing narrows.
+ */
+type DefaultCtx<C> =
+  GuardChain<C> extends infer Walked
+    ? [Walked] extends [`hexok: ${string}`]
+      ? Walked
+      : C extends { context: infer Declared }
+        ? MutuallyAssignable<Declared, Walked> extends true
+          ? Declared
+          : DeclaredMismatch<C>
+        : Walked
+    : never;
+
+/** Argument to `ExternalUseCase.execute` and `InternalUseCase.execute`. Typed from the subclass statics. `ctx` is `declare static context` when it matches the last `defineGuard` `OutCtx`, else that `OutCtx`, else `unknown`. */
+export type ExecuteCtx<C> = {
   /** Validated `static input`. */
   input: C extends { input: infer S extends StandardSchemaV1 }
     ? Infer<S>
@@ -50,8 +113,8 @@ export type ExecuteCtx<C, Ctx = unknown> = {
   ports: C extends { ports: infer P }
     ? ResolvedPorts<P>
     : Record<string, never>;
-  /** App request context from `App.ctx` or the caller. */
-  ctx: Ctx;
+  /** Post-guard request context. Inbound ctx is `App.ctx` / per-call `{ ctx }`. */
+  ctx: DefaultCtx<C>;
   /** Factories from `static errors`. Throw `errors.NOT_FOUND()`. */
   errors: C extends { errors: infer E }
     ? ErrorFactories<E>
@@ -93,8 +156,8 @@ type CatalogCtxOf<C> = C extends {
   ? Ctx
   : unknown;
 
-/** Argument to `EventUseCase.execute`. Typed from the subclass statics. */
-export type EventCtx<C, Ctx = unknown> = {
+/** Argument to `EventUseCase.execute`. Typed from the subclass statics. `ctx` is `declare static context` when it matches the last `defineGuard` `OutCtx`, else that `OutCtx`, else `unknown`. */
+export type EventCtx<C> = {
   /** Envelope for `static on`, including payload and catalog metadata. */
   event: Envelope<
     EventOn<C>['key'] extends infer N extends string ? N : string,
@@ -107,8 +170,8 @@ export type EventCtx<C, Ctx = unknown> = {
   ports: C extends { ports: infer P }
     ? ResolvedPorts<P>
     : Record<string, never>;
-  /** App request context from `App.ctx` or the caller. */
-  ctx: Ctx;
+  /** Post-guard request context. Inbound ctx is `App.ctx` / per-call `{ ctx }`. */
+  ctx: DefaultCtx<C>;
   /** Factories from `static errors`. Throw `errors.NOT_FOUND()`. */
   errors: C extends { errors: infer E }
     ? ErrorFactories<E>

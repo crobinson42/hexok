@@ -1,4 +1,4 @@
-import type { UseCaseBag } from '../app/index.js';
+import type { DefinedGuard, UseCaseBag } from '../app/index.js';
 import type { EventCatalog } from '../domain/index.js';
 
 export type RequiredPorts<Bag extends UseCaseBag, Routed = never> =
@@ -190,6 +190,52 @@ export type MissingMessages<
   | MissingPortMessages<Bag, Provided, Routed>
   | MissingCatalogMessages<Bag, Bound, Routed>
   | MissingChannelMessages<Bag, Routed>;
+
+type UseCaseKey<C> = C extends { key: infer K extends string }
+  ? string extends K
+    ? 'unknown'
+    : K
+  : 'unknown';
+
+type WalkAppGuards<Guards, Acc, Key extends string> = [Guards] extends [
+  readonly [infer Head, ...infer Tail],
+]
+  ? Head extends DefinedGuard<infer In, infer Out>
+    ? [Acc] extends [In]
+      ? WalkAppGuards<Tail, Out, Key>
+      : `hexok: "${Key}" app context is not assignable to guard InCtx`
+    : WalkAppGuards<Tail, Acc, Key>
+  : never;
+
+type GuardInCtxMessageFor<C, AppCtx> = C extends {
+  trigger: 'external';
+  guards: infer G;
+}
+  ? WalkAppGuards<G, AppCtx, UseCaseKey<C>>
+  : C extends {
+        trigger: 'event';
+        guards: infer G extends readonly unknown[];
+      }
+    ? undefined extends G
+      ? never
+      : WalkAppGuards<G, AppCtx, UseCaseKey<C>>
+    : never;
+
+/** Compile-time type of `build` when builder `Ctx` is not assignable to a branded guard `InCtx`. */
+export type GuardInCtxMessages<Bag, Ctx> = {
+  [K in keyof Bag]: GuardInCtxMessageFor<Bag[K], Ctx>;
+}[keyof Bag];
+
+/** Port/catalog/channel gaps plus branded-guard `InCtx` mismatches. */
+export type BuildMessages<
+  Bag extends UseCaseBag,
+  Provided,
+  Bound,
+  Routed,
+  Ctx,
+> =
+  | MissingMessages<Bag, Provided, Bound, Routed>
+  | GuardInCtxMessages<Bag, Ctx>;
 
 /** Compile-time error when `provide` is called twice for the same token. */
 export type DuplicatePortError = `hexok: port already provided`;

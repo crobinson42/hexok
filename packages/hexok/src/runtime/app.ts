@@ -37,11 +37,11 @@ import {
 } from './channel.js';
 import type { NestedClient } from './client.js';
 import type {
+  BuildMessages,
   ChannelKindError,
   DuplicateCatalogError,
   DuplicateChannelError,
   DuplicatePortError,
-  MissingMessages,
 } from './completeness.js';
 import { startHandlers, stopAdapters } from './events.js';
 import { createFetchHandler } from './http.js';
@@ -296,16 +296,19 @@ export class AppBuilder<
 
   /**
    * Complete the graph. Incomplete builders expose `build` as the missing
-   * port/catalog message (not callable). Runtime throws the same sentences.
+   * port/catalog/channel or branded-guard InCtx message (not callable).
+   * Runtime throws the port/catalog/channel/guards sentences.
    */
-  get build(): [MissingMessages<Bag, Provided, Bound, Routed>] extends [never]
+  get build(): [BuildMessages<Bag, Provided, Bound, Routed, Ctx>] extends [
+    never,
+  ]
     ? () => AppInstance<Bag, Ctx, Routed>
-    : MissingMessages<Bag, Provided, Bound, Routed> {
+    : BuildMessages<Bag, Provided, Bound, Routed, Ctx> {
     return (() => this.#build()) as unknown as [
-      MissingMessages<Bag, Provided, Bound, Routed>,
+      BuildMessages<Bag, Provided, Bound, Routed, Ctx>,
     ] extends [never]
       ? () => AppInstance<Bag, Ctx, Routed>
-      : MissingMessages<Bag, Provided, Bound, Routed>;
+      : BuildMessages<Bag, Provided, Bound, Routed, Ctx>;
   }
 
   #build(): AppInstance<Bag, Ctx, Routed> {
@@ -497,6 +500,36 @@ export class AppBuilder<
         );
       }
     }
+
+    for (const ctor of Object.values(this.#useCases) as UseCaseClass[]) {
+      if (isExternalUseCase(ctor)) {
+        if (ctor.guards === undefined) {
+          throw new Error(
+            `hexok: ExternalUseCase "${ctor.key}" is missing static guards`,
+          );
+        }
+        assertUniqueGuardKeys('ExternalUseCase', ctor.key, ctor.guards);
+      }
+      if (isEventUseCase(ctor) && ctor.guards !== undefined) {
+        assertUniqueGuardKeys('EventUseCase', ctor.key, ctor.guards);
+      }
+    }
+  }
+}
+
+function assertUniqueGuardKeys(
+  kind: 'ExternalUseCase' | 'EventUseCase',
+  key: string,
+  guards: readonly { key: string }[],
+): void {
+  const seen = new Set<string>();
+  for (const guard of guards) {
+    if (seen.has(guard.key)) {
+      throw new Error(
+        `hexok: ${kind} "${key}" has duplicate guard key "${guard.key}"`,
+      );
+    }
+    seen.add(guard.key);
   }
 }
 

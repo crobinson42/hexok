@@ -1,14 +1,14 @@
-import { type ExecuteCtx, ExternalUseCase } from 'hexok/app';
+import type { ExecuteCtx } from 'hexok/app';
 import { z } from 'zod';
 import { userCredentialsSchema } from '../../../domain/entities/user-credentials.js';
 import { DomainEvents } from '../../../domain/events/domain/catalog.js';
 import { UserCredentialsUpdated } from '../../../domain/events/domain/user-credentials.js';
 import { requireUser } from '../../auth.js';
-import type { AppContext } from '../../context.js';
 import { AuthErrors } from '../../errors.js';
+import { UserUseCase } from '../../guards.js';
 import { UserCredentialsRepository } from '../../ports/repos/user-credentials.js';
 
-export class UpdateUserCredentials extends ExternalUseCase {
+export class UpdateUserCredentials extends UserUseCase {
   static readonly key = 'user.updateCredentials';
 
   static input = z.object({
@@ -35,7 +35,7 @@ export class UpdateUserCredentials extends ExternalUseCase {
     errors,
     publish,
     ctx,
-  }: ExecuteCtx<typeof UpdateUserCredentials, AppContext>) {
+  }: ExecuteCtx<typeof UpdateUserCredentials>) {
     requireUser(ctx, input.userId, errors);
 
     const credentials = await ports.userCredentials.getByUserId(input.userId);

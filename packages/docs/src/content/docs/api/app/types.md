@@ -1,6 +1,6 @@
 ---
 title: Types
-description: Constructor shapes, guards, and error factories for use cases.
+description: Constructor shapes, type predicates, and error factories for use cases.
 sidebar:
   order: 6
 ---
@@ -26,9 +26,9 @@ import {
 } from 'hexok/app'
 ```
 
-Helpers for composition: constructor shapes, `isExternalUseCase`-style guards, and `errorFactories`. `App.from` uses them to report missing statics as a `hexok:` sentence. Subclass `ExternalUseCase`, `InternalUseCase`, or `EventUseCase` — these types are for the compiler and the runtime.
+Helpers for composition: constructor shapes, `isExternalUseCase`-style type predicates, and `errorFactories`. `App.from` uses them to report missing statics as a `hexok:` sentence. Subclass `ExternalUseCase`, `InternalUseCase`, or `EventUseCase` — these types are for the compiler and the runtime. Identity gates are [Guards](/hexok/api/app/guards/), not these predicates.
 
-## Guards
+## Type predicates
 
 | Name | Notes |
 | --- | --- |
@@ -70,6 +70,7 @@ throw errors.NOT_FOUND()
 
 ## Related
 
+- [Guard](/hexok/api/app/guards/)
 - [ExternalUseCase](/hexok/api/app/external-use-case/)
 - [InternalUseCase](/hexok/api/app/internal-use-case/)
 - [EventUseCase](/hexok/api/app/event-use-case/)

@@ -5,7 +5,6 @@ export {
   createHandler,
   HmacAuthToken,
   hmacAuthToken,
-  publicRoutes,
   tokenFromRequest,
   WebSocketChannel,
 } from './api/index.js';

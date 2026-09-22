@@ -1,6 +1,8 @@
 import { describe, expect, expectTypeOf, it } from 'vitest';
+import { z } from 'zod';
+import { defineGuard, ExternalUseCase } from '../app/index.js';
 import { Entity, Port } from '../domain/index.js';
-import { TestAppBuilder, type TestAppInstance } from './app-test.js';
+import { App, TestAppBuilder, type TestAppInstance } from './app-test.js';
 import { InMemoryQueue } from './in-memory-queue.js';
 import { InMemoryRepository } from './in-memory-repository.js';
 
@@ -181,6 +183,32 @@ describe('TestAppBuilder', () => {
       new TestAppBuilder(null as never, []);
     };
     void _typeChecks;
+  });
+
+  it('types build as a hexok sentence when ctx is not assignable to branded InCtx', () => {
+    const needsSession = defineGuard<{ sessionId: string }, { actor: string }>({
+      key: 'session',
+      allow() {},
+    });
+    class NeedsSession extends ExternalUseCase {
+      static readonly key = 'ping.session';
+      static readonly input = z.object({});
+      static readonly output = z.object({});
+      static readonly errors = {} as const;
+      static readonly ports = {};
+      static readonly guards = [needsSession] as const;
+      async execute() {
+        return {};
+      }
+    }
+    expectTypeOf(
+      App.test({ ping: NeedsSession }).ctx({ notReal: 1 }).build,
+    ).toEqualTypeOf<`hexok: "ping.session" app context is not assignable to guard InCtx`>();
+    expectTypeOf(
+      App.test({ ping: NeedsSession }).ctx<{ sessionId: string }>({
+        sessionId: 's',
+      }).build,
+    ).toBeFunction();
   });
 });
 

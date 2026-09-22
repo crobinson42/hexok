@@ -1,11 +1,12 @@
-import { type ExecuteCtx, ExternalUseCase } from 'hexok/app';
+import type { ExecuteCtx } from 'hexok/app';
 import { z } from 'zod';
 import { actorSchema } from '../../../domain/schemas/actor.js';
 import { InvalidCredentials } from '../../errors.js';
+import { PublicUseCase } from '../../guards.js';
 import { ApiKeyRepository } from '../../ports/repos/api-keys.js';
 import { AuthTokenService } from '../../ports/services/auth-token.js';
 
-export class AuthenticateApiKey extends ExternalUseCase {
+export class AuthenticateApiKey extends PublicUseCase {
   static readonly key = 'auth.authenticateApiKey';
 
   static input = z.object({

@@ -5,10 +5,12 @@ export type {
 } from './channel.js';
 export type { NestedClient } from './client.js';
 export type {
+  BuildMessages,
   ChannelKindError,
   DuplicateCatalogError,
   DuplicateChannelError,
   DuplicatePortError,
+  GuardInCtxMessages,
   MissingMessages,
 } from './completeness.js';
 export { wrapEvent } from './envelope.js';

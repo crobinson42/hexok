@@ -12,6 +12,7 @@ import { errorFactories } from './error-factory.js';
 import { EventUseCase } from './event-use-case.js';
 import type { EventCtx, ExecuteCtx, Publish } from './execute-ctx.js';
 import { ExternalUseCase } from './external-use-case.js';
+import { defineGuard } from './guard.js';
 import { InternalUseCase } from './internal-use-case.js';
 import { type CheckUseCase, isInternalUseCase } from './types.js';
 
@@ -59,6 +60,7 @@ class CloseIncident extends ExternalUseCase {
     incidents: IncidentRepository,
     clock: Clock,
   };
+  static readonly guards = [] as const;
   static readonly publishes = [DomainEvents] as const;
 
   async execute({
@@ -143,6 +145,7 @@ class StampTime extends ExternalUseCase {
   static readonly output = z.object({ now: z.date() });
   static readonly errors = {} as const;
   static readonly ports = { clock: Clock };
+  static readonly guards = [] as const;
   async execute({ ports }: ExecuteCtx<typeof StampTime>) {
     return { now: ports.clock.now() };
   }
@@ -155,6 +158,7 @@ class EmptyPublishes extends ExternalUseCase {
   static readonly errors = {} as const;
   static readonly ports = { clock: Clock };
   static readonly publishes = [] as const;
+  static readonly guards = [] as const;
   async execute() {
     return {};
   }
@@ -231,6 +235,12 @@ describe('CheckUseCase', () => {
     expectTypeOf<
       CheckUseCase<typeof LeftoverApi>
     >().toEqualTypeOf<`hexok: ApiUseCase was renamed to ExternalUseCase; composition-only use cases extend InternalUseCase — delete static internal`>();
+    expectTypeOf<
+      CheckUseCase<typeof MissingGuards>
+    >().toEqualTypeOf<`hexok: ExternalUseCase "missing.guards" is missing static guards`>();
+    expectTypeOf<
+      CheckUseCase<typeof WideGuards>
+    >().toEqualTypeOf<`hexok: ExternalUseCase "wide.guards" static guards must be \`as const\``>();
   });
 
   it('rejects static on that is not in the catalog Events', () => {
@@ -309,6 +319,224 @@ describe('ExecuteCtx', () => {
     };
     void _runTypes;
   });
+
+  it('defaults ctx to unknown when guards are empty', () => {
+    expectTypeOf<
+      ExecuteCtx<typeof CloseIncident>['ctx']
+    >().toEqualTypeOf<unknown>();
+  });
+
+  it('does not narrow ctx from an unbranded guard literal', () => {
+    class Open extends ExternalUseCase {
+      static readonly key = 'ctx.unbranded';
+      static readonly input = z.object({});
+      static readonly output = z.object({});
+      static readonly errors = {} as const;
+      static readonly ports = { clock: Clock };
+      static readonly guards = [{ key: 'open', allow() {} }] as const;
+      async execute() {
+        return {};
+      }
+    }
+    expectTypeOf<ExecuteCtx<typeof Open>['ctx']>().toEqualTypeOf<unknown>();
+  });
+
+  it('narrows ctx to last Out when first In is stricter than unknown', () => {
+    const lift = defineGuard<{ sessionId: string }, { actor: string }>({
+      key: 'lift',
+      allow() {},
+    });
+    class Lift extends ExternalUseCase {
+      static readonly key = 'ctx.lift';
+      static readonly input = z.object({});
+      static readonly output = z.object({});
+      static readonly errors = {} as const;
+      static readonly ports = { clock: Clock };
+      static readonly guards = [lift] as const;
+      async execute() {
+        return {};
+      }
+    }
+    expectTypeOf<ExecuteCtx<typeof Lift>['ctx']>().toEqualTypeOf<{
+      actor: string;
+    }>();
+  });
+
+  it('narrows ctx to the last defineGuard OutCtx', () => {
+    const authed = defineGuard<unknown, { actor: string }>({
+      key: 'authed',
+      allow() {},
+    });
+    const open = { key: 'open', allow() {} };
+    const withRole = defineGuard<
+      { actor: string },
+      { actor: string; role: string }
+    >({
+      key: 'role',
+      allow() {},
+    });
+    class Chained extends ExternalUseCase {
+      static readonly key = 'ctx.chained';
+      static readonly input = z.object({});
+      static readonly output = z.object({});
+      static readonly errors = {} as const;
+      static readonly ports = { clock: Clock };
+      static readonly guards = [authed, open, withRole] as const;
+      async execute() {
+        return {};
+      }
+    }
+    expectTypeOf<ExecuteCtx<typeof Chained>['ctx']>().toEqualTypeOf<{
+      actor: string;
+      role: string;
+    }>();
+  });
+
+  it('types ctx as declared context when it matches the last OutCtx', () => {
+    const authed = defineGuard<unknown, { actor: string }>({
+      key: 'authed',
+      allow() {},
+    });
+    abstract class WithActor extends ExternalUseCase {
+      declare static context: { actor: string };
+    }
+    class Sub extends WithActor {
+      static readonly key = 'ctx.declared.match';
+      static readonly input = z.object({});
+      static readonly output = z.object({});
+      static readonly errors = {} as const;
+      static readonly ports = { clock: Clock };
+      static readonly guards = [authed] as const;
+      async execute() {
+        return {};
+      }
+    }
+    expectTypeOf<ExecuteCtx<typeof Sub>['ctx']>().toEqualTypeOf<{
+      actor: string;
+    }>();
+  });
+
+  it('puts a declared-context / OutCtx mismatch on ctx as a hexok string', () => {
+    const widened = defineGuard<
+      { actor: string },
+      { actor: string; extra: true }
+    >({
+      key: 'widen',
+      allow() {},
+    });
+    abstract class WithActor extends ExternalUseCase {
+      declare static context: { actor: string };
+    }
+    class Sub extends WithActor {
+      static readonly key = 'ctx.declared.mismatch';
+      static readonly input = z.object({});
+      static readonly output = z.object({});
+      static readonly errors = {} as const;
+      static readonly ports = { clock: Clock };
+      static readonly guards = [widened] as const;
+      async execute() {
+        return {};
+      }
+    }
+    expectTypeOf<
+      ExecuteCtx<typeof Sub>['ctx']
+    >().toEqualTypeOf<`hexok: "ctx.declared.mismatch" declared context does not match guard OutCtx`>();
+    expectTypeOf<CheckUseCase<typeof Sub>>().toEqualTypeOf<typeof Sub>();
+  });
+
+  it('does not let unbranded guards disturb declare static context', () => {
+    const authenticated = { key: 'authenticated', allow() {} };
+    abstract class WithActor extends ExternalUseCase {
+      declare static context: { actor: string };
+    }
+    class Sub extends WithActor {
+      static readonly key = 'ctx.unbranded.declared';
+      static readonly input = z.object({});
+      static readonly output = z.object({});
+      static readonly errors = {} as const;
+      static readonly ports = { clock: Clock };
+      static readonly guards = [authenticated] as const;
+      async execute() {
+        return {};
+      }
+    }
+    expectTypeOf<ExecuteCtx<typeof Sub>['ctx']>().toEqualTypeOf<{
+      actor: string;
+    }>();
+  });
+
+  it('puts a guard chain mismatch on ctx as a hexok string, not CheckUseCase', () => {
+    const authed = defineGuard<unknown, { actor: string }>({
+      key: 'authed',
+      allow() {},
+    });
+    const needsId = defineGuard<{ actor: string; id: string }>({
+      key: 'needs-id',
+      allow() {},
+    });
+    class Broken extends ExternalUseCase {
+      static readonly key = 'ctx.mismatch';
+      static readonly input = z.object({});
+      static readonly output = z.object({});
+      static readonly errors = {} as const;
+      static readonly ports = { clock: Clock };
+      static readonly guards = [authed, needsId] as const;
+      async execute() {
+        return {};
+      }
+    }
+    expectTypeOf<
+      ExecuteCtx<typeof Broken>['ctx']
+    >().toEqualTypeOf<`hexok: "ctx.mismatch" guard InCtx does not accept accumulated ctx`>();
+    expectTypeOf<CheckUseCase<typeof Broken>>().toEqualTypeOf<typeof Broken>();
+  });
+
+  it('narrows EventCtx the same way', () => {
+    const authed = defineGuard<unknown, { actor: string }>({
+      key: 'authed',
+      allow() {},
+    });
+    class OnAuthed extends EventUseCase {
+      static readonly key = 'ctx.event';
+      static readonly on = IncidentClosed;
+      static readonly catalog = DomainEvents;
+      static readonly guards = [authed] as const;
+      async execute(): Promise<void> {}
+    }
+    expectTypeOf<EventCtx<typeof OnAuthed>['ctx']>().toEqualTypeOf<{
+      actor: string;
+    }>();
+  });
+
+  it('types ctx from inherited declare static context', () => {
+    abstract class WithActor extends ExternalUseCase {
+      declare static context: { actor: string };
+    }
+    class Sub extends WithActor {
+      static readonly key = 'ctx.inherited';
+      static readonly input = z.object({});
+      static readonly output = z.object({});
+      static readonly errors = {} as const;
+      static readonly ports = { clock: Clock };
+      static readonly guards = [] as const;
+      async execute() {
+        return {};
+      }
+    }
+    expectTypeOf<ExecuteCtx<typeof Sub>['ctx']>().toEqualTypeOf<{
+      actor: string;
+    }>();
+  });
+
+  it('rejects a second generic on ExecuteCtx and EventCtx', () => {
+    const _typeChecks = () => {
+      // @ts-expect-error ExecuteCtx takes one type argument
+      null as unknown as ExecuteCtx<typeof CloseIncident, { notReal: number }>;
+      // @ts-expect-error EventCtx takes one type argument
+      null as unknown as EventCtx<typeof NotifyOnClose, { notReal: number }>;
+    };
+    void _typeChecks;
+  });
 });
 
 describe('errorFactories', () => {
@@ -367,6 +595,30 @@ class DeadInternal extends ExternalUseCase {
   static readonly output = z.object({});
   static readonly errors = {} as const;
   static readonly ports = { clock: Clock };
+  static readonly guards = [] as const;
+  async execute() {
+    return {};
+  }
+}
+
+class MissingGuards extends ExternalUseCase {
+  static readonly key = 'missing.guards';
+  static readonly input = z.object({});
+  static readonly output = z.object({});
+  static readonly errors = {} as const;
+  static readonly ports = { clock: Clock };
+  async execute() {
+    return {};
+  }
+}
+
+class WideGuards extends ExternalUseCase {
+  static readonly key = 'wide.guards';
+  static readonly input = z.object({});
+  static readonly output = z.object({});
+  static readonly errors = {} as const;
+  static readonly ports = { clock: Clock };
+  static readonly guards = [{ key: 'x', allow() {} }];
   async execute() {
     return {};
   }

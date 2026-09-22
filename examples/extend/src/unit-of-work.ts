@@ -13,8 +13,8 @@ import {
  * Publish flushes **after** the use-case onion, so a successful commit
  * naturally yields after-commit publish.
  *
- * Register **authorize before** unit of work so a forbidden call never
- * opens a transaction.
+ * Guards run before interceptors, so a forbidden call never opens a
+ * transaction. Authorize-before-unit-of-work is automatic.
  */
 export class UnitOfWorkInterceptor implements Interceptor {
   readonly key = 'unit-of-work';

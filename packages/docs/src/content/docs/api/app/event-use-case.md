@@ -9,7 +9,7 @@ sidebar:
 import { EventUseCase } from 'hexok/app'
 ```
 
-An event use case handles one event from one catalog — notify, update another aggregate, enqueue follow-up work. Handlers subscribe only after `app.start()`. Queue catalogs require `static group`.
+An event use case handles one event from one catalog — notify, update another aggregate, enqueue follow-up work. Handlers subscribe only after `app.start()`. Queue catalogs require `static group`. [Guards](/hexok/api/app/guards/) are optional. Omit them and every delivery runs.
 
 ## Statics
 
@@ -24,6 +24,7 @@ An event use case handles one event from one catalog — notify, update another 
 | `errors` | `ErrorMap?` | Declared refusals. Keys become `errors.CODE()` on `EventCtx`. Defaults to `{}`. |
 | `publishes` | `readonly AnyEventCatalog[]` | Catalogs this handler may `publish` to. Use `as const`. |
 | `channels` | `readonly EventChannelCtor[]` | Channels available as `channels` on event ctx. Use `as const`. |
+| `guards` | `readonly Guard[]?` | Optional. Omitted or empty skips. Use `as const` when set. |
 
 ## Instance
 
@@ -33,6 +34,8 @@ An event use case handles one event from one catalog — notify, update another 
 | `unwrap(result)` | Throws `CodedError` from a fail `Result`. |
 
 Handlers subscribe only after `app.start()`.
+
+When `guards` is set, the context is only `App.ctx()` / `defaultCtx` — never `ctxFrom`, and never the envelope. `app.start()` does not pass `{ ctx }`. `invokeEvent` is not a public per-call API. An HTTP-identity guard such as `authenticated` is almost always wrong here: the default context has no actor, so every delivery is refused.
 
 ## Example
 
@@ -51,6 +54,7 @@ class NotifyOnClose extends EventUseCase {
 
 ## Related
 
+- [Guard](/hexok/api/app/guards/)
 - [EventCtx](/hexok/api/app/execute-ctx/)
 - [DomainEvent](/hexok/api/domain/domain-event/)
 - [EventCatalog](/hexok/api/domain/event-catalog/)

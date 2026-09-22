@@ -1,6 +1,7 @@
 import { describe, expect, expectTypeOf, it } from 'vitest';
 import { z } from 'zod';
 import {
+  defineGuard,
   type EventCtx,
   EventUseCase,
   type ExecuteCtx,
@@ -55,6 +56,7 @@ class CloseIncident extends ExternalUseCase {
     incidents: IncidentRepository,
     clock: Clock,
   };
+  static readonly guards = [] as const;
   static readonly publishes = [DomainEvents] as const;
 
   async execute({
@@ -113,6 +115,7 @@ class StampTime extends ExternalUseCase {
   static readonly output = z.object({ now: z.date() });
   static readonly errors = {} as const;
   static readonly ports = { clock: Clock };
+  static readonly guards = [] as const;
 
   async execute({ ports }: ExecuteCtx<typeof StampTime>) {
     return { now: ports.clock.now() };
@@ -183,6 +186,75 @@ describe('App completeness', () => {
       DuplicateCatalogError<'domain'>
     >().toEqualTypeOf<`hexok: catalog "domain" already bound`>();
   });
+
+  it('types build as a hexok sentence when ctx is not assignable to branded InCtx', () => {
+    const needsSession = defineGuard<{ sessionId: string }, { actor: string }>({
+      key: 'session',
+      allow() {},
+    });
+    class NeedsSession extends ExternalUseCase {
+      static readonly key = 'ping.session';
+      static readonly input = z.object({});
+      static readonly output = z.object({});
+      static readonly errors = {} as const;
+      static readonly ports = {};
+      static readonly guards = [needsSession] as const;
+      async execute() {
+        return {};
+      }
+    }
+    expectTypeOf(
+      App.from({ ping: NeedsSession }).ctx({ notReal: 1 }).build,
+    ).toEqualTypeOf<`hexok: "ping.session" app context is not assignable to guard InCtx`>();
+    expectTypeOf(
+      App.from({ ping: NeedsSession }).build,
+    ).toEqualTypeOf<`hexok: "ping.session" app context is not assignable to guard InCtx`>();
+  });
+
+  it('types build as a function when ctx is assignable to branded InCtx', () => {
+    const needsSession = defineGuard<{ sessionId: string }, { actor: string }>({
+      key: 'session',
+      allow() {},
+    });
+    class NeedsSession extends ExternalUseCase {
+      static readonly key = 'ping.session.ok';
+      static readonly input = z.object({});
+      static readonly output = z.object({});
+      static readonly errors = {} as const;
+      static readonly ports = {};
+      static readonly guards = [needsSession] as const;
+      async execute() {
+        return {};
+      }
+    }
+    expectTypeOf(
+      App.from({ ping: NeedsSession }).ctx<{ sessionId: string }>({
+        sessionId: 's',
+      }).build,
+    ).toBeFunction();
+    expectTypeOf<ExecuteCtx<typeof NeedsSession>['ctx']>().toEqualTypeOf<{
+      actor: string;
+    }>();
+  });
+
+  it('still types build as a function for unbranded-only guards', () => {
+    const open = { key: 'open', allow() {} };
+    class OpenPing extends ExternalUseCase {
+      static readonly key = 'ping.open';
+      static readonly input = z.object({});
+      static readonly output = z.object({});
+      static readonly errors = {} as const;
+      static readonly ports = {};
+      static readonly guards = [open] as const;
+      async execute() {
+        return {};
+      }
+    }
+    expectTypeOf(App.from({ ping: OpenPing }).build).toBeFunction();
+    expectTypeOf(
+      App.from({ ping: OpenPing }).ctx({ notReal: 1 }).build,
+    ).toBeFunction();
+  });
 });
 
 describe('App invoke', () => {
@@ -227,6 +299,7 @@ describe('App invoke', () => {
       static readonly output = z.object({});
       static readonly errors = {} as const;
       static readonly ports = {};
+      static readonly guards = [] as const;
       static readonly publishes = [Notes, ClientNotes] as const;
 
       async execute({ input, publish }: ExecuteCtx<typeof PostNote>) {
@@ -332,6 +405,7 @@ describe('App invoke', () => {
       static readonly output = z.unknown();
       static readonly errors = {} as const;
       static readonly ports = { clock: Clock };
+      static readonly guards = [] as const;
       async execute({ ctx }: ExecuteCtx<typeof EchoCtx>) {
         return ctx;
       }
@@ -364,6 +438,7 @@ describe('App invoke', () => {
       static readonly output = z.unknown();
       static readonly errors = {} as const;
       static readonly ports = { clock: Clock };
+      static readonly guards = [] as const;
       async execute({ ctx }: ExecuteCtx<typeof EchoCtx>) {
         return ctx;
       }

@@ -14,7 +14,7 @@ import {
 } from 'hexok/runtime'
 ```
 
-An interceptor wraps execute, adapters, publish, or dispatch at runtime. Use it for cross-cutting work (auth, unit of work, logging) without putting that in entities or use cases. Register with [`App.intercept`](/hexok/api/runtime/app/). First registered is **outer**. Nested `run` skips `aroundUseCase`. Duplicate `key` throws.
+An interceptor wraps execute, adapters, publish, or dispatch at runtime. Identity and permission gates are [Guards](/hexok/api/app/guards/) on the use case, not interceptors. Use an interceptor for unit of work, request scope, and logging — work that should not live on an entity. Register with [`App.intercept`](/hexok/api/runtime/app/). First registered is **outer**. Nested `run` skips `aroundUseCase`. Duplicate `key` throws. Guards already run before this onion, so a forbidden call never opens a transaction.
 
 ## Interceptor
 
@@ -73,6 +73,7 @@ Throw if a port impl is missing `bindTo` / `fork`. `provide()` calls this when t
 
 ## Related
 
+- [Guard](/hexok/api/app/guards/)
 - [App.intercept](/hexok/api/runtime/app/)
 - [ApiMiddleware](/hexok/api/runtime/middleware/)
 - [Port](/hexok/api/domain/port/)

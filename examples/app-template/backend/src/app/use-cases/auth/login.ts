@@ -1,13 +1,14 @@
-import { type ExecuteCtx, ExternalUseCase } from 'hexok/app';
+import type { ExecuteCtx } from 'hexok/app';
 import { z } from 'zod';
 import { actorSchema } from '../../../domain/schemas/actor.js';
 import { InvalidCredentials } from '../../errors.js';
+import { PublicUseCase } from '../../guards.js';
 import { UserCredentialsRepository } from '../../ports/repos/user-credentials.js';
 import { UserRepository } from '../../ports/repos/users.js';
 import { AuthTokenService } from '../../ports/services/auth-token.js';
 import { PasswordHasher } from '../../ports/utilities/password-hasher.js';
 
-export class Login extends ExternalUseCase {
+export class Login extends PublicUseCase {
   static readonly key = 'auth.login';
 
   static input = z.object({

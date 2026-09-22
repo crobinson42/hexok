@@ -4,18 +4,17 @@ Copy these interceptors. They read **typed fields and interfaces**, never `meta`
 
 ## Order
 
-First registered is **outer**. Register **authorize before unit of work** so a forbidden call never opens a transaction. That rule lives on `Interceptor` JSDoc and here — not folklore.
+Guards run before interceptors, so a forbidden call never opens a transaction. First registered interceptor is **outer**.
 
 ```ts
 App.from(useCases)
-  .intercept(new AuthorizeInterceptor())
   .intercept(new RequestScopeInterceptor())
   .intercept(new UnitOfWorkInterceptor())
 ```
 
-## Authorize
+## Guards
 
-`static policy = 'ledger:charge'` on the use case. Interceptor skips when absent. Requires `ctx.principal.roles` to include the policy or `'admin'`. Uses `errors.FORBIDDEN()` when declared.
+`static readonly guards = [Roles.of('ledger:charge')] as const` on the use case. `Roles.of` requires `ctx.principal.roles` to include the role or `'admin'`. Throws `errors.FORBIDDEN()` when declared, otherwise `CodedError` `FORBIDDEN`. The use case lists the guard — missing policy is not a skip.
 
 ## Request scope
 

@@ -18,11 +18,7 @@ import {
   type ClientConnection,
   WebSocketChannel,
 } from '../infra/client-event-bus/index.js';
-import {
-  contextFromRequest,
-  createHandler,
-  rpcKeyFromRequest,
-} from './http.js';
+import { contextFromRequest, createHandler } from './http.js';
 import {
   memoryApiKeys,
   memoryUserCredentials,
@@ -35,7 +31,7 @@ import { acceptClient } from './ws.js';
 export { HmacAuthToken, hmacAuthToken } from '../infra/auth-token/index.js';
 export type { ClientConnection } from '../infra/client-event-bus/index.js';
 export { WebSocketChannel } from '../infra/client-event-bus/index.js';
-export { createHandler, publicRoutes } from './http.js';
+export { createHandler } from './http.js';
 export {
   memoryApiKeys,
   memoryUserCredentials,
@@ -65,9 +61,7 @@ export function createApi() {
     .bind(ClientEvents, clientBus)
     .route(ClientChannel, presence)
     .ctx<AppContext>({})
-    .ctxFrom(({ request, ctx }) =>
-      contextFromRequest(rpcKeyFromRequest(request), request, token, ctx),
-    )
+    .ctxFrom(({ request, ctx }) => contextFromRequest(request, token, ctx))
     .build();
 
   return {

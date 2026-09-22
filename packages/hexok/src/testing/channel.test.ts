@@ -87,6 +87,7 @@ class PostNote extends ExternalUseCase {
   static readonly output = z.object({});
   static readonly errors = {} as const;
   static readonly ports = {};
+  static readonly guards = [] as const;
   static readonly publishes = [ClientEvents] as const;
 
   async execute({ input, publish }: ExecuteCtx<typeof PostNote>) {
@@ -101,6 +102,7 @@ class KickUser extends ExternalUseCase {
   static readonly output = z.object({});
   static readonly errors = {} as const;
   static readonly ports = {};
+  static readonly guards = [] as const;
   static readonly channels = [ClientChannel] as const;
 
   async execute({ input, channels }: ExecuteCtx<typeof KickUser>) {
@@ -115,6 +117,7 @@ class RefreshUser extends ExternalUseCase {
   static readonly output = z.object({});
   static readonly errors = {} as const;
   static readonly ports = {};
+  static readonly guards = [] as const;
   static readonly channels = [ClientChannel] as const;
 
   async execute({ input, channels }: ExecuteCtx<typeof RefreshUser>) {

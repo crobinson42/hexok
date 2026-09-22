@@ -35,7 +35,7 @@ An event use case handles one event from one catalog — notify, update another 
 
 Handlers subscribe only after `app.start()`.
 
-When `guards` is set, the context is only `App.ctx()` or a per-invoke `{ ctx }` from a custom dispatcher — never `ctxFrom`, and never the envelope. `app.start()` does not pass `{ ctx }`. An HTTP-identity guard such as `authenticated` is almost always wrong here: the default context has no actor, so every delivery is refused.
+When `guards` is set, the context is only `App.ctx()` / `defaultCtx` — never `ctxFrom`, and never the envelope. `app.start()` does not pass `{ ctx }`. `invokeEvent` is not a public per-call API. An HTTP-identity guard such as `authenticated` is almost always wrong here: the default context has no actor, so every delivery is refused.
 
 ## Example
 

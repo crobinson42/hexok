@@ -101,9 +101,9 @@ expect(app.published).toHaveLength(1)
 
 ## Extend
 
-Subclass and typed statics. Who may enter is `static readonly guards` on the use case (`[] as const` is public). Interceptors are unit of work, request scope, and logging — first registered is outer. See `examples/extend`.
+Identity gates are `static readonly guards` on the use case (`[] as const` is public). Interceptors wrap cross-cutting work; first registered is outer. `examples/extend` still shows request-scope and unit-of-work interceptors — not the guard seam.
 
 ## Examples
 
-- [`examples/extend`](examples/extend) — copy-paste interceptors.
+- [`examples/extend`](examples/extend) — request-scope and unit-of-work interceptors.
 - [`examples/app-template`](examples/app-template) — Astro client + empty hexok backend.

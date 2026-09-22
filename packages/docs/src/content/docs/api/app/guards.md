@@ -2,7 +2,7 @@
 title: Guard
 description: Identity gate on a use case. Empty list is public; omitting it fails closed.
 sidebar:
-  order: 3
+  order: 8
 ---
 
 ```ts
@@ -17,7 +17,7 @@ Throw a [`CodedError`](/hexok/api/core/coded-error/) to refuse. Return to allow.
 
 | Member | Notes |
 | --- | --- |
-| `key` | Stable id. A duplicate `key` on one class throws `hexok: … duplicate guard key "…"`. The same key on different use cases is fine. |
+| `key` | Stable id. The same key on different use cases is fine. |
 | `allow(args)` | `void \| Promise<void>`. No ports, no input, no `Request`. |
 
 `GuardArgs`:
@@ -61,13 +61,17 @@ export const Roles = {
 
 ## static guards
 
-Same family as `ports`, `publishes`, and `channels`. The field is optional on the base class and has no initializer, so a subclass that forgets it does not inherit a public array. `CheckUseCase`, `App.from` / `build()`, and invoke all require it on an external use case.
+Same family as `ports`, `publishes`, and `channels`. The field is optional on the base class and has no initializer, so a subclass that forgets it does not inherit a public array.
 
 | Spelling | Result |
 | --- | --- |
 | `static readonly guards = [] as const` | Public. |
-| Field omitted | `hexok: ExternalUseCase "…" is missing static guards` |
-| Wide array, no `as const` | `` hexok: ExternalUseCase "…" static guards must be `as const` `` |
+| Field omitted | Fail closed. |
+| Wide array, no `as const` | `CheckUseCase` diagnostic only: `` hexok: ExternalUseCase "…" static guards must be `as const` ``. `build()` does not throw this. |
+
+Omitting `guards` fails closed. `CheckUseCase` reports it, and `build()` and invoke throw `hexok: ExternalUseCase "…" is missing static guards`.
+
+A duplicate `key` on one class throws `hexok: … duplicate guard key "…"` at `build()` and again at invoke.
 
 A subclass **replaces** the list. Hexok does not merge parent and child (same as `ports`). Spread to extend: `static readonly guards = [...UserUseCase.guards, extra] as const`.
 
@@ -122,7 +126,7 @@ Do not assign `ctx.actor` inside `allow`. Identity comes from `ctxFrom` or per-c
 
 ## Events
 
-On an event handler the list is optional. Omit it, or set `[] as const`, and the handler runs. When the list is present, ctx is only `App.ctx()` or a per-invoke `opts.ctx` — never `ctxFrom`, never the envelope. `app.start()` does not pass `{ ctx }`. An HTTP-identity guard such as `authenticated` on an `EventUseCase` is almost always wrong: an empty default context refuses every delivery.
+On an event handler the list is optional. Omit it, or set `[] as const`, and the handler runs. When the list is present, ctx is only `App.ctx()` / `defaultCtx` — never `ctxFrom`, never the envelope. `app.start()` does not pass `{ ctx }`. `invokeEvent` is not a public per-call API. An HTTP-identity guard such as `authenticated` on an `EventUseCase` is almost always wrong: an empty default context refuses every delivery.
 
 ## No global
 

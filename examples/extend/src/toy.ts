@@ -3,6 +3,7 @@ import type { Infer } from 'hexok/core';
 import type { RequestScoped, Transactional, UnitOfWork } from 'hexok/domain';
 import { DomainEvent, EventCatalog, Port } from 'hexok/domain';
 import { z } from 'zod';
+import { Roles } from './guards.js';
 
 export class LedgerCharged extends DomainEvent {
   static readonly key = 'ledger.charged';
@@ -33,7 +34,6 @@ export const RequestIds = Port.token<RequestIds & RequestScoped<RequestIds>>(
 
 export class Charge extends ExternalUseCase {
   static readonly key = 'ledger.charge';
-  static readonly policy = 'ledger:charge';
   static readonly input = z.object({ amount: z.number() });
   static readonly output = z.object({ balance: z.number(), id: z.string() });
   static readonly errors = {
@@ -41,7 +41,7 @@ export class Charge extends ExternalUseCase {
     INSUFFICIENT: { message: 'Insufficient funds' },
   } as const;
   static readonly ports = { ledger: Ledger, ids: RequestIds };
-  static readonly guards = [] as const;
+  static readonly guards = [Roles.of('ledger:charge')] as const;
   static readonly publishes = [LedgerEvents] as const;
 
   async execute({ input, ports, errors, publish }: ExecuteCtx<typeof Charge>) {

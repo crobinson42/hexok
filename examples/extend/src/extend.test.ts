@@ -1,6 +1,5 @@
 import { App, InMemoryBus } from 'hexok/testing';
 import { describe, expect, it } from 'vitest';
-import { AuthorizeInterceptor } from './authorize.js';
 import type { AppContext } from './context.js';
 import { RequestScopeInterceptor } from './request-scope.js';
 import {
@@ -19,14 +18,13 @@ function build(ledger = new MemoryLedger(100)) {
     .provide(RequestIds, new MemoryIds())
     .bind(LedgerEvents, InMemoryBus.create())
     .ctx<AppContext>({ principal: { roles: ['ledger:charge'] } })
-    .intercept(new AuthorizeInterceptor())
     .intercept(new RequestScopeInterceptor())
     .intercept(new UnitOfWorkInterceptor())
     .build();
 }
 
 describe('extend stack', () => {
-  it('authorize → request-scope → unit-of-work', async () => {
+  it('request-scope → unit-of-work', async () => {
     const app = build();
     const first = await app.local.ledger.charge({ amount: 10 });
     const second = await app.local.ledger.charge({ amount: 10 });
@@ -45,7 +43,6 @@ describe('extend stack', () => {
       .provide(RequestIds, new MemoryIds())
       .bind(LedgerEvents, InMemoryBus.create())
       .ctx<AppContext>({ principal: { roles: [] } })
-      .intercept(new AuthorizeInterceptor())
       .intercept(new RequestScopeInterceptor())
       .intercept(new UnitOfWorkInterceptor())
       .build();

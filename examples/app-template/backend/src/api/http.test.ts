@@ -78,6 +78,7 @@ describe('HTTP auth gates', () => {
 
   it('apiKey.create with no Bearer is 401, not VALIDATION', async () => {
     const { fetch, app } = createApi();
+    await app.start();
     const response = await rpc(fetch, 'apiKey.create', {});
     expect(response.status).toBe(401);
     await expect(response.json()).resolves.toMatchObject({
@@ -89,6 +90,7 @@ describe('HTTP auth gates', () => {
 
   it('empty Bearer on apiKey.create is 401', async () => {
     const { fetch, app } = createApi();
+    await app.start();
     const response = await rpc(fetch, 'apiKey.create', {}, 'Bearer ');
     expect(response.status).toBe(401);
     await expect(response.json()).resolves.toMatchObject({

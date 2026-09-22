@@ -16,7 +16,7 @@ import {
 } from 'hexok/app'
 ```
 
-Execute context is what runtime passes into `execute`: validated input, bound ports, error factories, `publish`, and nested `run`. It is typed from the subclass statics. `ctx` defaults to `declare static context` on the class, otherwise `unknown`. Use cases destructure this bag. Event handlers get `EventCtx` (the envelope plus `attempt`), with the same `ctx` default.
+Execute context is what runtime passes into `execute`: validated input, bound ports, error factories, `publish`, and nested `run`. It is typed from the subclass statics. `ExecuteCtx<C>` and `EventCtx<C>` take one type argument. `ctx` is `declare static context` when it matches the last branded guard `OutCtx`, else that `OutCtx`, else `unknown`. Use cases destructure this bag. Event handlers get `EventCtx` (the envelope plus `attempt`), with the same `ctx` default.
 
 ## ExecuteCtx
 
@@ -26,7 +26,7 @@ Argument to `ExternalUseCase.execute` and `InternalUseCase.execute`.
 | --- | --- |
 | `input` | Validated `static input`. |
 | `ports` | Bound adapters from `static ports`. |
-| `ctx` | Request context. The second generic overrides. Otherwise `declare static context` wins, else the last `defineGuard` `OutCtx`, else `unknown`. See [ctx](#ctx). |
+| `ctx` | Post-guard request context. `declare static context` when it matches the last `defineGuard` `OutCtx`, else that `OutCtx`, else `unknown`. See [ctx](#ctx). |
 | `errors` | Factories from `static errors`. Throw `errors.NOT_FOUND()`. |
 | `signal` | Abort signal for this invocation. |
 | `publish` | Enqueue a catalog event. Flushed only if `execute` returns. |
@@ -43,7 +43,7 @@ async execute({ input, ports, errors }: ExecuteCtx<typeof CloseIncident>) {
 
 ## ctx
 
-`ExecuteCtx<C, Ctx>` and `EventCtx<C, Ctx>` use the second generic when you pass one. Otherwise `declare static context` wins, even when a guard's `OutCtx` is wider. The field is type-only. `CheckUseCase` does not require it, and Hexok does not ship `Admin` or `Public` context types. Declare it on an app base class next to [guards](/hexok/api/app/guards/).
+`ExecuteCtx<C>` and `EventCtx<C>` take one type argument. `ctx` is the post-guard type: looking at `static guards` plus `ExecuteCtx<typeof ThisClass>` is enough. Inbound context (`App.ctx<C>()` / per-call `{ ctx }`) may differ. `CheckUseCase` does not require `declare static context`, and Hexok does not ship `Admin` or `Public` context types. Declare it on an app base class next to [guards](/hexok/api/app/guards/).
 
 ```ts
 export abstract class UserUseCase extends ExternalUseCase {
@@ -58,15 +58,17 @@ class CreateApiKey extends UserUseCase {
 }
 ```
 
-`ExecuteCtx<typeof CreateApiKey, { notReal: number }>` types `ctx` as `{ notReal: number }`.
-
 If `declare static context` is omitted, `ctx` is the last `defineGuard` `OutCtx`. `defineGuard<InCtx, OutCtx>(guard)` brands the gate so the chain can see `OutCtx`. An empty list or an object literal does not narrow, so `ctx` stays `unknown`. Unbranded guards are skipped; they do not reset an earlier `OutCtx`.
 
 The walk starts at `declare static context`, or `unknown`. Each branded `InCtx` must accept the context so far, and the next context is that guard's `OutCtx`. When it does not, `ctx` is `` `hexok: "${key}" guard InCtx does not accept accumulated ctx` ``. That string is not a `CheckUseCase` error.
 
+When `declare static context` is present, it must be mutually assignable with the final walked type. Then `ctx` is that type. If they disagree, `ctx` is `` `hexok: "${key}" declared context does not match guard OutCtx` ``.
+
+`.ctx<C>()` is inbound. At `build`, that `C` must be assignable to each branded guard `InCtx` (unbranded guards do not force anything). On failure `build` is `` `hexok: "${key}" app context is not assignable to guard InCtx` ``, not a function. `unknown` (no `.ctx<C>()`) is assignable only to an `In` of `unknown`.
+
 ## EventCtx
 
-Argument to `EventUseCase.execute`. Same `ports`, `ctx`, `errors`, `signal`, `publish`, `run`, `channels` as `ExecuteCtx`. `ctx` uses the same `declare static context` default.
+Argument to `EventUseCase.execute`. Same `ports`, `ctx`, `errors`, `signal`, `publish`, `run`, `channels` as `ExecuteCtx`. `ctx` uses the same single-argument default.
 
 | Field | Notes |
 | --- | --- |

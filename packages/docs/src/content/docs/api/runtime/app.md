@@ -1,6 +1,6 @@
 ---
 title: App
-description: Composition root. build() is callable when every required port, catalog, and channel is wired.
+description: Composition root. build() is callable when ports, catalogs, channels, and branded guard InCtx are wired.
 sidebar:
   order: 1
 ---
@@ -41,7 +41,7 @@ Start composition from a map of use-case classes. Each entry is checked by `Chec
 | `adapt(factory, ...deps)` | `provide(factory.token, factory.create(...deps))`. |
 | `use(middleware)` | Register middleware around external `execute` (`local` and HTTP) — not event handlers or nested `run`. |
 | `intercept(interceptor)` | Register an interceptor. First registered is outer. Duplicate `key` throws. |
-| `build` | Complete the graph. Incomplete builders expose `build` as the missing port/catalog/channel message (not callable). |
+| `build` | Complete the graph. Incomplete builders expose `build` as the missing port/catalog/channel or branded-guard InCtx message (not callable). |
 
 `AdapterFor<K>` is `BusAdapter` when `K` is `'bus'`, `QueueAdapter` when `K` is `'queue'`.
 
@@ -76,6 +76,7 @@ These types appear as the type of `build` / `provide` / `bind` / `route` when th
 | Type | Compile-time message |
 | --- | --- |
 | `MissingMessages` | `hexok: unprovided port "…"` (use-case alias) / `unbound catalog "…"` / `unrouted channel "…"`. Missing ports also say `Call .provide(token, impl) before .build()`. |
+| `GuardInCtxMessages` | `hexok: "…" app context is not assignable to guard InCtx`. Builder `.ctx<C>()` must satisfy each branded guard `InCtx`. |
 | `DuplicatePortError` | `hexok: port already provided` |
 | `DuplicateCatalogError` | `hexok: catalog "…" already bound` |
 | `DuplicateChannelError` | `hexok: catalog "…" already routed` |

@@ -13,19 +13,19 @@ A guard is who may enter a use case, declared on the class as `static readonly g
 
 ## Guard
 
-Throw a [`CodedError`](/hexok/api/core/coded-error/) to refuse. Return to allow. Do not return a boolean — Hexok does not map `false` to 403. [`httpStatus`](/hexok/api/runtime/http-status/) already maps `UNAUTHORIZED` to 401 and `FORBIDDEN` to 403.
+Throw a [`CodedError`](/hexok/api/core/coded-error/) to refuse. Return `void` to keep ctx; return a value to replace ctx for later guards, `execute`, and nested `run`. Do not return a boolean — Hexok does not map `false` to 403. [`httpStatus`](/hexok/api/runtime/http-status/) already maps `UNAUTHORIZED` to 401 and `FORBIDDEN` to 403.
 
 | Member | Notes |
 | --- | --- |
 | `key` | Stable id. The same key on different use cases is fine. |
-| `allow(args)` | `void \| Promise<void>`. No ports, no input, no `Request`. |
+| `allow(args)` | `void \| Ctx \| Promise<void \| Ctx>`. `void` leaves ctx unchanged. Any other value replaces it. No ports, no input, no `Request`. |
 
 `GuardArgs`:
 
 | Field | Notes |
 | --- | --- |
 | `ctor` | Leaf constructor (`Charge`), not an app base class. |
-| `ctx` | Read-only request context. The same object later passed to `execute`. |
+| `ctx` | Request context for this guard. `defineGuard` types this as `InCtx`. |
 | `errors` | Factories from `static errors`. Prefer `errors.UNAUTHORIZED()` / `errors.FORBIDDEN()`. |
 
 ```ts
@@ -92,7 +92,7 @@ export abstract class UserUseCase extends ExternalUseCase {
 }
 ```
 
-`declare static context` is type-only. It types [`ExecuteCtx`](/hexok/api/app/execute-ctx/) `ctx`. `AppContext` and `Actor` are app types. `CheckUseCase` does not require the declaration.
+`declare static context` is type-only. It types [`ExecuteCtx`](/hexok/api/app/execute-ctx/) `ctx` when it is mutually assignable with the last branded `OutCtx`. `AppContext` and `Actor` are app types. `CheckUseCase` does not require the declaration. Unbranded object guards (this `authenticated` example) do not change the accumulated type.
 
 ## Pipeline
 
@@ -101,7 +101,7 @@ HTTP and `app.local`:
 **ctx → guards → validate → middleware (outer) → interceptors → execute**
 
 1. **ctx** — HTTP uses `ctxFrom`. `app.local` uses per-call `{ ctx }` or the `App.ctx()` default. `ctxFrom` does not receive the use-case constructor.
-2. **guards** — `allow` in order. The first throw wins. A refusal does not see `VALIDATION` and does not enter an interceptor, so a forbidden call does not open a transaction.
+2. **guards** — `allow` in order. A returned value replaces ctx for the rest of the list and for `execute`. The first throw wins. A refusal does not see `VALIDATION` and does not enter an interceptor, so a forbidden call does not open a transaction.
 3. **validate** — `static input`.
 4. **middleware** — [`App.use`](/hexok/api/runtime/app/). Outer.
 5. **interceptors** — [`App.intercept`](/hexok/api/runtime/app/). Inner: unit of work, request scope, logging.
@@ -120,9 +120,13 @@ Nested [`run()`](/hexok/api/app/execute-ctx/) skips guards, middleware, and inte
 | Middleware / interceptor | `App.use` / `App.intercept` | Work after the gate: unit of work, request scope, logging. Middleware is outer. |
 | `execute` | Use-case class | Resource / row rules, often after a load. |
 
-## Read-only ctx
+## Returning the next ctx
 
-Do not assign `ctx.actor` inside `allow`. Identity comes from `ctxFrom` or per-call `{ ctx }`, not from writing the context. `app.local` without `{ ctx }` passes the app-wide default, so a write leaks into later calls. Guards have no ctx out-param. Middleware `next()` cannot replace ctx either. Refuse with `errors.UNAUTHORIZED()` or `errors.FORBIDDEN()`.
+Return a new object from `allow` to give `execute` a typed actor or session. `void` / `undefined` leaves ctx unchanged. Hexok replaces `shared.ctx`; it does not `Object.assign` onto the existing object and does not write back onto the app-wide default from `.ctx()`. The next `app.local` call that omits `{ ctx }` still sees that default.
+
+Mutating the default object in place is still a footgun: `app.local` without `{ ctx }` passes that same object, so a write leaks into later calls. Middleware `next()` cannot replace ctx either.
+
+`defineGuard<InCtx, OutCtx>` brands the gate so `ExecuteCtx` chains `Out` of one guard as `In` of the next. Object literals stay unbranded and do not narrow `ExecuteCtx`. `.ctx<C>()` is inbound, before guards; `ExecuteCtx['ctx']` is post-guard. At `build`, `C` must be assignable to each branded `InCtx` or `build` is `` `hexok: "${key}" app context is not assignable to guard InCtx` ``. Unbranded guards do not force `.ctx<C>()`. Refuse with `errors.UNAUTHORIZED()` or `errors.FORBIDDEN()`.
 
 ## Events
 

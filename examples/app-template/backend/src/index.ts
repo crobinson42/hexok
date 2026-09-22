@@ -33,6 +33,7 @@ export {
   CreateUser,
   DeleteApiKey,
   Login,
+  OrganizationCreatedEventHandler,
   RegisterOrganization,
   SetupUserCredentials,
   UpdateUserCredentials,

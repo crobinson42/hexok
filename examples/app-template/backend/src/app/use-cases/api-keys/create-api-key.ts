@@ -30,7 +30,7 @@ export class CreateApiKey extends ExternalUseCase {
     ...UserErrors,
     API_KEY_EXISTS: { message: 'API key already exists' },
     ORGANIZATION_NOT_ALLOWED: { message: 'Organization not allowed' },
-  } as const;
+  };
 
   static ports = {
     users: UserRepository,

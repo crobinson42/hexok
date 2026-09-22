@@ -31,6 +31,8 @@ export class SetupUserCredentials extends ExternalUseCase {
     userCredentials: UserCredentialsRepository,
   };
 
+  static readonly guards = [] as const;
+
   static publishes = [DomainEvents] as const;
 
   async execute({

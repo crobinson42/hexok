@@ -41,6 +41,7 @@ export class Charge extends ExternalUseCase {
     INSUFFICIENT: { message: 'Insufficient funds' },
   } as const;
   static readonly ports = { ledger: Ledger, ids: RequestIds };
+  static readonly guards = [] as const;
   static readonly publishes = [LedgerEvents] as const;
 
   async execute({ input, ports, errors, publish }: ExecuteCtx<typeof Charge>) {

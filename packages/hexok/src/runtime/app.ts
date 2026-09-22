@@ -497,6 +497,36 @@ export class AppBuilder<
         );
       }
     }
+
+    for (const ctor of Object.values(this.#useCases) as UseCaseClass[]) {
+      if (isExternalUseCase(ctor)) {
+        if (ctor.guards === undefined) {
+          throw new Error(
+            `hexok: ExternalUseCase "${ctor.key}" is missing static guards`,
+          );
+        }
+        assertUniqueGuardKeys('ExternalUseCase', ctor.key, ctor.guards);
+      }
+      if (isEventUseCase(ctor) && ctor.guards !== undefined) {
+        assertUniqueGuardKeys('EventUseCase', ctor.key, ctor.guards);
+      }
+    }
+  }
+}
+
+function assertUniqueGuardKeys(
+  kind: 'ExternalUseCase' | 'EventUseCase',
+  key: string,
+  guards: readonly { key: string }[],
+): void {
+  const seen = new Set<string>();
+  for (const guard of guards) {
+    if (seen.has(guard.key)) {
+      throw new Error(
+        `hexok: ${kind} "${key}" has duplicate guard key "${guard.key}"`,
+      );
+    }
+    seen.add(guard.key);
   }
 }
 

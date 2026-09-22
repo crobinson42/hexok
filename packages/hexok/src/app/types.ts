@@ -5,6 +5,7 @@ import type {
   EventClass,
   PortToken,
 } from '../domain/index.js';
+import type { Guard } from './guard.js';
 
 /** Port map with tokens replaced by their bound implementations. */
 export type ResolvedPorts<P> = {
@@ -89,19 +90,29 @@ type CheckEventShape<C> =
         : `hexok: EventUseCase "${KeyOf<C>}" is missing static catalog`
       : `hexok: EventUseCase "${KeyOf<C>}" is missing static on`;
 
+type CheckGuards<C> = [C] extends [string]
+  ? C
+  : 'guards' extends keyof C
+    ? undefined extends C['guards']
+      ? `hexok: ExternalUseCase "${KeyOf<C>}" is missing static guards`
+      : CheckAsConst<C, 'guards', 'ExternalUseCase'>
+    : `hexok: ExternalUseCase "${KeyOf<C>}" is missing static guards`;
+
 /**
  * Per-entry diagnostic for `App.from` / `App.test`. Missing statics become a
  * `hexok:` sentence instead of a UseCaseClass union dump.
  */
 export type CheckUseCase<C> = C extends { trigger: 'external' }
-  ? CheckAsConst<
+  ? CheckGuards<
       CheckAsConst<
-        CheckCallableShape<C, 'ExternalUseCase'>,
-        'publishes',
+        CheckAsConst<
+          CheckCallableShape<C, 'ExternalUseCase'>,
+          'publishes',
+          'ExternalUseCase'
+        >,
+        'channels',
         'ExternalUseCase'
-      >,
-      'channels',
-      'ExternalUseCase'
+      >
     >
   : C extends { trigger: 'internal' }
     ? CheckAsConst<
@@ -115,8 +126,12 @@ export type CheckUseCase<C> = C extends { trigger: 'external' }
       >
     : C extends { trigger: 'event' }
       ? CheckAsConst<
-          CheckAsConst<CheckEventShape<C>, 'publishes', 'EventUseCase'>,
-          'channels',
+          CheckAsConst<
+            CheckAsConst<CheckEventShape<C>, 'publishes', 'EventUseCase'>,
+            'channels',
+            'EventUseCase'
+          >,
+          'guards',
           'EventUseCase'
         >
       : C extends { trigger: 'api' }
@@ -158,6 +173,8 @@ export interface CallableUseCaseCtor {
 /** Constructor shape of an `ExternalUseCase` subclass. */
 export interface ExternalUseCaseCtor extends CallableUseCaseCtor {
   readonly trigger: 'external';
+  /** Identity / permission gates. Empty array is public. Required at `App.from`. */
+  readonly guards: readonly Guard[];
 }
 
 /** Constructor shape of an `InternalUseCase` subclass. */
@@ -193,6 +210,8 @@ export interface EventUseCaseCtor {
   readonly publishes?: readonly AnyEventCatalog[];
   /** Channels available as `channels` on event ctx. */
   readonly channels?: readonly EventChannelCtor[];
+  /** Identity / permission gates. Omitted skips; present runs before execute. */
+  readonly guards?: readonly Guard[];
   /** Declared refusals. */
   readonly errors?: ErrorMap;
   readonly prototype: { execute(ctx: never): Promise<void> };
@@ -238,6 +257,6 @@ export function isInternalUseCase(
 /** True when `ctor.trigger` is `'external'` or `'internal'`. */
 export function isCallableUseCase(
   ctor: UseCaseClass,
-): ctor is CallableUseCaseCtor {
+): ctor is ExternalUseCaseCtor | InternalUseCaseCtor {
   return ctor.trigger === 'external' || ctor.trigger === 'internal';
 }

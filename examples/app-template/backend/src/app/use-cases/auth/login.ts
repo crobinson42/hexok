@@ -31,6 +31,8 @@ export class Login extends ExternalUseCase {
     token: AuthTokenService,
   };
 
+  static readonly guards = [] as const;
+
   async execute({ input, ports, errors }: ExecuteCtx<typeof Login>) {
     const user = await ports.users.getByEmail(input.email);
     if (!user) throw errors.INVALID_CREDENTIALS();

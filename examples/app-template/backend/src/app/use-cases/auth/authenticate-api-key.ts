@@ -26,6 +26,8 @@ export class AuthenticateApiKey extends ExternalUseCase {
     token: AuthTokenService,
   };
 
+  static readonly guards = [] as const;
+
   async execute({
     input,
     ports,

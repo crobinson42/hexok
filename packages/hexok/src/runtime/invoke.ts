@@ -104,6 +104,33 @@ async function runNested(
   return instance.execute(ctx as never) as Promise<unknown>;
 }
 
+async function runGuards(
+  ctor: ExternalUseCaseCtor | EventUseCaseCtor,
+  ctx: unknown,
+  errors: Record<string, (data?: unknown) => never>,
+  mode: 'required' | 'optional',
+): Promise<void> {
+  const guards = ctor.guards;
+  if (guards === undefined) {
+    if (mode === 'required') {
+      throw new Error(
+        `hexok: ExternalUseCase "${ctor.key}" is missing static guards`,
+      );
+    }
+    return;
+  }
+  const seen = new Set<string>();
+  for (const guard of guards) {
+    if (seen.has(guard.key)) {
+      throw new Error(
+        `hexok: ${ctor.trigger === 'event' ? 'EventUseCase' : 'ExternalUseCase'} "${ctor.key}" has duplicate guard key "${guard.key}"`,
+      );
+    }
+    seen.add(guard.key);
+    await guard.allow({ ctor, ctx, errors });
+  }
+}
+
 export async function invokeExternal(
   ctor: ExternalUseCaseCtor,
   input: unknown,
@@ -111,22 +138,23 @@ export async function invokeExternal(
   opts?: { ctx?: unknown; signal?: AbortSignal; request?: Request },
 ): Promise<unknown> {
   assertHandlersStarted(deps, ctor.publishes);
+  const shared: SharedInvoke = {
+    ctx: opts?.ctx ?? deps.defaultCtx,
+    signal: opts?.signal ?? new AbortController().signal,
+  };
+  const errors = errorFactories(ctor.errors);
+  await runGuards(ctor, shared.ctx, errors, 'required');
   const parsed = validate(ctor.input, input);
   if (!parsed.ok) {
     throw validationError('Validation failed', parsed.issues);
   }
   const queue: Envelope[] = [];
-  const shared: SharedInvoke = {
-    ctx: opts?.ctx ?? deps.defaultCtx,
-    signal: opts?.signal ?? new AbortController().signal,
-  };
   const run = nestedRun(deps, queue, shared);
   const publish: Publish = ((event: Parameters<Publish>[0]) => {
     queue.push(wrapEvent(event, ctor.publishes ?? [], tracingCtx(shared.ctx)));
   }) as Publish;
 
   const ports = aliasPorts(ctor.ports, deps.ports);
-  const errors = errorFactories(ctor.errors);
   const ctx = {
     input: parsed.value as Infer<typeof ctor.input>,
     ports,
@@ -166,12 +194,14 @@ export async function invokeEvent(
   deps: InvokeDeps,
   opts?: { ctx?: unknown; signal?: AbortSignal; attempt?: number },
 ): Promise<void> {
-  const queue: Envelope[] = [];
   const shared: SharedInvoke = {
     ctx: opts?.ctx ?? deps.defaultCtx,
     signal: opts?.signal ?? new AbortController().signal,
   };
   assertHandlersStarted(deps, ctor.publishes);
+  const errors = errorFactories(ctor.errors ?? {});
+  await runGuards(ctor, shared.ctx, errors, 'optional');
+  const queue: Envelope[] = [];
   const run = nestedRun(deps, queue, shared);
   const publish: Publish = ((event: Parameters<Publish>[0]) => {
     queue.push(
@@ -179,7 +209,6 @@ export async function invokeEvent(
     );
   }) as Publish;
   const ports = aliasPorts(ctor.ports ?? {}, deps.ports);
-  const errors = errorFactories(ctor.errors ?? {});
   const ctx = {
     event: envelope,
     ports,

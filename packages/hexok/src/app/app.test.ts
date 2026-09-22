@@ -59,6 +59,7 @@ class CloseIncident extends ExternalUseCase {
     incidents: IncidentRepository,
     clock: Clock,
   };
+  static readonly guards = [] as const;
   static readonly publishes = [DomainEvents] as const;
 
   async execute({
@@ -143,6 +144,7 @@ class StampTime extends ExternalUseCase {
   static readonly output = z.object({ now: z.date() });
   static readonly errors = {} as const;
   static readonly ports = { clock: Clock };
+  static readonly guards = [] as const;
   async execute({ ports }: ExecuteCtx<typeof StampTime>) {
     return { now: ports.clock.now() };
   }
@@ -155,6 +157,7 @@ class EmptyPublishes extends ExternalUseCase {
   static readonly errors = {} as const;
   static readonly ports = { clock: Clock };
   static readonly publishes = [] as const;
+  static readonly guards = [] as const;
   async execute() {
     return {};
   }
@@ -231,6 +234,12 @@ describe('CheckUseCase', () => {
     expectTypeOf<
       CheckUseCase<typeof LeftoverApi>
     >().toEqualTypeOf<`hexok: ApiUseCase was renamed to ExternalUseCase; composition-only use cases extend InternalUseCase — delete static internal`>();
+    expectTypeOf<
+      CheckUseCase<typeof MissingGuards>
+    >().toEqualTypeOf<`hexok: ExternalUseCase "missing.guards" is missing static guards`>();
+    expectTypeOf<
+      CheckUseCase<typeof WideGuards>
+    >().toEqualTypeOf<`hexok: ExternalUseCase "wide.guards" static guards must be \`as const\``>();
   });
 
   it('rejects static on that is not in the catalog Events', () => {
@@ -309,6 +318,38 @@ describe('ExecuteCtx', () => {
     };
     void _runTypes;
   });
+
+  it('defaults ctx to unknown without declare static context', () => {
+    expectTypeOf<
+      ExecuteCtx<typeof CloseIncident>['ctx']
+    >().toEqualTypeOf<unknown>();
+  });
+
+  it('types ctx from inherited declare static context', () => {
+    abstract class WithActor extends ExternalUseCase {
+      declare static context: { actor: string };
+    }
+    class Sub extends WithActor {
+      static readonly key = 'ctx.inherited';
+      static readonly input = z.object({});
+      static readonly output = z.object({});
+      static readonly errors = {} as const;
+      static readonly ports = { clock: Clock };
+      static readonly guards = [] as const;
+      async execute() {
+        return {};
+      }
+    }
+    expectTypeOf<ExecuteCtx<typeof Sub>['ctx']>().toEqualTypeOf<{
+      actor: string;
+    }>();
+  });
+
+  it('lets the second generic override declare static context', () => {
+    expectTypeOf<
+      ExecuteCtx<typeof CloseIncident, { notReal: number }>['ctx']
+    >().toEqualTypeOf<{ notReal: number }>();
+  });
 });
 
 describe('errorFactories', () => {
@@ -367,6 +408,30 @@ class DeadInternal extends ExternalUseCase {
   static readonly output = z.object({});
   static readonly errors = {} as const;
   static readonly ports = { clock: Clock };
+  static readonly guards = [] as const;
+  async execute() {
+    return {};
+  }
+}
+
+class MissingGuards extends ExternalUseCase {
+  static readonly key = 'missing.guards';
+  static readonly input = z.object({});
+  static readonly output = z.object({});
+  static readonly errors = {} as const;
+  static readonly ports = { clock: Clock };
+  async execute() {
+    return {};
+  }
+}
+
+class WideGuards extends ExternalUseCase {
+  static readonly key = 'wide.guards';
+  static readonly input = z.object({});
+  static readonly output = z.object({});
+  static readonly errors = {} as const;
+  static readonly ports = { clock: Clock };
+  static readonly guards = [{ key: 'x', allow() {} }];
   async execute() {
     return {};
   }

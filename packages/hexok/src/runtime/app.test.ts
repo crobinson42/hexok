@@ -55,6 +55,7 @@ class CloseIncident extends ExternalUseCase {
     incidents: IncidentRepository,
     clock: Clock,
   };
+  static readonly guards = [] as const;
   static readonly publishes = [DomainEvents] as const;
 
   async execute({
@@ -113,6 +114,7 @@ class StampTime extends ExternalUseCase {
   static readonly output = z.object({ now: z.date() });
   static readonly errors = {} as const;
   static readonly ports = { clock: Clock };
+  static readonly guards = [] as const;
 
   async execute({ ports }: ExecuteCtx<typeof StampTime>) {
     return { now: ports.clock.now() };
@@ -227,6 +229,7 @@ describe('App invoke', () => {
       static readonly output = z.object({});
       static readonly errors = {} as const;
       static readonly ports = {};
+      static readonly guards = [] as const;
       static readonly publishes = [Notes, ClientNotes] as const;
 
       async execute({ input, publish }: ExecuteCtx<typeof PostNote>) {
@@ -332,6 +335,7 @@ describe('App invoke', () => {
       static readonly output = z.unknown();
       static readonly errors = {} as const;
       static readonly ports = { clock: Clock };
+      static readonly guards = [] as const;
       async execute({ ctx }: ExecuteCtx<typeof EchoCtx>) {
         return ctx;
       }
@@ -364,6 +368,7 @@ describe('App invoke', () => {
       static readonly output = z.unknown();
       static readonly errors = {} as const;
       static readonly ports = { clock: Clock };
+      static readonly guards = [] as const;
       async execute({ ctx }: ExecuteCtx<typeof EchoCtx>) {
         return ctx;
       }

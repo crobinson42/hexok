@@ -28,16 +28,21 @@ export type Handler = (ctx: HandlerCtx) => Promise<unknown>;
 
 /**
  * Extension seam. First registered is **outer**.
- * Register authorize before unit of work so a forbidden call never opens a transaction.
+ * Identity / permission gates are Guards (`static guards` on ExternalUseCase).
+ * Interceptors wrap unit of work, request-scope, and logging.
  *
  * ```ts
- * class AuthorizeInterceptor implements Interceptor {
- *   readonly key = 'authorize'
+ * class LoggingInterceptor implements Interceptor {
+ *   readonly key = 'log'
  *   aroundUseCase(uc, next) {
  *     return async (ctx) => {
- *       const policy = (uc as { policy?: string }).policy
- *       if (policy) check(ctx, policy)
- *       return next(ctx)
+ *       const started = Date.now()
+ *       try {
+ *         return await next(ctx)
+ *       } finally {
+ *         void uc.key
+ *         void started
+ *       }
  *     }
  *   }
  * }

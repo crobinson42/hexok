@@ -109,6 +109,7 @@ class InviteUser extends ExternalUseCase {
     USER_EXISTS: { message: 'User already exists' },
   } as const;
   static readonly ports = { users: UserRepository };
+  static readonly guards = [] as const;
   static readonly publishes = [DomainEvents] as const;
 
   async execute({
@@ -146,6 +147,7 @@ class RegisterOrganization extends ExternalUseCase {
     ...CreateUser.errors,
   } as const;
   static readonly ports = { organizations: OrganizationRepository };
+  static readonly guards = [] as const;
   static readonly publishes = [DomainEvents] as const;
 
   async execute({
@@ -178,6 +180,7 @@ class RunInvite extends ExternalUseCase {
   static readonly output = RegisterOrganization.output;
   static readonly errors = RegisterOrganization.errors;
   static readonly ports = { organizations: OrganizationRepository };
+  static readonly guards = [] as const;
   static readonly publishes = [DomainEvents] as const;
 
   async execute({ input, ports, publish, run }: ExecuteCtx<typeof RunInvite>) {
@@ -201,6 +204,7 @@ class ForwardUser extends ExternalUseCase {
   static readonly output = CreateUser.output;
   static readonly errors = {} as const;
   static readonly ports = { organizations: OrganizationRepository };
+  static readonly guards = [] as const;
 
   async execute({ input, run }: ExecuteCtx<typeof ForwardUser>) {
     return run(

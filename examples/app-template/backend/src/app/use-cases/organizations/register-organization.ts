@@ -38,6 +38,8 @@ export class RegisterOrganization extends ExternalUseCase {
     organizations: OrganizationRepository,
   };
 
+  static readonly guards = [] as const;
+
   static publishes = [DomainEvents, ClientEvents] as const;
 
   async execute({

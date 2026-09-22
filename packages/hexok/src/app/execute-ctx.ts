@@ -40,8 +40,10 @@ export type Run = <U extends CallableUseCaseCtor>(
   input: Infer<U['input']>,
 ) => Promise<Infer<U['output']>>;
 
-/** Argument to `ExternalUseCase.execute` and `InternalUseCase.execute`. Typed from the subclass statics. */
-export type ExecuteCtx<C, Ctx = unknown> = {
+type ContextOf<C> = C extends { context: infer Ctx } ? Ctx : unknown;
+
+/** Argument to `ExternalUseCase.execute` and `InternalUseCase.execute`. Typed from the subclass statics. `Ctx` defaults to `declare static context`, else `unknown`. */
+export type ExecuteCtx<C, Ctx = ContextOf<C>> = {
   /** Validated `static input`. */
   input: C extends { input: infer S extends StandardSchemaV1 }
     ? Infer<S>
@@ -93,8 +95,8 @@ type CatalogCtxOf<C> = C extends {
   ? Ctx
   : unknown;
 
-/** Argument to `EventUseCase.execute`. Typed from the subclass statics. */
-export type EventCtx<C, Ctx = unknown> = {
+/** Argument to `EventUseCase.execute`. Typed from the subclass statics. `Ctx` defaults to `declare static context`, else `unknown`. */
+export type EventCtx<C, Ctx = ContextOf<C>> = {
   /** Envelope for `static on`, including payload and catalog metadata. */
   event: Envelope<
     EventOn<C>['key'] extends infer N extends string ? N : string,

@@ -37,6 +37,8 @@ export class CreateApiKey extends ExternalUseCase {
     apiKeys: ApiKeyRepository,
   };
 
+  static readonly guards = [] as const;
+
   static publishes = [DomainEvents, ClientEvents] as const;
 
   async execute({

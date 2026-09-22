@@ -4,6 +4,7 @@ import type {
   EventClass,
   PortToken,
 } from '../domain/index.js';
+import type { Guard } from './guard.js';
 import type { EventChannelCtor } from './types.js';
 
 /**
@@ -38,6 +39,11 @@ export abstract class EventUseCase {
   static readonly publishes?: readonly AnyEventCatalog[];
   /** `static channels = [ClientChannel] as const` — without `as const`, catalog keys widen. */
   static readonly channels?: readonly EventChannelCtor[];
+  /**
+   * Identity / permission gates, in order. Omitted skips. Present runs
+   * against `defaultCtx` / per-invoke `{ ctx }` only — never `ctxFrom`.
+   */
+  static readonly guards?: readonly Guard[];
   /** Declared refusals. Keys become `errors.CODE()` factories on `EventCtx`. */
   static readonly errors: ErrorMap = {};
 

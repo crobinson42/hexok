@@ -24,7 +24,8 @@ export type {
   Run,
 } from './execute-ctx.js';
 export { ExternalUseCase } from './external-use-case.js';
-export type { Guard, GuardArgs } from './guard.js';
+export type { DefinedGuard, Guard, GuardArgs } from './guard.js';
+export { defineGuard } from './guard.js';
 export { InternalUseCase } from './internal-use-case.js';
 export {
   type AsUseCaseBag,

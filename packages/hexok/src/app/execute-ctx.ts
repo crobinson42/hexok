@@ -8,6 +8,7 @@ import type {
   EventPayload,
 } from '../domain/index.js';
 import type { ChannelProps } from './event-channel.js';
+import type { DefinedGuard } from './guard.js';
 import type {
   CallableUseCaseCtor,
   ErrorFactories,
@@ -42,8 +43,48 @@ export type Run = <U extends CallableUseCaseCtor>(
 
 type ContextOf<C> = C extends { context: infer Ctx } ? Ctx : unknown;
 
-/** Argument to `ExternalUseCase.execute` and `InternalUseCase.execute`. Typed from the subclass statics. `Ctx` defaults to `declare static context`, else `unknown`. */
-export type ExecuteCtx<C, Ctx = ContextOf<C>> = {
+type KeyOf<C> = C extends { key: infer K extends string }
+  ? string extends K
+    ? 'unknown'
+    : K
+  : 'unknown';
+
+type GuardsOf<C> = C extends { guards: infer G extends readonly unknown[] }
+  ? G
+  : readonly [];
+
+type GuardMismatch<C> =
+  `hexok: "${KeyOf<C>}" guard InCtx does not accept accumulated ctx`;
+
+/** Branded guards only. Unbranded literals keep `Acc` (they do not narrow). */
+type WalkGuards<Guards, Acc, C> = [Guards] extends [
+  readonly [infer Head, ...infer Tail],
+]
+  ? Head extends DefinedGuard<infer In, infer Out>
+    ? [Acc] extends [In]
+      ? WalkGuards<Tail, Out, C>
+      : GuardMismatch<C>
+    : WalkGuards<Tail, Acc, C>
+  : Acc;
+
+type GuardChain<C> = WalkGuards<GuardsOf<C>, ContextOf<C>, C>;
+
+/**
+ * `declare static context` wins over the last `OutCtx`.
+ * A chain mismatch replaces `ctx` with a `hexok:` string.
+ * Otherwise the last branded `OutCtx`, or `unknown` when nothing narrows.
+ */
+type DefaultCtx<C> =
+  GuardChain<C> extends infer Walked
+    ? [Walked] extends [`hexok: ${string}`]
+      ? Walked
+      : C extends { context: infer Ctx }
+        ? Ctx
+        : Walked
+    : never;
+
+/** Argument to `ExternalUseCase.execute` and `InternalUseCase.execute`. Typed from the subclass statics. `Ctx` is the second generic, else `declare static context`, else the last `defineGuard` `OutCtx`, else `unknown`. */
+export type ExecuteCtx<C, Ctx = DefaultCtx<C>> = {
   /** Validated `static input`. */
   input: C extends { input: infer S extends StandardSchemaV1 }
     ? Infer<S>
@@ -95,8 +136,8 @@ type CatalogCtxOf<C> = C extends {
   ? Ctx
   : unknown;
 
-/** Argument to `EventUseCase.execute`. Typed from the subclass statics. `Ctx` defaults to `declare static context`, else `unknown`. */
-export type EventCtx<C, Ctx = ContextOf<C>> = {
+/** Argument to `EventUseCase.execute`. Typed from the subclass statics. `Ctx` is the second generic, else `declare static context`, else the last `defineGuard` `OutCtx`, else `unknown`. */
+export type EventCtx<C, Ctx = DefaultCtx<C>> = {
   /** Envelope for `static on`, including payload and catalog metadata. */
   event: Envelope<
     EventOn<C>['key'] extends infer N extends string ? N : string,

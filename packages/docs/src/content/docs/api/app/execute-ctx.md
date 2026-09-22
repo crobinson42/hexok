@@ -6,12 +6,13 @@ sidebar:
 ---
 
 ```ts
-import type {
-  EventCtx,
-  ExecuteCtx,
-  Publish,
-  PublishFor,
-  Run,
+import {
+  defineGuard,
+  type EventCtx,
+  type ExecuteCtx,
+  type Publish,
+  type PublishFor,
+  type Run,
 } from 'hexok/app'
 ```
 
@@ -25,7 +26,7 @@ Argument to `ExternalUseCase.execute` and `InternalUseCase.execute`.
 | --- | --- |
 | `input` | Validated `static input`. |
 | `ports` | Bound adapters from `static ports`. |
-| `ctx` | Request context. `declare static context` on the class, else `unknown`. The second generic overrides. |
+| `ctx` | Request context. The second generic overrides. Otherwise `declare static context` wins, else the last `defineGuard` `OutCtx`, else `unknown`. See [ctx](#ctx). |
 | `errors` | Factories from `static errors`. Throw `errors.NOT_FOUND()`. |
 | `signal` | Abort signal for this invocation. |
 | `publish` | Enqueue a catalog event. Flushed only if `execute` returns. |
@@ -40,9 +41,9 @@ async execute({ input, ports, errors }: ExecuteCtx<typeof CloseIncident>) {
 }
 ```
 
-## declare static context
+## ctx
 
-`ExecuteCtx<C>` and `EventCtx<C>` read `ctx` from `declare static context` (`ContextOf`). No declaration means `unknown`. The field is type-only — `CheckUseCase` does not require it, and Hexok does not ship `Admin` or `Public` context types. Declare it on an app base class next to [guards](/hexok/api/app/guards/).
+`ExecuteCtx<C, Ctx>` and `EventCtx<C, Ctx>` use the second generic when you pass one. Otherwise `declare static context` wins, even when a guard's `OutCtx` is wider. The field is type-only. `CheckUseCase` does not require it, and Hexok does not ship `Admin` or `Public` context types. Declare it on an app base class next to [guards](/hexok/api/app/guards/).
 
 ```ts
 export abstract class UserUseCase extends ExternalUseCase {
@@ -57,7 +58,11 @@ class CreateApiKey extends UserUseCase {
 }
 ```
 
-The second generic still wins: `ExecuteCtx<typeof CreateApiKey, { notReal: number }>` types `ctx` as `{ notReal: number }`.
+`ExecuteCtx<typeof CreateApiKey, { notReal: number }>` types `ctx` as `{ notReal: number }`.
+
+If `declare static context` is omitted, `ctx` is the last `defineGuard` `OutCtx`. `defineGuard<InCtx, OutCtx>(guard)` brands the gate so the chain can see `OutCtx`. An empty list or an object literal does not narrow, so `ctx` stays `unknown`. Unbranded guards are skipped; they do not reset an earlier `OutCtx`.
+
+The walk starts at `declare static context`, or `unknown`. Each branded `InCtx` must accept the context so far, and the next context is that guard's `OutCtx`. When it does not, `ctx` is `` `hexok: "${key}" guard InCtx does not accept accumulated ctx` ``. That string is not a `CheckUseCase` error.
 
 ## EventCtx
 

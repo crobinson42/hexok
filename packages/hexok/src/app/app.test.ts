@@ -12,6 +12,7 @@ import { errorFactories } from './error-factory.js';
 import { EventUseCase } from './event-use-case.js';
 import type { EventCtx, ExecuteCtx, Publish } from './execute-ctx.js';
 import { ExternalUseCase } from './external-use-case.js';
+import { defineGuard } from './guard.js';
 import { InternalUseCase } from './internal-use-case.js';
 import { type CheckUseCase, isInternalUseCase } from './types.js';
 
@@ -319,10 +320,128 @@ describe('ExecuteCtx', () => {
     void _runTypes;
   });
 
-  it('defaults ctx to unknown without declare static context', () => {
+  it('defaults ctx to unknown when guards are empty', () => {
     expectTypeOf<
       ExecuteCtx<typeof CloseIncident>['ctx']
     >().toEqualTypeOf<unknown>();
+  });
+
+  it('does not narrow ctx from an unbranded guard literal', () => {
+    class Open extends ExternalUseCase {
+      static readonly key = 'ctx.unbranded';
+      static readonly input = z.object({});
+      static readonly output = z.object({});
+      static readonly errors = {} as const;
+      static readonly ports = { clock: Clock };
+      static readonly guards = [{ key: 'open', allow() {} }] as const;
+      async execute() {
+        return {};
+      }
+    }
+    expectTypeOf<ExecuteCtx<typeof Open>['ctx']>().toEqualTypeOf<unknown>();
+  });
+
+  it('narrows ctx to the last defineGuard OutCtx', () => {
+    const authed = defineGuard<unknown, { actor: string }>({
+      key: 'authed',
+      allow() {},
+    });
+    const open = { key: 'open', allow() {} };
+    const withRole = defineGuard<
+      { actor: string },
+      { actor: string; role: string }
+    >({
+      key: 'role',
+      allow() {},
+    });
+    class Chained extends ExternalUseCase {
+      static readonly key = 'ctx.chained';
+      static readonly input = z.object({});
+      static readonly output = z.object({});
+      static readonly errors = {} as const;
+      static readonly ports = { clock: Clock };
+      static readonly guards = [authed, open, withRole] as const;
+      async execute() {
+        return {};
+      }
+    }
+    expectTypeOf<ExecuteCtx<typeof Chained>['ctx']>().toEqualTypeOf<{
+      actor: string;
+      role: string;
+    }>();
+  });
+
+  it('lets declare static context win over the last OutCtx', () => {
+    const widened = defineGuard<
+      { actor: string },
+      { actor: string; extra: true }
+    >({
+      key: 'widen',
+      allow() {},
+    });
+    abstract class WithActor extends ExternalUseCase {
+      declare static context: { actor: string };
+    }
+    class Sub extends WithActor {
+      static readonly key = 'ctx.declared.wins';
+      static readonly input = z.object({});
+      static readonly output = z.object({});
+      static readonly errors = {} as const;
+      static readonly ports = { clock: Clock };
+      static readonly guards = [widened] as const;
+      async execute() {
+        return {};
+      }
+    }
+    expectTypeOf<ExecuteCtx<typeof Sub>['ctx']>().toEqualTypeOf<{
+      actor: string;
+    }>();
+  });
+
+  it('puts a guard chain mismatch on ctx as a hexok string, not CheckUseCase', () => {
+    const authed = defineGuard<unknown, { actor: string }>({
+      key: 'authed',
+      allow() {},
+    });
+    const needsId = defineGuard<{ actor: string; id: string }>({
+      key: 'needs-id',
+      allow() {},
+    });
+    class Broken extends ExternalUseCase {
+      static readonly key = 'ctx.mismatch';
+      static readonly input = z.object({});
+      static readonly output = z.object({});
+      static readonly errors = {} as const;
+      static readonly ports = { clock: Clock };
+      static readonly guards = [authed, needsId] as const;
+      async execute() {
+        return {};
+      }
+    }
+    expectTypeOf<
+      ExecuteCtx<typeof Broken>['ctx']
+    >().toEqualTypeOf<`hexok: "ctx.mismatch" guard InCtx does not accept accumulated ctx`>();
+    expectTypeOf<CheckUseCase<typeof Broken>>().toEqualTypeOf<typeof Broken>();
+  });
+
+  it('narrows EventCtx the same way, unless the second generic overrides', () => {
+    const authed = defineGuard<unknown, { actor: string }>({
+      key: 'authed',
+      allow() {},
+    });
+    class OnAuthed extends EventUseCase {
+      static readonly key = 'ctx.event';
+      static readonly on = IncidentClosed;
+      static readonly catalog = DomainEvents;
+      static readonly guards = [authed] as const;
+      async execute(): Promise<void> {}
+    }
+    expectTypeOf<EventCtx<typeof OnAuthed>['ctx']>().toEqualTypeOf<{
+      actor: string;
+    }>();
+    expectTypeOf<
+      EventCtx<typeof OnAuthed, { notReal: number }>['ctx']
+    >().toEqualTypeOf<{ notReal: number }>();
   });
 
   it('types ctx from inherited declare static context', () => {

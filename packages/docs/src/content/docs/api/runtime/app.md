@@ -61,6 +61,12 @@ Start composition from a map of use-case classes. Each entry is checked by `Chec
 
 HTTP: `POST /rpc/incident/close` with `{ input: { id: '1' } }`. Request context is `.ctx()` / `.ctxFrom(({ request, ctx }) => ctx)` — not `body.ctx`.
 
+## Invoke
+
+HTTP and `app.local` run one pipeline: request context (`ctxFrom`, per-call `{ ctx }`, or `.ctx()`) → [guards](/hexok/api/app/guards/) → validate input → [middleware](/hexok/api/runtime/middleware/) (outer) → [interceptors](/hexok/api/runtime/interceptor/) → `execute`. A guard refusal never reaches validation or interceptors. Nested `run` skips guards, middleware, and interceptors. There is no `App.guard()`.
+
+`build()` throws `hexok: ExternalUseCase "…" is missing static guards` when an external use case omits the field. `[] as const` is public. Event handlers skip guards when the list is omitted or empty.
+
 `NestedClient<Bag, Ctx>` is the type of `local`. `ChannelGateway<C>` is `ChannelControl` plus `join(input, connection)`. `ChannelGateways<Routed>` is those gateways keyed by catalog key.
 
 ## Compile-time errors
@@ -94,6 +100,7 @@ await app.stop()
 
 ## Related
 
+- [Guard](/hexok/api/app/guards/)
 - [ExternalUseCase](/hexok/api/app/external-use-case/)
 - [InternalUseCase](/hexok/api/app/internal-use-case/)
 - [Interceptor](/hexok/api/runtime/interceptor/)

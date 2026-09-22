@@ -3,7 +3,7 @@
 [![CI](https://github.com/crobinson42/hexok/actions/workflows/ci.yml/badge.svg)](https://github.com/crobinson42/hexok/actions/workflows/ci.yml)
 [![npm](https://img.shields.io/npm/v/hexok)](https://www.npmjs.com/package/hexok)
 
-Hexok (Hexo Kit) is a TypeScript kit for writing a clean-architecture backend as **ordinary classes**: Entity, Port, Adapter, UseCase, Event, Interceptor.
+Hexok (Hexo Kit) is a TypeScript kit for writing a clean-architecture backend as **ordinary classes**: Entity, Port, Adapter, UseCase, Guard, Event, Interceptor.
 
 A new hire should open a use-case file and understand the business flow without a glossary of hidden methods, phantom fields, or `meta` bags.
 
@@ -26,7 +26,7 @@ import { App as TestApp, InMemoryRepository } from 'hexok/testing'
 | --- | --- |
 | `hexok/core` | `Result`, Standard Schema V1, `ErrorMap` |
 | `hexok/domain` | `Entity`, `DeepReadonly`, `Port`, `EventCatalog`, `DomainEvent` |
-| `hexok/app` | `ExternalUseCase`, `InternalUseCase`, `EventUseCase`, contract derivation |
+| `hexok/app` | `ExternalUseCase`, `InternalUseCase`, `EventUseCase`, `Guard`, contract derivation |
 | `hexok/infra` | `Mapper` (entity ↔ row), `Adapter.of` |
 | `hexok/runtime` | `App.from` composition, completeness, interceptors, local client, HTTP |
 | `hexok/testing` | Test-only: `App.test`, in-memory repo/bus/queue/channel, `published` |
@@ -45,6 +45,7 @@ class CloseIncident extends ExternalUseCase {
     NOT_FOUND: { message: 'Incident not found' },
   } as const
   static readonly ports = { incidents: IncidentRepository, clock: Clock }
+  static readonly guards = [] as const
   static readonly publishes = [DomainEvents] as const
 
   async execute({ input, ports, errors, publish }: ExecuteCtx<typeof CloseIncident>) {
@@ -58,7 +59,7 @@ class CloseIncident extends ExternalUseCase {
 }
 ```
 
-The entity owns the rule (`incident.close(now)`). The use case orchestrates.
+The entity owns the rule (`incident.close(now)`). The use case orchestrates. `guards = [] as const` is public; omitting `guards` fails closed.
 
 ## Boot an app
 
@@ -100,7 +101,7 @@ expect(app.published).toHaveLength(1)
 
 ## Extend
 
-Subclass + typed statics + interceptors. See `examples/extend`: authorize, request-scope, unit-of-work. First registered interceptor is outer — register authorize **before** unit of work.
+Subclass and typed statics. Who may enter is `static readonly guards` on the use case (`[] as const` is public). Interceptors are unit of work, request scope, and logging — first registered is outer. See `examples/extend`.
 
 ## Examples
 

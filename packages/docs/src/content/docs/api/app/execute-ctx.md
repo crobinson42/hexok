@@ -15,7 +15,7 @@ import type {
 } from 'hexok/app'
 ```
 
-Execute context is what runtime passes into `execute`: validated input, bound ports, error factories, `publish`, and nested `run`. It is typed from the subclass statics. Use cases destructure this bag. Event handlers get `EventCtx` (the envelope plus `attempt`).
+Execute context is what runtime passes into `execute`: validated input, bound ports, error factories, `publish`, and nested `run`. It is typed from the subclass statics. `ctx` defaults to `declare static context` on the class, otherwise `unknown`. Use cases destructure this bag. Event handlers get `EventCtx` (the envelope plus `attempt`), with the same `ctx` default.
 
 ## ExecuteCtx
 
@@ -25,11 +25,11 @@ Argument to `ExternalUseCase.execute` and `InternalUseCase.execute`.
 | --- | --- |
 | `input` | Validated `static input`. |
 | `ports` | Bound adapters from `static ports`. |
-| `ctx` | App request context from `App.ctx` or the caller. |
+| `ctx` | Request context. `declare static context` on the class, else `unknown`. The second generic overrides. |
 | `errors` | Factories from `static errors`. Throw `errors.NOT_FOUND()`. |
 | `signal` | Abort signal for this invocation. |
 | `publish` | Enqueue a catalog event. Flushed only if `execute` returns. |
-| `run` | Invoke an ExternalUseCase or InternalUseCase with the same ctx, signal, and publish queue. Nested `run` does not re-enter interceptors or `App.use`. |
+| `run` | Invoke an ExternalUseCase or InternalUseCase with the same ctx, signal, and publish queue. Nested `run` does not re-enter guards, interceptors, or `App.use`. |
 | `channels` | Presence handles for `static channels`, keyed by catalog key. |
 
 ```ts
@@ -40,9 +40,28 @@ async execute({ input, ports, errors }: ExecuteCtx<typeof CloseIncident>) {
 }
 ```
 
+## declare static context
+
+`ExecuteCtx<C>` and `EventCtx<C>` read `ctx` from `declare static context` (`ContextOf`). No declaration means `unknown`. The field is type-only — `CheckUseCase` does not require it, and Hexok does not ship `Admin` or `Public` context types. Declare it on an app base class next to [guards](/hexok/api/app/guards/).
+
+```ts
+export abstract class UserUseCase extends ExternalUseCase {
+  static readonly guards = [authenticated] as const
+  declare static context: { actor: { id: string } }
+}
+
+class CreateApiKey extends UserUseCase {
+  async execute({ ctx }: ExecuteCtx<typeof CreateApiKey>) {
+    ctx.actor.id
+  }
+}
+```
+
+The second generic still wins: `ExecuteCtx<typeof CreateApiKey, { notReal: number }>` types `ctx` as `{ notReal: number }`.
+
 ## EventCtx
 
-Argument to `EventUseCase.execute`. Same `ports`, `ctx`, `errors`, `signal`, `publish`, `run`, `channels` as `ExecuteCtx`.
+Argument to `EventUseCase.execute`. Same `ports`, `ctx`, `errors`, `signal`, `publish`, `run`, `channels` as `ExecuteCtx`. `ctx` uses the same `declare static context` default.
 
 | Field | Notes |
 | --- | --- |
@@ -67,6 +86,7 @@ A throw from `execute` drops the publish queue.
 
 ## Related
 
+- [Guard](/hexok/api/app/guards/)
 - [ExternalUseCase](/hexok/api/app/external-use-case/)
 - [InternalUseCase](/hexok/api/app/internal-use-case/)
 - [EventUseCase](/hexok/api/app/event-use-case/)

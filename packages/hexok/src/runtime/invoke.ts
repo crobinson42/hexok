@@ -106,7 +106,7 @@ async function runNested(
 
 async function runGuards(
   ctor: ExternalUseCaseCtor | EventUseCaseCtor,
-  ctx: unknown,
+  shared: SharedInvoke,
   errors: Record<string, (data?: unknown) => never>,
   mode: 'required' | 'optional',
 ): Promise<void> {
@@ -127,7 +127,10 @@ async function runGuards(
       );
     }
     seen.add(guard.key);
-    await guard.allow({ ctor, ctx, errors });
+    const next = await guard.allow({ ctor, ctx: shared.ctx, errors });
+    if (next !== undefined) {
+      shared.ctx = next;
+    }
   }
 }
 
@@ -143,7 +146,7 @@ export async function invokeExternal(
     signal: opts?.signal ?? new AbortController().signal,
   };
   const errors = errorFactories(ctor.errors);
-  await runGuards(ctor, shared.ctx, errors, 'required');
+  await runGuards(ctor, shared, errors, 'required');
   const parsed = validate(ctor.input, input);
   if (!parsed.ok) {
     throw validationError('Validation failed', parsed.issues);
@@ -200,7 +203,7 @@ export async function invokeEvent(
   };
   assertHandlersStarted(deps, ctor.publishes);
   const errors = errorFactories(ctor.errors ?? {});
-  await runGuards(ctor, shared.ctx, errors, 'optional');
+  await runGuards(ctor, shared, errors, 'optional');
   const queue: Envelope[] = [];
   const run = nestedRun(deps, queue, shared);
   const publish: Publish = ((event: Parameters<Publish>[0]) => {

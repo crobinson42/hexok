@@ -4,19 +4,20 @@ import type { EventUseCaseCtor, ExternalUseCaseCtor } from './types.js';
 export type GuardArgs<Ctx = unknown> = {
   /** Leaf constructor (`Charge`), not an app base class. */
   ctor: ExternalUseCaseCtor | EventUseCaseCtor;
-  /** Read-only request context. `defineGuard` types this as `InCtx`. */
+  /** Request context for this guard. `defineGuard` types this as `InCtx`. */
   ctx: Ctx;
   /** Factories from `static errors`. Prefer `errors.UNAUTHORIZED()` / `errors.FORBIDDEN()`. */
   errors: Record<string, (data?: unknown) => never>;
 };
 
 /**
- * Identity / permission gate. Throw `CodedError` to refuse; return to allow.
+ * Identity / permission gate. Throw `CodedError` to refuse.
+ * Return `void` to keep ctx; return a value to replace it for the rest of the call.
  * Object literals are unbranded: `OutCtx` is not inferable.
  */
-export type Guard<InCtx = unknown> = {
+export type Guard<InCtx = unknown, Ctx = unknown> = {
   readonly key: string;
-  allow(args: GuardArgs<InCtx>): void | Promise<void>;
+  allow(args: GuardArgs<InCtx>): void | Ctx | Promise<void> | Promise<Ctx>;
 };
 
 declare const GuardOut: unique symbol;

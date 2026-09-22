@@ -1,10 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import { z } from 'zod';
 import {
+  type EventCtx,
   EventUseCase,
   type ExecuteCtx,
   ExternalUseCase,
   type Guard,
+  InternalUseCase,
 } from '../app/index.js';
 import { CodedError } from '../core/index.js';
 import {
@@ -489,7 +491,33 @@ describe('guards', () => {
     expect(entered).toBe(0);
   });
 
-  it('discourages authenticating by mutating defaultCtx', async () => {
+  it('replaces ctx when a guard returns a new object and leaves the default unchanged', async () => {
+    const defaultCtx: { actor?: string } = {};
+    const lift: Guard = {
+      key: 'lift',
+      allow({ ctx }) {
+        return { ...(ctx as object), actor: 'ada' };
+      },
+    };
+    class LiftPing extends ExternalUseCase {
+      static readonly key = 'ping.lift';
+      static readonly input = z.object({});
+      static readonly output = z.unknown();
+      static readonly errors = {} as const;
+      static readonly ports = {};
+      static readonly guards = [lift] as const;
+      async execute({ ctx }: ExecuteCtx<typeof LiftPing>) {
+        return ctx;
+      }
+    }
+    const app = App.from({ ping: LiftPing }).ctx(defaultCtx).build();
+    expect(await app.local.ping.lift({})).toEqual({ actor: 'ada' });
+    expect(defaultCtx).toEqual({});
+    expect(await app.local.ping.lift({})).toEqual({ actor: 'ada' });
+    expect(defaultCtx).toEqual({});
+  });
+
+  it('mutating the default ctx object still leaks into later calls', async () => {
     const defaultCtx: { actor?: string } = {};
     const mutate: Guard = {
       key: 'mutate',
@@ -511,6 +539,93 @@ describe('guards', () => {
     const app = App.from({ ping: MutatePing }).ctx(defaultCtx).build();
     expect(await app.local.ping.mutate({})).toEqual({ actor: 'sneak' });
     expect(defaultCtx.actor).toBe('sneak');
+  });
+
+  it('threads a returned ctx to the next guard', async () => {
+    const seen: unknown[] = [];
+    const first: Guard = {
+      key: 'first',
+      allow({ ctx }) {
+        return { ...(ctx as object), actor: 'ada' };
+      },
+    };
+    const second: Guard = {
+      key: 'second',
+      allow({ ctx }) {
+        seen.push(ctx);
+      },
+    };
+    class ThreadPing extends ExternalUseCase {
+      static readonly key = 'ping.thread';
+      static readonly input = z.object({});
+      static readonly output = z.unknown();
+      static readonly errors = {} as const;
+      static readonly ports = {};
+      static readonly guards = [first, second] as const;
+      async execute({ ctx }: ExecuteCtx<typeof ThreadPing>) {
+        return ctx;
+      }
+    }
+    const app = App.from({ ping: ThreadPing }).ctx({}).build();
+    expect(await app.local.ping.thread({})).toEqual({ actor: 'ada' });
+    expect(seen).toEqual([{ actor: 'ada' }]);
+  });
+
+  it('nested run sees the replaced ctx', async () => {
+    const lift: Guard = {
+      key: 'lift',
+      allow() {
+        return { actor: 'ada' };
+      },
+    };
+    class ReadCtx extends InternalUseCase {
+      static readonly key = 'ctx.read';
+      static readonly input = z.object({});
+      static readonly output = z.unknown();
+      static readonly errors = {} as const;
+      static readonly ports = {};
+      async execute({ ctx }: ExecuteCtx<typeof ReadCtx>) {
+        return ctx;
+      }
+    }
+    class LiftThenRun extends ExternalUseCase {
+      static readonly key = 'ping.nestedLift';
+      static readonly input = z.object({});
+      static readonly output = z.unknown();
+      static readonly errors = {} as const;
+      static readonly ports = {};
+      static readonly guards = [lift] as const;
+      async execute({ run }: ExecuteCtx<typeof LiftThenRun>) {
+        return run(ReadCtx, {});
+      }
+    }
+    const app = App.from({ ping: LiftThenRun, read: ReadCtx }).build();
+    expect(await app.local.ping.nestedLift({})).toEqual({ actor: 'ada' });
+  });
+
+  it('event guards replace ctx for execute', async () => {
+    const lift: Guard = {
+      key: 'lift',
+      allow({ ctx }) {
+        return { ...(ctx as object), actor: 'ada' };
+      },
+    };
+    class LiftHandler extends EventUseCase {
+      static readonly key = 'jobs.lift';
+      static readonly on = JobPosted;
+      static readonly catalog = Jobs;
+      static readonly guards = [lift] as const;
+      static seen: unknown;
+      async execute({ ctx }: EventCtx<typeof LiftHandler>) {
+        LiftHandler.seen = ctx;
+      }
+    }
+    const bus = memoryBus();
+    const app = App.from({ lift: LiftHandler }).bind(Jobs, bus).ctx({}).build();
+    await app.start();
+    await app.publish(jobEnvelope);
+    expect(LiftHandler.seen).toEqual({ actor: 'ada' });
+    await app.stop();
   });
 
   it('runs event guards before aliasPorts so refusals do not leak unprovided port', async () => {

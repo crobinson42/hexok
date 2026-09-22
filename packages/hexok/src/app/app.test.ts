@@ -341,6 +341,27 @@ describe('ExecuteCtx', () => {
     expectTypeOf<ExecuteCtx<typeof Open>['ctx']>().toEqualTypeOf<unknown>();
   });
 
+  it('narrows ctx to last Out when first In is stricter than unknown', () => {
+    const lift = defineGuard<{ sessionId: string }, { actor: string }>({
+      key: 'lift',
+      allow() {},
+    });
+    class Lift extends ExternalUseCase {
+      static readonly key = 'ctx.lift';
+      static readonly input = z.object({});
+      static readonly output = z.object({});
+      static readonly errors = {} as const;
+      static readonly ports = { clock: Clock };
+      static readonly guards = [lift] as const;
+      async execute() {
+        return {};
+      }
+    }
+    expectTypeOf<ExecuteCtx<typeof Lift>['ctx']>().toEqualTypeOf<{
+      actor: string;
+    }>();
+  });
+
   it('narrows ctx to the last defineGuard OutCtx', () => {
     const authed = defineGuard<unknown, { actor: string }>({
       key: 'authed',
@@ -371,7 +392,31 @@ describe('ExecuteCtx', () => {
     }>();
   });
 
-  it('lets declare static context win over the last OutCtx', () => {
+  it('types ctx as declared context when it matches the last OutCtx', () => {
+    const authed = defineGuard<unknown, { actor: string }>({
+      key: 'authed',
+      allow() {},
+    });
+    abstract class WithActor extends ExternalUseCase {
+      declare static context: { actor: string };
+    }
+    class Sub extends WithActor {
+      static readonly key = 'ctx.declared.match';
+      static readonly input = z.object({});
+      static readonly output = z.object({});
+      static readonly errors = {} as const;
+      static readonly ports = { clock: Clock };
+      static readonly guards = [authed] as const;
+      async execute() {
+        return {};
+      }
+    }
+    expectTypeOf<ExecuteCtx<typeof Sub>['ctx']>().toEqualTypeOf<{
+      actor: string;
+    }>();
+  });
+
+  it('puts a declared-context / OutCtx mismatch on ctx as a hexok string', () => {
     const widened = defineGuard<
       { actor: string },
       { actor: string; extra: true }
@@ -383,12 +428,34 @@ describe('ExecuteCtx', () => {
       declare static context: { actor: string };
     }
     class Sub extends WithActor {
-      static readonly key = 'ctx.declared.wins';
+      static readonly key = 'ctx.declared.mismatch';
       static readonly input = z.object({});
       static readonly output = z.object({});
       static readonly errors = {} as const;
       static readonly ports = { clock: Clock };
       static readonly guards = [widened] as const;
+      async execute() {
+        return {};
+      }
+    }
+    expectTypeOf<
+      ExecuteCtx<typeof Sub>['ctx']
+    >().toEqualTypeOf<`hexok: "ctx.declared.mismatch" declared context does not match guard OutCtx`>();
+    expectTypeOf<CheckUseCase<typeof Sub>>().toEqualTypeOf<typeof Sub>();
+  });
+
+  it('does not let unbranded guards disturb declare static context', () => {
+    const authenticated = { key: 'authenticated', allow() {} };
+    abstract class WithActor extends ExternalUseCase {
+      declare static context: { actor: string };
+    }
+    class Sub extends WithActor {
+      static readonly key = 'ctx.unbranded.declared';
+      static readonly input = z.object({});
+      static readonly output = z.object({});
+      static readonly errors = {} as const;
+      static readonly ports = { clock: Clock };
+      static readonly guards = [authenticated] as const;
       async execute() {
         return {};
       }
@@ -424,7 +491,7 @@ describe('ExecuteCtx', () => {
     expectTypeOf<CheckUseCase<typeof Broken>>().toEqualTypeOf<typeof Broken>();
   });
 
-  it('narrows EventCtx the same way, unless the second generic overrides', () => {
+  it('narrows EventCtx the same way', () => {
     const authed = defineGuard<unknown, { actor: string }>({
       key: 'authed',
       allow() {},
@@ -439,9 +506,6 @@ describe('ExecuteCtx', () => {
     expectTypeOf<EventCtx<typeof OnAuthed>['ctx']>().toEqualTypeOf<{
       actor: string;
     }>();
-    expectTypeOf<
-      EventCtx<typeof OnAuthed, { notReal: number }>['ctx']
-    >().toEqualTypeOf<{ notReal: number }>();
   });
 
   it('types ctx from inherited declare static context', () => {
@@ -464,10 +528,14 @@ describe('ExecuteCtx', () => {
     }>();
   });
 
-  it('lets the second generic override declare static context', () => {
-    expectTypeOf<
-      ExecuteCtx<typeof CloseIncident, { notReal: number }>['ctx']
-    >().toEqualTypeOf<{ notReal: number }>();
+  it('rejects a second generic on ExecuteCtx and EventCtx', () => {
+    const _typeChecks = () => {
+      // @ts-expect-error ExecuteCtx takes one type argument
+      null as unknown as ExecuteCtx<typeof CloseIncident, { notReal: number }>;
+      // @ts-expect-error EventCtx takes one type argument
+      null as unknown as EventCtx<typeof NotifyOnClose, { notReal: number }>;
+    };
+    void _typeChecks;
   });
 });
 

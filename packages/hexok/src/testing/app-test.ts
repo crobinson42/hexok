@@ -18,12 +18,12 @@ import {
   type ApiMiddleware,
   type AppBuilder,
   type AppInstance,
+  type BuildMessages,
   type ChannelKindError,
   type DuplicateCatalogError,
   type DuplicateChannelError,
   type DuplicatePortError,
   type Interceptor,
-  type MissingMessages,
   type NestedClient,
   App as RuntimeApp,
 } from '../runtime/index.js';
@@ -199,11 +199,14 @@ export class TestAppBuilder<
 
   /**
    * Complete the graph; incomplete builders expose `build` as the missing
-   * port/catalog message (not callable). The instance includes `published` and `as`.
+   * port/catalog/channel or branded-guard InCtx message (not callable).
+   * The instance includes `published` and `as`.
    */
-  get build(): [MissingMessages<Bag, Provided, Bound, Routed>] extends [never]
+  get build(): [BuildMessages<Bag, Provided, Bound, Routed, Ctx>] extends [
+    never,
+  ]
     ? () => TestAppInstance<Bag, Ctx, Routed>
-    : MissingMessages<Bag, Provided, Bound, Routed> {
+    : BuildMessages<Bag, Provided, Bound, Routed, Ctx> {
     const published = this.#published;
     return (() => {
       const app = (
@@ -216,10 +219,10 @@ export class TestAppBuilder<
         as: (ctx: Ctx) => rebindLocal(app.local, ctx) as NestedClient<Bag, Ctx>,
       });
     }) as () => TestAppInstance<Bag, Ctx, Routed> as [
-      MissingMessages<Bag, Provided, Bound, Routed>,
+      BuildMessages<Bag, Provided, Bound, Routed, Ctx>,
     ] extends [never]
       ? () => TestAppInstance<Bag, Ctx, Routed>
-      : MissingMessages<Bag, Provided, Bound, Routed>;
+      : BuildMessages<Bag, Provided, Bound, Routed, Ctx>;
   }
 }
 

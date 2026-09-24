@@ -17,6 +17,8 @@ Hexok is a small set of classes. Import them from `hexok`.
 | EventCatalog | `EventCatalog('domain', { userCreated })` |
 | Errors | `Errors('domain', { BlankName: { message: 'Name is blank' } })` |
 
+`EventMessage<typeof DomainEvents>` is `{ key, payload }` for each entry in that catalog. Pass a catalog key as the second type argument to keep one entry.
+
 The string is the token. Its type is that literal. A schema is an argument of the same call, so it cannot be left out. `execute`, the methods on a port, `fromSource`, and `toSource` are abstract: the compiler reports a missing one on the class. `parse`, `set`, `start`, and `stop` are concrete methods you can override.
 
 A use case takes its ports in the constructor. Hexok does not route HTTP or assemble the object graph.

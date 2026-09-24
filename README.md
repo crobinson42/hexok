@@ -22,7 +22,7 @@ import { Adapter, Entity, Errors, Event, EventCatalog, Mapper, Port, Schema, Use
 | `EventCatalog` | `EventCatalog('domain', { userCreated })` | the token and the event map are arguments |
 | `Errors` | `Errors('domain', { BlankName: { message } })` | each key is a factory; throw the error it returns |
 
-`Result`, `CodedError`, and Standard Schema helpers ship next to the primitives. HTTP, gateways, and composition do not. A use case receives its ports in the constructor, and the application constructs that use case.
+`Result`, `CodedError`, and Standard Schema helpers ship next to the primitives. `EventMessage<typeof DomainEvents>` is `{ key, payload }` for each catalog entry; pass a catalog key as the second type argument to keep one entry. HTTP, gateways, and composition do not. A use case receives its ports in the constructor, and the application constructs that use case.
 
 ```ts
 class DomainError extends Errors('domain', {

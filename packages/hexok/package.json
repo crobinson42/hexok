@@ -1,7 +1,7 @@
 {
   "name": "hexok",
   "version": "1.0.0",
-  "description": "TypeScript primitives for hexagonal software: Entity, Schema, UseCase, Port, Adapter, EventCatalog, and Errors.",
+  "description": "TypeScript primitives for hexagonal software: Schema, Entity, UseCase, Port, Adapter, Mapper, Event, EventCatalog, and Errors.",
   "type": "module",
   "license": "MIT",
   "sideEffects": false,

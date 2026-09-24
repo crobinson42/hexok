@@ -1,6 +1,6 @@
 # hexok
 
-TypeScript primitives for hexagonal software: `Schema`, `Entity`, `UseCase`, `Port`, `Adapter`, `Event`, `EventCatalog`, and `Errors`.
+TypeScript primitives for hexagonal software: `Schema`, `Entity`, `UseCase`, `Port`, `Adapter`, `Mapper`, `Event`, `EventCatalog`, and `Errors`. A `Mapper` subclass implements `fromSource` and `toSource`; adapters call `toModel` and `fromModel`.
 
 Import them from `hexok`. There is no HTTP layer and no composition root in this package. Construct use cases with the ports they need.
 

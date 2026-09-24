@@ -1,8 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { createApp, UserRecord } from './create-user.js';
-import { DomainError } from './errors.js';
-import { mapError } from './map-error.js';
-import { UserCreatedEvent, UserEntity } from './user.js';
+import { UserRecord } from '../adapters/user-record.js';
+import { createApp } from '../app.js';
+import { UserEntity } from '../entities/user.js';
+import { DomainError } from '../errors/domain.js';
+import { mapError } from '../errors/map-error.js';
+import { UserCreatedEvent } from '../events/user-created.js';
 
 describe('CreateUser', () => {
   it('maps the entity id to a stored _id and loads the entity back', () => {

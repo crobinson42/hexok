@@ -1,5 +1,5 @@
 import { CodedError } from 'hexok';
-import { DomainError } from './errors.js';
+import { DomainError } from './domain.js';
 
 export type HttpResult = {
   status: number;

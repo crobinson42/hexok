@@ -53,3 +53,37 @@ export function EventCatalog<
 
   return CatalogClass;
 }
+
+/**
+ * Payload of an event class. Read from the instance so
+ * {@link EventConstructor}'s `object` return does not erase it.
+ */
+type EventPayload<Event> = Event extends abstract new (
+  ...args: never[]
+) => infer Instance
+  ? Instance extends { readonly payload: infer Payload }
+    ? Payload
+    : never
+  : never;
+
+/**
+ * `{ key, payload }` for one catalog entry, or every entry when `Key` is omitted.
+ * `key` is the catalog map name. The event token stays on the class.
+ *
+ * ```ts
+ * abstract publish(event: EventMessage<typeof DomainEvents>): Promise<void>
+ * publish({ key: 'userCreated', payload })
+ * ```
+ *
+ * `EventMessage<typeof DomainEvents, 'userCreated'>` keeps that one entry.
+ */
+export type EventMessage<
+  Catalog extends { readonly events: Record<string, EventConstructor> },
+  Key extends keyof Catalog['events'] & string = keyof Catalog['events'] &
+    string,
+> = {
+  [K in Key]: {
+    key: K;
+    payload: EventPayload<Catalog['events'][K]>;
+  };
+}[Key];

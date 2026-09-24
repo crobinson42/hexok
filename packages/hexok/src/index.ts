@@ -1,5 +1,5 @@
 export { Adapter } from './adapter.js';
-export { EventCatalog } from './catalog.js';
+export { EventCatalog, type EventMessage } from './catalog.js';
 export { CodedError, validationError } from './coded-error.js';
 export { type DeepReadonly, Entity, type EntityInstance } from './entity.js';
 export {

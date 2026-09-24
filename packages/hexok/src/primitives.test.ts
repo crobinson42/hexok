@@ -1,7 +1,7 @@
 import { describe, expect, expectTypeOf, it } from 'vitest';
 import { z } from 'zod';
 import { Adapter } from './adapter.js';
-import { EventCatalog } from './catalog.js';
+import { EventCatalog, type EventMessage } from './catalog.js';
 import { CodedError } from './coded-error.js';
 import { Entity } from './entity.js';
 import { Event } from './event.js';
@@ -253,6 +253,49 @@ describe('UseCase, Adapter, Event, Schema', () => {
       }),
     ).rejects.toThrow(CodedError);
     await users.stop();
+  });
+
+  it('types catalog messages from the event map', () => {
+    class UserRenamed extends Event(
+      'user.renamed',
+      z.object({ id: z.string(), name: z.string() }),
+    ) {}
+    class Catalog extends EventCatalog('domain', {
+      userCreated: UserCreated,
+      userRenamed: UserRenamed,
+    }) {}
+
+    expectTypeOf<EventMessage<typeof Catalog>>().toEqualTypeOf<
+      | {
+          key: 'userCreated';
+          payload: { id: string; name: string; email: string };
+        }
+      | { key: 'userRenamed'; payload: { id: string; name: string } }
+    >();
+    expectTypeOf<EventMessage<typeof Catalog, 'userRenamed'>>().toEqualTypeOf<{
+      key: 'userRenamed';
+      payload: { id: string; name: string };
+    }>();
+
+    function publish(event: EventMessage<typeof Catalog>): void {
+      void event;
+    }
+    publish({
+      key: 'userCreated',
+      payload: { id: '1', name: 'Ada', email: 'ada@ex.com' },
+    });
+    // @ts-expect-error email is required for userCreated
+    publish({ key: 'userCreated', payload: { id: '1', name: 'Ada' } });
+    publish({
+      // @ts-expect-error catalog key, not the event token
+      key: 'user.created',
+      payload: { id: '1', name: 'Ada', email: 'ada@ex.com' },
+    });
+
+    // @ts-expect-error the event map is static
+    type InstanceMessage = EventMessage<Catalog>;
+    const _ignored: InstanceMessage | undefined = undefined;
+    void _ignored;
   });
 
   it('parses an event and looks it up on the catalog', () => {

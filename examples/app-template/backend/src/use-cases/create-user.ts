@@ -1,14 +1,16 @@
 import { UseCase } from 'hexok';
 import { UserEntity } from '../entities/user.js';
 import { DomainError } from '../errors/domain.js';
+import type { DomainEventPublisher } from '../ports/domain-event-publisher.js';
 import type { UserRepository } from '../ports/user-repository.js';
-import type {DomainEventPublisher} from "../ports/domain-event-publisher.js";
 
 export class CreateUser extends UseCase('user.create') {
-  constructor(readonly deps: {
-    domainEventPublisher: DomainEventPublisher;
-    users: UserRepository;
-  }) {
+  constructor(
+    readonly deps: {
+      domainEventPublisher: DomainEventPublisher;
+      users: UserRepository;
+    },
+  ) {
     super();
   }
 
@@ -22,7 +24,7 @@ export class CreateUser extends UseCase('user.create') {
     const user = UserEntity.create(input);
     await this.deps.users.save(user);
     await this.deps.domainEventPublisher.publish({
-      type: 'userCreated',
+      key: 'userCreated',
       payload: {
         id: user.props.id,
         name: user.props.name,

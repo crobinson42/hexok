@@ -1,24 +1,56 @@
-import { Adapter, EventCatalog, Port, UseCase } from 'hexok';
+import {
+  Adapter,
+  EventCatalog,
+  type InferSchema,
+  Mapper,
+  Port,
+  UseCase,
+} from 'hexok';
+import { z } from 'zod';
 import { DomainError } from './errors.js';
-import { UserCreatedEvent, UserEntity, type UserSchema } from './user.js';
+import { UserCreatedEvent, UserEntity } from './user.js';
+
+const userRecordSchema = z.object({
+  _id: z.string(),
+  name: z.string(),
+  email: z.string(),
+});
+
+type UserRecordData = InferSchema<typeof userRecordSchema>;
+
+/** In-memory row. The entity property `id` is stored as `_id`. */
+export class UserRecord extends Mapper(
+  'memory.User',
+  UserEntity,
+  userRecordSchema,
+) {
+  protected fromSource(user: UserEntity): UserRecordData {
+    const props = user.toProps();
+    return { _id: props.id, name: props.name, email: props.email };
+  }
+
+  protected toSource(record: UserRecordData) {
+    return { id: record._id, name: record.name, email: record.email };
+  }
+}
 
 export abstract class UserRepository extends Port('UserRepository') {
-  abstract get(id: string): Promise<UserSchema | null>;
+  abstract get(id: string): Promise<UserEntity | null>;
   abstract save(user: UserEntity): Promise<void>;
 }
 
 export class InMemoryUsers extends Adapter(UserRepository) {
-  #rows = new Map<string, ReturnType<UserEntity['toProps']>>();
+  readonly #model = new UserRecord();
+  #rows = new Map<string, UserRecordData>();
 
-  // repo queries should return a schema, not an entity
   async get(id: string): Promise<UserEntity | null> {
-    const props = this.#rows.get(id);
-    return props === undefined ? null : UserEntity.restore(props);
+    const record = this.#rows.get(id);
+    return record === undefined ? null : this.#model.fromModel(record);
   }
 
-  // repo commands should accept an entity, not a schema, to ensure the entity is valid
   async save(user: UserEntity): Promise<void> {
-    this.#rows.set(user.props.id, user.toProps());
+    const record = this.#model.toModel(user);
+    this.#rows.set(record._id, record);
     user.commit();
   }
 }

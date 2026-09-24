@@ -1,10 +1,26 @@
 import { describe, expect, it } from 'vitest';
-import { createApp } from './create-user.js';
+import { createApp, UserRecord } from './create-user.js';
 import { DomainError } from './errors.js';
 import { mapError } from './map-error.js';
 import { UserCreatedEvent, UserEntity } from './user.js';
 
 describe('CreateUser', () => {
+  it('maps the entity id to a stored _id and loads the entity back', () => {
+    const user = UserEntity.create({
+      id: '1',
+      name: 'Ada',
+      email: 'ada@ex.com',
+    });
+    const record = new UserRecord().toModel(user);
+    expect(record).toEqual({ _id: '1', name: 'Ada', email: 'ada@ex.com' });
+
+    const loaded = new UserRecord().fromModel(record);
+    expect(loaded).toBeInstanceOf(UserEntity);
+    expect(loaded.props).toEqual(user.props);
+    expect(loaded.isNew).toBe(false);
+    expect(loaded.isValidated).toBe(false);
+  });
+
   it('saves a user and refuses a duplicate', async () => {
     const app = createApp();
     const user = await app.createUser.execute({

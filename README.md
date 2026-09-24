@@ -1,109 +1,70 @@
 # Hexok
 
-[![CI](https://github.com/crobinson42/hexok/actions/workflows/ci.yml/badge.svg)](https://github.com/crobinson42/hexok/actions/workflows/ci.yml)
-[![npm](https://img.shields.io/npm/v/hexok)](https://www.npmjs.com/package/hexok)
-
-Hexok (Hexo Kit) is a TypeScript kit for writing a clean-architecture backend as **ordinary classes**: Entity, Port, Adapter, UseCase, Guard, Event, Interceptor.
-
-A new hire should open a use-case file and understand the business flow without a glossary of hidden methods, phantom fields, or `meta` bags.
-
-## Install
+Hexok is a small TypeScript kit for hexagonal software. You extend a primitive, and the compiler tells you what that primitive still requires. You wire objects together yourself.
 
 ```bash
 npm i hexok
 ```
 
-Import from a layer. There is no root barrel — that keeps the public API aligned with the architecture.
-
 ```ts
-import { Entity } from 'hexok/domain'
-import { ExternalUseCase } from 'hexok/app'
-import { App } from 'hexok/runtime'
-import { App as TestApp, InMemoryRepository } from 'hexok/testing'
+import { Adapter, Entity, Errors, Event, EventCatalog, Port, Schema, UseCase } from 'hexok'
 ```
 
-| Import | What it is |
-| --- | --- |
-| `hexok/core` | `Result`, Standard Schema V1, `ErrorMap` |
-| `hexok/domain` | `Entity`, `DeepReadonly`, `Port`, `EventCatalog`, `DomainEvent` |
-| `hexok/app` | `ExternalUseCase`, `InternalUseCase`, `EventUseCase`, `Guard`, contract derivation |
-| `hexok/infra` | `Mapper` (entity ↔ row), `Adapter.of` |
-| `hexok/runtime` | `App.from` composition, completeness, interceptors, local client, HTTP |
-| `hexok/testing` | Test-only: `App.test`, in-memory repo/bus/queue/channel, `published` |
+| Primitive | What you extend | What the compiler requires |
+| --- | --- | --- |
+| `Schema` | `Schema('User', zodSchema)` | the token and the schema are arguments |
+| `Entity` | `Entity('User', UserSchema)` | `create` and `set` are already implemented; add rules as methods |
+| `Port` | `Port('UserRepository')` | the abstract methods you declare on the port |
+| `Adapter` | `Adapter(UserRepository)` | every abstract port method; override `start` / `stop` when you need them |
+| `UseCase` | `UseCase('user.create')` | `execute`. Pass ports through the constructor |
+| `Event` | `Event('user.created', UserSchema)` | the token and the payload schema are arguments |
+| `EventCatalog` | `EventCatalog('domain', { userCreated })` | the token and the event map are arguments |
+| `Errors` | `Errors('domain', { BlankName: { message } })` | each key is a factory; throw the error it returns |
 
-Docs: [crobinson42.github.io/hexok](https://crobinson42.github.io/hexok/) (published on each npm release). Local: `npm run dev -w @hexok/docs`.
-
-## Write a use case
+`Result`, `CodedError`, and Standard Schema helpers ship next to the primitives. HTTP, gateways, and composition do not. A use case receives its ports in the constructor, and the application constructs that use case.
 
 ```ts
-class CloseIncident extends ExternalUseCase {
-  static readonly key = 'incident.close'
-  static readonly input = z.object({ id: z.string() })
-  static readonly output = Incident.schema
-  static readonly errors = {
-    ...Incident.errors,
-    NOT_FOUND: { message: 'Incident not found' },
-  } as const
-  static readonly ports = { incidents: IncidentRepository, clock: Clock }
-  static readonly guards = [] as const
-  static readonly publishes = [DomainEvents] as const
+class DomainError extends Errors('domain', {
+  BlankName: { message: 'Name is blank' },
+  UserExists: { message: 'User already exists', data: z.object({ id: z.string() }) },
+}) {}
 
-  async execute({ input, ports, errors, publish }: ExecuteCtx<typeof CloseIncident>) {
-    const incident = await ports.incidents.get(input.id)
-    if (!incident) throw errors.NOT_FOUND()
-    const closed = incident.close(ports.clock.now())
-    await ports.incidents.save(closed)
-    publish(new IncidentClosed({ id: closed.props.id, closedAt: closed.props.closedAt }))
-    return closed.toProps()
+class User extends Entity('User', userSchema) {
+  rename(name: string): this {
+    if (name.trim() === '') throw DomainError.BlankName()
+    return this.set((draft) => {
+      draft.name = name
+    })
   }
 }
+
+abstract class UserRepository extends Port('UserRepository') {
+  abstract get(id: string): Promise<User | null>
+  abstract save(user: User): Promise<void>
+}
+
+class InMemoryUsers extends Adapter(UserRepository) {
+  override async get(id: string): Promise<User | null> { /* ... */ }
+  override async save(user: User): Promise<void> { /* ... */ }
+}
+
+class CreateUser extends UseCase('user.create') {
+  constructor(private readonly users: UserRepository) { super() }
+  async execute(input: { id: string; name: string; email: string }): Promise<User> {
+    const existing = await this.users.get(input.id)
+    if (existing) throw DomainError.UserExists({ id: input.id })
+    const user = User.create(input)
+    await this.users.save(user)
+    return user
+  }
+}
+
+const createUser = new CreateUser(new InMemoryUsers())
+await createUser.execute({ id: '1', name: 'Ada', email: 'ada@ex.com' })
 ```
 
-The entity owns the rule (`incident.close(now)`). The use case orchestrates. `guards = [] as const` is public; omitting `guards` fails closed.
+The string you pass is the token. Its type is that string literal. A subclass does not redeclare it, and a different literal is not assignable over the top of it.
 
-## Boot an app
+`static abstract` is not part of TypeScript, so a base class cannot force a subclass to fill in a static field. Hexok therefore takes the token and the schema as arguments of the primitive. Required behavior is an abstract instance method: omit `execute`, or omit a port method on an adapter, and the error is on that class.
 
-```ts
-const app = App.from(useCases)
-  .provide(IncidentRepository, repo)
-  .provide(Clock, clock)
-  .bind(DomainEvents, bus)
-  .ctx<AppContext>({ requestId: 'boot' })
-  .ctxFrom(({ request, ctx }) => ctx)
-  .build()
-
-await app.start()
-await app.local.incident.close({ id: '1' })
-await app.stop()
-```
-
-`build()` is not callable until every required port and catalog is provided — at compile time and at runtime.
-
-Call `start()` before use cases that publish to catalogs with handlers.
-
-HTTP: `POST /rpc/incident/close` with `{ input: { id: '1' } }`. Request context is `.ctx()` / `.ctxFrom(({ request, ctx }) => ctx)` — never `body.ctx`.
-
-## Test
-
-```ts
-const app = TestApp.test({ close: CloseIncident })
-  .provide(IncidentRepository, InMemoryRepository.of(IncidentRepository, {
-    keyBy: 'id',
-    seed: [Incident.open('1', 'Seeded')],
-  }))
-  .provide(Clock, { now: () => new Date() })
-  .bind(DomainEvents, InMemoryBus.create())
-  .build()
-
-await app.local.incident.close({ id: '1' })
-expect(app.published).toHaveLength(1)
-```
-
-## Extend
-
-Identity gates are `static readonly guards` on the use case (`[] as const` is public). Interceptors wrap cross-cutting work; first registered is outer. `examples/extend` still shows request-scope and unit-of-work interceptors — not the guard seam.
-
-## Examples
-
-- [`examples/extend`](examples/extend) — request-scope and unit-of-work interceptors.
-- [`examples/app-template`](examples/app-template) — Astro client + empty hexok backend.
+See `examples/app-template` for a wired slice and `examples/extend` for overriding `parse` and `start`.

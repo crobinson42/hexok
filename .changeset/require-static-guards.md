@@ -2,12 +2,10 @@
 "hexok": major
 ---
 
-Require `static readonly guards` on every ExternalUseCase. Empty `[] as const` is public; omitting the field is a compile-time and runtime error. Guards run before input validation and interceptors.
+Hexok is now the primitives only: `Schema`, `Entity`, `UseCase`, `Port`, `Adapter`, `Event`, `EventCatalog`, and `Errors`, imported from `hexok`.
 
-`ExecuteCtx` and `EventCtx` take one type argument. `ctx` is no longer overridden by a second generic.
+`Errors` is an application error catalog. `throw DomainError.UserExists({ id })` from a use case, an entity, or an adapter. A gateway imports that catalog and maps each member.
 
-`Guard.allow` may return the next ctx for the call (`void` leaves it unchanged). A replacement is visible to later guards, `execute`, and nested `run`; it does not mutate the `.ctx()` default.
+The token and any schema are arguments of the primitive (`class User extends Entity('User', userSchema)`), so a subclass does not declare `static readonly` fields and does not write `as const`. Required behavior is an abstract method. Omitting `execute`, or a port method on an adapter, is a compiler error on that class. `start`, `stop`, `parse`, and `set` can be overridden.
 
-`declare static context` must be mutually assignable with the last branded `OutCtx`. A mismatch types `ExecuteCtx['ctx']` as a `hexok:` string.
-
-`.ctx<C>()` is inbound. At `build`, `C` must be assignable to each branded guard `InCtx` or `build` is a `hexok:` sentence (same mechanism as missing ports). Unbranded guards do not force `.ctx()`.
+`hexok/core`, `hexok/domain`, `hexok/app`, `hexok/infra`, `hexok/runtime`, and `hexok/testing` are gone, along with `App.from`, HTTP, RPC, guards, interceptors, and channels. A use case takes its ports in the constructor. The application constructs it.

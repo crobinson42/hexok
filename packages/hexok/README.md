@@ -1,31 +1,7 @@
 # hexok
 
-Hexo Kit — a TypeScript kit for writing a clean-architecture backend as ordinary classes: Entity, Port, Adapter, UseCase, Event, Interceptor.
+TypeScript primitives for hexagonal software: `Schema`, `Entity`, `UseCase`, `Port`, `Adapter`, `Event`, `EventCatalog`, and `Errors`.
 
-**Docs:** https://crobinson42.github.io/hexok/
+Import them from `hexok`. There is no HTTP layer and no composition root in this package. Construct use cases with the ports they need.
 
-## Install
-
-```bash
-npm i hexok
-```
-
-Import from a layer. There is no root barrel.
-
-```ts
-import { Entity } from 'hexok/domain'
-import { ExternalUseCase } from 'hexok/app'
-import { App } from 'hexok/runtime'
-import { App as TestApp, InMemoryRepository } from 'hexok/testing'
-```
-
-| Import | What it is |
-| --- | --- |
-| `hexok/core` | `Result`, Standard Schema V1, `ErrorMap`, `CodedError` |
-| `hexok/domain` | `Entity`, `Port`, `EventCatalog`, `DomainEvent` |
-| `hexok/app` | `ExternalUseCase`, `InternalUseCase`, `EventUseCase`, `EventChannel` |
-| `hexok/infra` | `Mapper`, `Adapter.of` |
-| `hexok/runtime` | `App.from`, interceptors, local client, HTTP |
-| `hexok/testing` | `App.test`, in-memory adapters |
-
-Full API: https://crobinson42.github.io/hexok/
+The root [README](../../README.md) shows the shape. Tokens and schemas are arguments of each primitive, so they cannot be forgotten. `execute` and port methods are abstract, so a missing method is a compiler error on the class. `start`, `stop`, `parse`, and `set` are concrete methods you can override.

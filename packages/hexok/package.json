@@ -1,7 +1,7 @@
 {
   "name": "hexok",
   "version": "1.0.0",
-  "description": "A TypeScript kit for writing a clean-architecture backend as ordinary classes.",
+  "description": "TypeScript primitives for hexagonal software: Entity, Schema, UseCase, Port, Adapter, EventCatalog, and Errors.",
   "type": "module",
   "license": "MIT",
   "sideEffects": false,
@@ -28,29 +28,9 @@
     "access": "public"
   },
   "exports": {
-    "./core": {
-      "types": "./dist/core/index.d.ts",
-      "import": "./dist/core/index.js"
-    },
-    "./domain": {
-      "types": "./dist/domain/index.d.ts",
-      "import": "./dist/domain/index.js"
-    },
-    "./app": {
-      "types": "./dist/app/index.d.ts",
-      "import": "./dist/app/index.js"
-    },
-    "./infra": {
-      "types": "./dist/infra/index.d.ts",
-      "import": "./dist/infra/index.js"
-    },
-    "./runtime": {
-      "types": "./dist/runtime/index.d.ts",
-      "import": "./dist/runtime/index.js"
-    },
-    "./testing": {
-      "types": "./dist/testing/index.d.ts",
-      "import": "./dist/testing/index.js"
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
     },
     "./package.json": "./package.json"
   },

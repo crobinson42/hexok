@@ -1,5 +1,7 @@
 # @hexok/docs
 
+> Note: There are no documentation pages yet - this project is still being polished/shaped/changed.
+
 Hexok documentation site (Astro + Starlight).
 
 Published at [crobinson42.github.io/hexok](https://crobinson42.github.io/hexok/) when `hexok` is published to npm.

@@ -7,7 +7,7 @@ npm i hexok
 ```
 
 ```ts
-import { Adapter, Entity, Errors, Event, EventCatalog, Mapper, Port, Schema, UseCase } from 'hexok'
+import { Adapter, Entity, Errors, Event, EventCatalog, EventHandler, Mapper, Port, Schema, UseCase } from 'hexok'
 ```
 
 | Primitive | What you extend | What the compiler requires |
@@ -20,9 +20,10 @@ import { Adapter, Entity, Errors, Event, EventCatalog, Mapper, Port, Schema, Use
 | `UseCase` | `UseCase('user.create')` | `execute`. Pass ports through the constructor |
 | `Event` | `Event('user.created', UserSchema)` | the token and the payload schema are arguments |
 | `EventCatalog` | `EventCatalog('domain', { userCreated })` | the token and the event map are arguments |
+| `EventHandler` | `EventHandler('on.user.created', UserCreated)` | `handle` |
 | `Errors` | `Errors('domain', { BlankName: { message } })` | each key is a factory; throw the error it returns |
 
-`Result`, `CodedError`, and Standard Schema helpers ship next to the primitives. `EventMessage<typeof DomainEvents>` is `{ key, payload }` for each catalog entry; pass a catalog key as the second type argument to keep one entry. HTTP, gateways, and composition do not. A use case receives its ports in the constructor, and the application constructs that use case.
+`Result`, `CodedError`, and Standard Schema helpers ship next to the primitives. `EventInstance<typeof DomainEvents>` is the catalog's event objects. A use case publishes `new UserCreated(...)`. `EventMessage<typeof DomainEvents>` is `{ key, payload }` for an adapter. `DomainEvents.message` and `DomainEvents.parse` convert between them. Pass a catalog key as the second type argument to keep one entry. HTTP, gateways, and composition do not. A use case receives its ports in the constructor, and the application constructs that use case.
 
 ```ts
 class DomainError extends Errors('domain', {

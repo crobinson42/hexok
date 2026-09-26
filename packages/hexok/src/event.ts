@@ -29,6 +29,8 @@ export function Event<const Token extends string, S extends SchemaSource>(
 
     /** Nominal marker. Each `Event(...)` call is a distinct class. */
     readonly #brand = true;
+    /** Event name. Same literal as the static token. */
+    readonly token: Token = token;
     /** Typed payload. Not validated in the constructor. */
     readonly payload: InferSchema<S>;
 
@@ -40,9 +42,14 @@ export function Event<const Token extends string, S extends SchemaSource>(
     /**
      * Validate `value` and construct an event.
      * Throws `CodedError` `VALIDATION` when the schema rejects it.
-     * Override to customize the boundary.
+     * A subclass receives its own instance. Override to customize the boundary.
      */
-    static parse(value: unknown): EventClass {
+    static parse<T extends EventClass>(
+      this: new (
+        payload: InferSchema<S>,
+      ) => T,
+      value: unknown,
+    ): T {
       const parsed = validate(definition, value);
       if (!parsed.ok) {
         throw validationError(
@@ -50,7 +57,7 @@ export function Event<const Token extends string, S extends SchemaSource>(
           parsed.issues,
         );
       }
-      return new EventClass(parsed.value as InferSchema<S>);
+      return new this(parsed.value as InferSchema<S>);
     }
   }
 

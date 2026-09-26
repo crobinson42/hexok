@@ -49,31 +49,108 @@ export function EventCatalog<
       }
       return event;
     }
+
+    /**
+     * Serializable `{ key, payload }` for an instance from this catalog.
+     * `key` is the map name. Throws when `event` is not registered here.
+     */
+    static message(
+      event: EventInstance<CatalogOf<Events>>,
+    ): EventMessage<CatalogOf<Events>> {
+      for (const key of Object.keys(registered) as (keyof Events & string)[]) {
+        const Ctor = registered[key];
+        if (Ctor !== undefined && event instanceof Ctor) {
+          // The instance type does not narrow to one catalog key.
+          const payload = (event as { readonly payload: unknown }).payload;
+          return { key, payload } as EventMessage<CatalogOf<Events>>;
+        }
+      }
+      const name =
+        'token' in event && typeof event.token === 'string'
+          ? event.token
+          : 'unknown';
+      throw new Error(`hexok: event "${name}" is not in catalog "${token}"`);
+    }
+
+    /**
+     * Validate a `{ key, payload }` message and construct the event.
+     * Throws when `key` is not in this catalog.
+     * Throws `CodedError` `VALIDATION` when the payload schema rejects it.
+     */
+    static parse(value: unknown): EventInstance<CatalogOf<Events>> {
+      if (!isMessage(value)) {
+        throw new Error(`hexok: catalog "${token}" expected { key, payload }`);
+      }
+      if (!Object.hasOwn(registered, value.key)) {
+        throw new Error(
+          `hexok: event "${value.key}" is not in catalog "${token}"`,
+        );
+      }
+      const EventClass = registered[value.key as keyof Events] as {
+        parse?(input: unknown): EventInstance<CatalogOf<Events>>;
+      };
+      if (typeof EventClass.parse !== 'function') {
+        throw new Error(
+          `hexok: event "${value.key}" in catalog "${token}" has no parse`,
+        );
+      }
+      return EventClass.parse(value.payload);
+    }
   }
 
   return CatalogClass;
 }
 
 /**
- * Payload of an event class. Read from the instance so
+ * Instance of an event class. Read from the constructor so
  * {@link EventConstructor}'s `object` return does not erase it.
  */
-type EventPayload<Event> = Event extends abstract new (
+type EventInstanceOf<Event> = Event extends abstract new (
   ...args: never[]
 ) => infer Instance
-  ? Instance extends { readonly payload: infer Payload }
-    ? Payload
-    : never
+  ? Instance
   : never;
 
 /**
- * `{ key, payload }` for one catalog entry, or every entry when `Key` is omitted.
- * `key` is the catalog map name. The event token stays on the class.
+ * Payload of an event class. Read from the instance so
+ * {@link EventConstructor}'s `object` return does not erase it.
+ */
+type EventPayload<Event> =
+  EventInstanceOf<Event> extends {
+    readonly payload: infer Payload;
+  }
+    ? Payload
+    : never;
+
+/** Catalog shape {@link EventInstance} and {@link EventMessage} read. */
+type CatalogOf<Events extends Record<string, EventConstructor>> = {
+  readonly events: Events;
+};
+
+/**
+ * Instance of one catalog entry, or every entry when `Key` is omitted.
+ * `token` is the event name. `payload` is the schema output.
  *
  * ```ts
- * abstract publish(event: EventMessage<typeof DomainEvents>): Promise<void>
- * publish({ key: 'userCreated', payload })
+ * abstract publish(event: EventInstance<typeof DomainEvents>): Promise<void>
+ * publish(new UserCreated({ id, name, email }))
  * ```
+ *
+ * `EventInstance<typeof DomainEvents, 'userCreated'>` keeps that one entry.
+ */
+export type EventInstance<
+  Catalog extends { readonly events: Record<string, EventConstructor> },
+  Key extends keyof Catalog['events'] & string = keyof Catalog['events'] &
+    string,
+> = {
+  [K in Key]: EventInstanceOf<Catalog['events'][K]>;
+}[Key];
+
+/**
+ * `{ key, payload }` for one catalog entry, or every entry when `Key` is omitted.
+ * `key` is the catalog map name. The event token stays on the instance.
+ * Adapters send this value. {@link EventCatalog} `message` and `parse` convert
+ * it to and from an {@link EventInstance}.
  *
  * `EventMessage<typeof DomainEvents, 'userCreated'>` keeps that one entry.
  */
@@ -87,3 +164,9 @@ export type EventMessage<
     payload: EventPayload<Catalog['events'][K]>;
   };
 }[Key];
+
+function isMessage(value: unknown): value is { key: string; payload: unknown } {
+  if (typeof value !== 'object' || value === null) return false;
+  if (!('key' in value) || typeof value.key !== 'string') return false;
+  return 'payload' in value;
+}

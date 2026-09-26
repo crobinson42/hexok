@@ -1,7 +1,11 @@
 import { describe, expect, expectTypeOf, it } from 'vitest';
 import { z } from 'zod';
 import { Adapter } from './adapter.js';
-import { EventCatalog, type EventMessage } from './catalog.js';
+import {
+  EventCatalog,
+  type EventInstance,
+  type EventMessage,
+} from './catalog.js';
 import { CodedError } from './coded-error.js';
 import { Entity } from './entity.js';
 import { Event } from './event.js';
@@ -276,6 +280,38 @@ describe('UseCase, Adapter, Event, Schema', () => {
       key: 'userRenamed';
       payload: { id: string; name: string };
     }>();
+    expectTypeOf<EventInstance<typeof Catalog>>().toEqualTypeOf<
+      UserCreated | UserRenamed
+    >();
+    expectTypeOf<
+      EventInstance<typeof Catalog, 'userRenamed'>
+    >().toEqualTypeOf<UserRenamed>();
+
+    function publishInstance(event: EventInstance<typeof Catalog>): string {
+      switch (event.token) {
+        case 'user.created':
+          return event.payload.email;
+        case 'user.renamed':
+          return event.payload.name;
+        default: {
+          const leftover: never = event;
+          return leftover;
+        }
+      }
+    }
+    expect(
+      publishInstance(
+        new UserCreated({ id: '1', name: 'Ada', email: 'ada@ex.com' }),
+      ),
+    ).toBe('ada@ex.com');
+    expect(publishInstance(new UserRenamed({ id: '1', name: 'Ada' }))).toBe(
+      'Ada',
+    );
+    // @ts-expect-error an instance is required
+    publishInstance({
+      token: 'user.created',
+      payload: { id: '1', name: 'Ada', email: 'ada@ex.com' },
+    });
 
     function publish(event: EventMessage<typeof Catalog>): void {
       void event;
@@ -304,11 +340,61 @@ describe('UseCase, Adapter, Event, Schema', () => {
       name: 'Ada',
       email: 'ada@ex.com',
     });
+    expect(event).toBeInstanceOf(UserCreated);
     expect(event.payload.email).toBe('ada@ex.com');
+    expect(event.token).toBe('user.created');
+    expectTypeOf(event.token).toEqualTypeOf<'user.created'>();
     expect(DomainEvents.get('userCreated')).toBe(UserCreated);
     expect(() => UserCreated.parse({ id: '1', name: 'Ada', email: 1 })).toThrow(
       CodedError,
     );
+  });
+
+  it('converts a catalog instance to a message and back', () => {
+    class UserRenamed extends Event(
+      'user.renamed',
+      z.object({ id: z.string(), name: z.string() }),
+    ) {}
+    class Catalog extends EventCatalog('domain', {
+      userCreated: UserCreated,
+      userRenamed: UserRenamed,
+    }) {}
+    class UserInvited extends Event('user.invited', userSchema) {}
+    const created = new UserCreated({
+      id: '1',
+      name: 'Ada',
+      email: 'ada@ex.com',
+    });
+    // @ts-expect-error a different token is a different event
+    const _samePayload: UserCreated = new UserInvited({
+      id: '1',
+      name: 'Ada',
+      email: 'ada@ex.com',
+    });
+    void _samePayload;
+
+    expect(Catalog.message(created)).toEqual({
+      key: 'userCreated',
+      payload: created.payload,
+    });
+    const parsed = Catalog.parse(Catalog.message(created));
+    expect(parsed).toBeInstanceOf(UserCreated);
+    expect(parsed.payload).toEqual(created.payload);
+    expect(Catalog.message(new UserRenamed({ id: '1', name: 'Ada' })).key).toBe(
+      'userRenamed',
+    );
+    expect(() =>
+      Catalog.message(
+        new UserInvited(created.payload) as unknown as UserCreated,
+      ),
+    ).toThrow(/not in catalog/);
+    expect(() => Catalog.parse(null)).toThrow(/expected \{ key, payload \}/);
+    expect(() => Catalog.parse({ key: 'missing', payload: {} })).toThrow(
+      /not in catalog/,
+    );
+    expect(() =>
+      Catalog.parse({ key: 'userCreated', payload: { id: 1 } }),
+    ).toThrow(CodedError);
   });
 
   it('rejects a catalog that registers one event token twice', () => {

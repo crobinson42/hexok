@@ -8,6 +8,7 @@ import {
 } from './catalog.js';
 import { CodedError } from './coded-error.js';
 import { Entity } from './entity.js';
+import { Errors } from './errors.js';
 import { Event } from './event.js';
 import { EventHandler } from './event-handler.js';
 import { Port } from './port.js';
@@ -22,22 +23,24 @@ const userSchema = z.object({
 
 class UserSchema extends Schema('User', userSchema) {}
 
+class DomainError extends Errors('domain', {
+  BlankName: { message: 'Name is blank' },
+  AlreadyClosed: { message: 'Incident already closed' },
+  UserExists: { message: 'User already exists' },
+}) {}
+
 class User extends Entity('User', UserSchema) {}
 
-class UserA extends Entity('UserA', userSchema, {
-  BLANK: { message: 'Name is blank' },
-}) {
+class UserA extends Entity('UserA', userSchema) {
   rename(name: string): this {
-    if (name.trim() === '') this.error('BLANK');
+    if (name.trim() === '') throw DomainError.BlankName();
     return this.set((draft) => {
       draft.name = name;
     });
   }
 }
 
-class UserB extends Entity('UserB', userSchema, {
-  BLANK: { message: 'Name is blank' },
-}) {}
+class UserB extends Entity('UserB', userSchema) {}
 
 const incidentSchema = z.object({
   id: z.string(),
@@ -45,15 +48,9 @@ const incidentSchema = z.object({
   closedAt: z.date().optional(),
 });
 
-class Incident extends Entity('Incident', incidentSchema, {
-  ALREADY_CLOSED: { message: 'Incident already closed' },
-  NOT_FOUND: {
-    message: 'Incident not found',
-    data: z.object({ id: z.string() }),
-  },
-}) {
+class Incident extends Entity('Incident', incidentSchema) {
   close(now: Date): this {
-    if (this.props.status === 'closed') this.error('ALREADY_CLOSED');
+    if (this.props.status === 'closed') throw DomainError.AlreadyClosed();
     return this.set((draft) => {
       draft.status = 'closed';
       draft.closedAt = now;
@@ -80,9 +77,7 @@ class InMemoryUsers extends Adapter(UserRepository) {
   }
 }
 
-class CreateUser extends UseCase('user.create', {
-  USER_EXISTS: { message: 'User already exists' },
-}) {
+class CreateUser extends UseCase('user.create') {
   constructor(private readonly users: UserRepository) {
     super();
   }
@@ -93,7 +88,7 @@ class CreateUser extends UseCase('user.create', {
     email: string;
   }): Promise<{ id: string; email: string }> {
     const existing = await this.users.get(input.id);
-    if (existing) this.error('USER_EXISTS');
+    if (existing) throw DomainError.UserExists();
     const user = User.create(input);
     await this.users.save(user);
     return { id: user.props.id, email: user.props.email };
@@ -128,7 +123,7 @@ describe('tokens and required members', () => {
     expect(User.token).toBe('User');
   });
 
-  it('types execute from the subclass method and error codes from the map', () => {
+  it('types execute from the subclass method', () => {
     const create = new CreateUser(new InMemoryUsers());
     expectTypeOf(create.execute).parameters.toEqualTypeOf<
       [{ id: string; name: string; email: string }]
@@ -136,13 +131,24 @@ describe('tokens and required members', () => {
     expectTypeOf(create.execute).returns.toEqualTypeOf<
       Promise<{ id: string; email: string }>
     >();
-    expectTypeOf(create.error).parameters.toEqualTypeOf<['USER_EXISTS']>();
   });
 
   it('rejects a missing use-case method, a missing port method, and a structural port', () => {
     // @ts-expect-error missing execute
     class Forgot extends UseCase('forgot') {}
     void Forgot;
+
+    // @ts-expect-error a use case does not take an error map
+    class Mapped extends UseCase('mapped', { UserExists: {} }) {
+      override async execute(): Promise<void> {}
+    }
+    void Mapped;
+
+    // @ts-expect-error an entity does not take an error map
+    class MappedUser extends Entity('MappedUser', userSchema, {
+      BlankName: {},
+    }) {}
+    void MappedUser;
 
     // @ts-expect-error missing get and save
     class Incomplete extends Adapter(UserRepository) {}
@@ -183,7 +189,7 @@ describe('Entity', () => {
     expect(user.isNew).toBe(true);
     expect(user.isDirty()).toBe(true);
     expect(user.props.name).toBe('Ada');
-    expect(() => user.rename('')).toThrow(CodedError);
+    expect(() => user.rename('')).toThrow(DomainError);
     expect(user.props.name).toBe('Ada');
   });
 
@@ -224,18 +230,15 @@ describe('Entity', () => {
     expect(incident.isDirty()).toBe(false);
   });
 
-  it('types declared errors and throws on an unknown code', () => {
+  it('throws a catalog member when a rule refuses', () => {
     const incident = Incident.create({ id: 'i', status: 'closed' });
-    expect(() => incident.error('ALREADY_CLOSED')).toThrow(CodedError);
-    expect(() => incident.error('NOT_FOUND', { id: 'i' })).toThrow(CodedError);
-    expect(() => Incident.error('NOT_A_CODE' as 'ALREADY_CLOSED')).toThrow(
-      /undeclared error/,
-    );
-    if (false as boolean) {
-      // @ts-expect-error NOT_FOUND requires data
-      incident.error('NOT_FOUND');
-      // @ts-expect-error ALREADY_CLOSED takes no data
-      incident.error('ALREADY_CLOSED', { id: 'i' });
+    expect(() => incident.close(new Date())).toThrow(DomainError);
+    try {
+      incident.close(new Date());
+    } catch (error) {
+      expect(DomainError.is(error) && error.code === 'AlreadyClosed').toBe(
+        true,
+      );
     }
   });
 });
@@ -256,7 +259,7 @@ describe('UseCase, Adapter, Event, Schema', () => {
         name: 'Ada',
         email: 'ada@ex.com',
       }),
-    ).rejects.toThrow(CodedError);
+    ).rejects.toThrow(DomainError);
     await users.stop();
   });
 

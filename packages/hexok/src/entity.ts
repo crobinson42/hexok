@@ -1,11 +1,10 @@
-import { throwMappedError, validationError } from './coded-error.js';
+import { validationError } from './coded-error.js';
 import {
   applyCowDraft,
   cloneValue,
   frozenSnapshot,
   isPlainObject,
 } from './cow-draft.js';
-import type { EmptyErrors, ErrorArgs, ErrorMap } from './error-map.js';
 import {
   type InferSchema,
   type ResolvedSchema,
@@ -29,9 +28,8 @@ export type DeepReadonly<T> = T extends Date
 type EntityConstructor = {
   readonly token: string;
   readonly schema: StandardSchemaV1;
-  readonly errors: ErrorMap;
-  // biome-ignore lint/suspicious/noExplicitAny: props and error maps vary per entity
-  readonly prototype: EntityBase<any, any>;
+  // biome-ignore lint/suspicious/noExplicitAny: props vary per entity
+  readonly prototype: EntityBase<any>;
 };
 
 type SchemaOutput<T extends EntityConstructor> = InferSchema<T['schema']>;
@@ -42,15 +40,11 @@ type ChangedKey<P extends object> = keyof P extends never
   : keyof P & string;
 
 /** Public instance of an entity. Subclass methods stay on `this`. */
-export interface EntityInstance<P extends object, Errors extends ErrorMap> {
+export interface EntityInstance<P extends object> {
   readonly props: DeepReadonly<P>;
   readonly isNew: boolean;
   readonly isValidated: boolean;
   readonly original: DeepReadonly<P> | undefined;
-  error<K extends keyof Errors & string>(
-    code: K,
-    ...args: ErrorArgs<Errors, K>
-  ): never;
   set(producer: (draft: P) => void): this;
   validate(): this;
   getChangedKeys(): Array<ChangedKey<P>>;
@@ -62,51 +56,37 @@ export interface EntityInstance<P extends object, Errors extends ErrorMap> {
   toJSON(): DeepReadonly<P>;
 }
 
-type EntityHandle<
-  Token extends string,
-  S extends SchemaSource,
-  Errors extends ErrorMap,
-> = {
+type EntityHandle<Token extends string, S extends SchemaSource> = {
   readonly token: Token;
   readonly schema: ResolvedSchema<S>;
-  readonly errors: Errors;
-  readonly prototype: EntityInstance<EntityProps<S>, Errors>;
-  error<E extends ErrorMap, K extends keyof E & string>(
-    this: { errors: E; token: string },
-    code: K,
-    ...args: ErrorArgs<E, K>
-  ): never;
-  create<
-    T extends { readonly prototype: EntityInstance<EntityProps<S>, Errors> },
-  >(
+  readonly prototype: EntityInstance<EntityProps<S>>;
+  create<T extends { readonly prototype: EntityInstance<EntityProps<S>> }>(
     this: T,
     props: EntityProps<S> | DeepReadonly<EntityProps<S>>,
   ): T['prototype'];
-  restore<
-    T extends { readonly prototype: EntityInstance<EntityProps<S>, Errors> },
-  >(
+  restore<T extends { readonly prototype: EntityInstance<EntityProps<S>> }>(
     this: T,
     props: EntityProps<S> | DeepReadonly<EntityProps<S>>,
   ): T['prototype'];
-  parse<
-    T extends { readonly prototype: EntityInstance<EntityProps<S>, Errors> },
-  >(this: T, value: unknown): T['prototype'];
+  parse<T extends { readonly prototype: EntityInstance<EntityProps<S>> }>(
+    this: T,
+    value: unknown,
+  ): T['prototype'];
 } & (abstract new (
   props: EntityProps<S>,
   init: never,
-) => EntityInstance<EntityProps<S>, Errors>);
+) => EntityInstance<EntityProps<S>>);
 
 /**
- * Mutable aggregate. The token, schema, and optional error map are arguments
- * of {@link Entity}, so a subclass cannot forget them. Rules are methods.
- * Override `set` only when the copy-on-write write path itself must change.
+ * Mutable aggregate. The token and schema are arguments of {@link Entity},
+ * so a subclass cannot forget them. Rules are methods. A refusal throws an
+ * {@link Errors} catalog member. Override `set` only when the copy-on-write
+ * write path itself must change.
  *
  * ```ts
- * class Incident extends Entity('Incident', incidentSchema, {
- *   ALREADY_CLOSED: { message: 'Incident already closed' },
- * }) {
+ * class Incident extends Entity('Incident', incidentSchema) {
  *   close(now: Date): this {
- *     if (this.props.status === 'closed') this.error('ALREADY_CLOSED')
+ *     if (this.props.status === 'closed') throw DomainError.AlreadyClosed()
  *     return this.set((draft) => {
  *       draft.status = 'closed'
  *       draft.closedAt = now
@@ -118,21 +98,17 @@ type EntityHandle<
 type EntityProps<S extends SchemaSource> =
   InferSchema<S> extends object ? InferSchema<S> : never;
 
-export function Entity<
-  const Token extends string,
-  S extends SchemaSource,
-  const Errors extends ErrorMap = EmptyErrors,
->(token: Token, schema: S, errors?: Errors): EntityHandle<Token, S, Errors> {
+export function Entity<const Token extends string, S extends SchemaSource>(
+  token: Token,
+  schema: S,
+): EntityHandle<Token, S> {
   const definition = schemaDefinition(schema);
-  const errorMap = (errors ?? {}) as Errors;
 
-  abstract class EntityClass extends EntityBase<EntityProps<S>, Errors> {
+  abstract class EntityClass extends EntityBase<EntityProps<S>> {
     /** Entity name. Literal type of the string passed to {@link Entity}. */
     static readonly token: Token = token;
     /** Schema used by `create`, `parse`, `set`, and `validate`. */
     static readonly schema: ResolvedSchema<S> = definition;
-    /** Declared refusal codes. Keys are the `error()` union. */
-    static readonly errors: Errors = errorMap;
     /** Nominal marker. Each `Entity(...)` call is a distinct class. */
     readonly #brand = true;
 
@@ -142,16 +118,14 @@ export function Entity<
     }
   }
 
-  return EntityClass as unknown as EntityHandle<Token, S, Errors>;
+  return EntityClass as unknown as EntityHandle<Token, S>;
 }
 
-abstract class EntityBase<P extends object, Errors extends ErrorMap> {
-  /** Entity name used in validation and undeclared-error messages. */
+abstract class EntityBase<P extends object> {
+  /** Entity name used in validation messages. */
   static readonly token: string;
   /** Schema for `create` / `parse` / `set` / `validate()`. */
   static readonly schema: StandardSchemaV1;
-  /** Declared refusal codes. */
-  static readonly errors: ErrorMap;
 
   #isNew = false;
   #validated = false;
@@ -194,29 +168,6 @@ abstract class EntityBase<P extends object, Errors extends ErrorMap> {
 
   protected constructor(props: P) {
     this.#props = props;
-  }
-
-  /**
-   * Throw a declared error. Codes are the keys of the map passed to {@link Entity}.
-   */
-  static error<E extends ErrorMap, K extends keyof E & string>(
-    this: { errors: E; token: string },
-    code: K,
-    ...args: ErrorArgs<E, K>
-  ): never {
-    throwMappedError(this.token, this.errors, code, args[0]);
-  }
-
-  /** Instance form of {@link EntityBase.error}. */
-  error<K extends keyof Errors & string>(
-    code: K,
-    ...args: ErrorArgs<Errors, K>
-  ): never {
-    const ctor = this.constructor as unknown as {
-      token: string;
-      errors: Errors;
-    };
-    throwMappedError(ctor.token, ctor.errors, code, args[0]);
   }
 
   /** Copy-on-write mutate. Edit `draft` and return `this`. Re-validates after a write. */
@@ -325,7 +276,7 @@ abstract class EntityBase<P extends object, Errors extends ErrorMap> {
     this: T,
     props: SchemaOutput<T> | DeepReadonly<SchemaOutput<T>>,
   ): T['prototype'] {
-    const instance = instantiate(this, props) as EntityBase<object, ErrorMap>;
+    const instance = instantiate(this, props) as EntityBase<object>;
     instance.#markNew();
     instance.#validated = true;
     return instance as T['prototype'];
@@ -340,7 +291,7 @@ abstract class EntityBase<P extends object, Errors extends ErrorMap> {
     this: T,
     props: SchemaOutput<T> | DeepReadonly<SchemaOutput<T>>,
   ): T['prototype'] {
-    const instance = construct(this, props) as EntityBase<object, ErrorMap>;
+    const instance = construct(this, props) as EntityBase<object>;
     instance.#markRestored();
     return instance as T['prototype'];
   }
@@ -354,7 +305,7 @@ abstract class EntityBase<P extends object, Errors extends ErrorMap> {
     this: T,
     value: unknown,
   ): T['prototype'] {
-    const instance = instantiate(this, value) as EntityBase<object, ErrorMap>;
+    const instance = instantiate(this, value) as EntityBase<object>;
     instance.#markRestored();
     instance.#validated = true;
     return instance as T['prototype'];

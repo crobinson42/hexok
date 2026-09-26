@@ -6,13 +6,7 @@ export {
 } from './catalog.js';
 export { CodedError, validationError } from './coded-error.js';
 export { type DeepReadonly, Entity, type EntityInstance } from './entity.js';
-export {
-  defineErrors,
-  type EmptyErrors,
-  type ErrorArgs,
-  type ErrorDef,
-  type ErrorMap,
-} from './error-map.js';
+export type { ErrorDef, ErrorMap } from './error-map.js';
 export {
   type CatalogMember,
   type CatalogUnion,

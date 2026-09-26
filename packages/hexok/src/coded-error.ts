@@ -1,16 +1,20 @@
-import type { ErrorMap } from './error-map.js';
 import type { StandardSchemaV1 } from './standard-schema.js';
 
 /**
- * Thrown by entity refusals and use-case error factories.
- * Carries `code`, optional `message`, and optional `data`.
+ * Code, message, and optional data. Schema checks throw this with code
+ * `VALIDATION`. The application catches it where errors bubble.
+ *
+ * Application refusals use an {@link Errors} catalog.
  *
  * ```ts
- * throw new CodedError({ code: 'NOT_FOUND', message: 'Incident not found' })
+ * new CodedError({
+ *   code: 'VALIDATION',
+ *   message: 'hexok: User validation failed',
+ * })
  * ```
  */
 export class CodedError<C extends string = string> extends Error {
-  /** Machine-readable refusal code. Catch and switch on this; a runtime transport may map it to a status. */
+  /** Machine-readable code. Schema checks use `VALIDATION`. */
   readonly code: C;
   /** Optional payload. Set only when the constructor received `data`. */
   readonly data?: unknown;
@@ -28,24 +32,6 @@ export class CodedError<C extends string = string> extends Error {
       this.data = args.data;
     }
   }
-}
-
-/** Throw a code from a declared error map. An unknown code is a programming error. */
-export function throwMappedError(
-  token: string,
-  errors: ErrorMap,
-  code: string,
-  data?: unknown,
-): never {
-  const def = errors[code];
-  if (def === undefined) {
-    throw new Error(`hexok: undeclared error "${code}" on ${token}`);
-  }
-  throw new CodedError({
-    code,
-    message: def.message ?? code,
-    ...(data !== undefined ? { data } : {}),
-  });
 }
 
 /** `VALIDATION` refusal. `data.issues` is the Standard Schema issue list when present. */

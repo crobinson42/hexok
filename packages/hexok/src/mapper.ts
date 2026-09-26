@@ -60,10 +60,11 @@ type RuntimeStatics = {
 };
 
 /**
- * Named so declaration emit can keep `protected` hooks.
- * An anonymous class expression cannot publish protected members.
+ * Instance base of {@link Mapper}. Exported so declaration emit can name it.
+ * An anonymous base cannot publish protected `fromSource` or `toSource` (TS4094).
+ * Extend {@link Mapper}, not this class.
  */
-abstract class MapperClass<
+export abstract class MapperClass<
   Token extends string,
   Source,
   Stored extends SchemaSource,

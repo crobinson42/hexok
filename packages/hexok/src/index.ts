@@ -17,7 +17,7 @@ export {
   type ErrorsHandle,
 } from './errors.js';
 export { Event } from './event.js';
-export { Mapper } from './mapper.js';
+export { Mapper, type MapperClass } from './mapper.js';
 export { Port } from './port.js';
 export { fail, ok, type Result } from './result.js';
 export { type InferSchema, Schema } from './schema.js';

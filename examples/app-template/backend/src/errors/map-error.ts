@@ -19,6 +19,10 @@ export function mapError(error: unknown): HttpResult {
     return { status: 500, body: { code: 'INTERNAL' } };
   }
   return DomainError.match(error, {
+    Unauthorized: (failure) => ({
+      status: 401,
+      body: { code: failure.code, message: failure.message },
+    }),
     BlankName: (failure) => ({
       status: 400,
       body: { code: failure.code, message: failure.message },

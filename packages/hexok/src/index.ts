@@ -21,6 +21,7 @@ export {
   type ErrorsHandle,
 } from './errors.js';
 export { Event } from './event.js';
+export { EventHandler } from './event-handler.js';
 export { Mapper, type MapperClass } from './mapper.js';
 export { Port } from './port.js';
 export { fail, ok, type Result } from './result.js';

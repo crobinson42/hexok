@@ -9,6 +9,7 @@ import {
 import { CodedError } from './coded-error.js';
 import { Entity } from './entity.js';
 import { Event } from './event.js';
+import { EventHandler } from './event-handler.js';
 import { Port } from './port.js';
 import { Schema } from './schema.js';
 import { UseCase } from './use-case.js';
@@ -395,6 +396,28 @@ describe('UseCase, Adapter, Event, Schema', () => {
     expect(() =>
       Catalog.parse({ key: 'userCreated', payload: { id: 1 } }),
     ).toThrow(CodedError);
+  });
+
+  it('binds a handler to one event', () => {
+    class OnCreated extends EventHandler('on.user.created', UserCreated) {
+      handle(event: UserCreated): void {
+        expectTypeOf(event.payload.email).toEqualTypeOf<string>();
+        expect(event.payload.email).toBe('ada@ex.com');
+      }
+    }
+
+    const created = new UserCreated({
+      id: '1',
+      name: 'Ada',
+      email: 'ada@ex.com',
+    });
+    expect(OnCreated.token).toBe('on.user.created');
+    expect(OnCreated.event).toBe(UserCreated);
+    new OnCreated().handle(created);
+
+    // @ts-expect-error handle is required
+    class Missing extends EventHandler('missing', UserCreated) {}
+    void Missing;
   });
 
   it('rejects a catalog that registers one event token twice', () => {

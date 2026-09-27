@@ -19,7 +19,7 @@ export { EventHandler } from './event-handler.js';
 export { Mapper, type MapperClass } from './mapper.js';
 export { Port } from './port.js';
 export { fail, ok, type Result } from './result.js';
-export { type InferSchema, Schema } from './schema.js';
+export { type InferSchema, Schema, type SchemaSource } from './schema.js';
 export type { StandardSchemaV1 } from './standard-schema.js';
 export { UseCase } from './use-case.js';
 export { type Infer, validate } from './validate.js';

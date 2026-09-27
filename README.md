@@ -79,8 +79,10 @@ const ApiUseCase = UseCase.context<
   ApiContext,
   { input: StandardSchemaV1; permission: string }
 >({
-  guard(ctx) {
-    if (ctx.sessionId.length < 1) throw DomainError.Unauthorized()
+  guard(ctx, spec) {
+    if (ctx.sessionId.length < 1 || spec.permission.length < 1) {
+      throw DomainError.Unauthorized()
+    }
   },
 })
 
@@ -104,7 +106,7 @@ The first type argument is the per-call context. The second is the required stat
 
 Ports stay constructor arguments. Context is an `execute` argument because a use case instance is long-lived. Annotate `execute` on the subclass. When the contract's `input` is a Standard Schema or a `Schema` class, the command parameter is that schema's output. `InferSchema<(typeof FindUsers)['input']>` follows the schema. A conflicting annotation is a compiler error on the class. `SchemaSource` is exported for a contract that accepts either a Standard Schema or a `Schema` class, the same values as `Entity` and `Event`.
 
-The optional `guard` runs first and may throw. When `input` is a schema, hexok validates with `validate` and throws `CodedError` code `VALIDATION`, message `hexok: ${token} validation failed`. Other statics are not interpreted. The application reads them (`FindUsers.permission`). `execute` is a method. Hexok does not know HTTP, sessions, or callers. The application builds the context and writes the guard.
+The optional `guard` runs first and may throw. Its second argument is the static bag, typed as the family contract, so `permission` is `string`. When `input` is a schema, hexok validates with `validate` and throws `CodedError` code `VALIDATION`, message `hexok: ${token} validation failed`. Other statics are not interpreted. The application reads them (`FindUsers.permission`). `execute` is a method. Hexok does not know HTTP, sessions, or callers. The application builds the context and writes the guard.
 
 An adapter owns a mapper when the shape it stores is not the shape the port speaks.
 

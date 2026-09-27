@@ -22,12 +22,6 @@ type DataOf<Def> = Def extends {
   ? Infer<S>
   : undefined;
 
-type ArgsOf<Def> = Def extends {
-  readonly data: infer S extends StandardSchemaV1;
-}
-  ? [data: Infer<S>]
-  : [];
-
 /** One member. `code` and `data` are the pair a gateway matches on. */
 export type CatalogMember<
   Token extends string,
@@ -44,12 +38,7 @@ export type CatalogMember<
 
 /** Discriminated union of every member. Returned by {@link ErrorsHandle.is}. */
 export type CatalogUnion<Token extends string, M> = {
-  [K in keyof M & string]: CatalogMember<
-    Token,
-    K,
-    MessageOf<K, M[K]>,
-    DataOf<M[K]>
-  >;
+  [K in keyof M & string]: CatalogMember<Token, K, string, DataOf<M[K]>>;
 }[keyof M & string];
 
 /**
@@ -74,13 +63,30 @@ type Matchers<
   R extends MatchReturns<keyof M & string>,
 > = {
   [K in keyof M & string]: (
-    error: CatalogMember<Token, K, MessageOf<K, M[K]>, DataOf<M[K]>>,
+    error: CatalogMember<Token, K, string, DataOf<M[K]>>,
   ) => R[K];
 };
 
-type Factory<Token extends string, Code extends string, Def> = (
-  ...args: ArgsOf<Def>
-) => CatalogMember<Token, Code, MessageOf<Code, Def>, DataOf<Def>>;
+/**
+ * Message, when passed, is the first argument. The catalog message is the default.
+ * With `data`: `(data)` or `(message, data)`. Without `data`: `()` or `(message)`.
+ */
+type Factory<Token extends string, Code extends string, Def> = Def extends {
+  readonly data: infer S extends StandardSchemaV1;
+}
+  ? {
+      <M extends string>(
+        message: M,
+        data: Infer<S>,
+      ): CatalogMember<Token, Code, M, Infer<S>>;
+      (
+        data: Infer<S>,
+      ): CatalogMember<Token, Code, MessageOf<Code, Def>, Infer<S>>;
+    }
+  : {
+      (): CatalogMember<Token, Code, MessageOf<Code, Def>, undefined>;
+      <M extends string>(message: M): CatalogMember<Token, Code, M, undefined>;
+    };
 
 /**
  * Abstract constructor, `is`, `match`, and one static factory per code.
@@ -118,7 +124,9 @@ type Construct = new (
  * }) {}
  *
  * throw DomainError.BlankName()
+ * throw DomainError.BlankName('Name cannot be empty')
  * throw DomainError.UserExists({ id })
+ * throw DomainError.UserExists('User ada already exists', { id })
  * ```
  */
 export function Errors<const Token extends string, const M extends ErrorMap>(
@@ -174,13 +182,24 @@ export function Errors<const Token extends string, const M extends ErrorMap>(
   for (const code of Object.keys(defs)) {
     const def = defs[code];
     if (def === undefined) continue;
-    const message = def.message ?? code;
+    const fallback = def.message ?? code;
+    const withData = def.data !== undefined;
     Object.defineProperty(CatalogError, code, {
       enumerable: true,
       configurable: true,
       writable: true,
-      value(this: Construct, data?: unknown) {
-        return new this(code, message, data);
+      value(this: Construct, ...args: unknown[]) {
+        if (!withData) {
+          return new this(
+            code,
+            args.length === 0 ? fallback : (args[0] as string),
+            undefined,
+          );
+        }
+        if (args.length > 1) {
+          return new this(code, args[0] as string, args[1]);
+        }
+        return new this(code, fallback, args[0]);
       },
     });
   }

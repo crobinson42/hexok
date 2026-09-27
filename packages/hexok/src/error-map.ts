@@ -10,7 +10,10 @@ import type { StandardSchemaV1 } from './standard-schema.js';
  * ```
  */
 export interface ErrorDef {
-  /** Human message. The factory uses the code when this is omitted. */
+  /**
+   * Default message. The factory uses the code when this is omitted.
+   * A call may override it by passing a string first.
+   */
   message?: string;
   /** Payload schema. The member factory requires this schema's output. */
   data?: StandardSchemaV1;

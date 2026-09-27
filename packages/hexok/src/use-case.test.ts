@@ -195,12 +195,18 @@ describe('UseCase.context', () => {
   it('runs the guard, then validation, then the method', async () => {
     const stages: string[] = [];
     let seen: { query: string } | undefined;
+    let seenSpec: { input: StandardSchemaV1; permission: string } | undefined;
     const Api = UseCase.context<
       ApiContext,
       { input: StandardSchemaV1; permission: string }
     >({
-      guard(ctx) {
+      guard(ctx, spec) {
         stages.push('guard');
+        seenSpec = spec;
+        expectTypeOf(spec.permission).toEqualTypeOf<string>();
+        expectTypeOf(spec.input).toEqualTypeOf<StandardSchemaV1>();
+        // @ts-expect-error extra statics are not part of the contract
+        void spec.area;
         if (ctx.sessionId.length < 1) throw new Error('unauthorized');
       },
     });
@@ -230,6 +236,8 @@ describe('UseCase.context', () => {
     ).resolves.toBe('ada');
     expect(stages).toEqual(['guard', 'body']);
     expect(seen).toEqual({ query: 'ada' });
+    expect(seenSpec?.permission).toBe('users.read');
+    expect(seenSpec?.input).toBe(querySchema);
 
     stages.length = 0;
     await expect(
@@ -256,6 +264,30 @@ describe('UseCase.context', () => {
       /hexok: user.find validation failed/,
     );
     expect(stages).toEqual(['guard']);
+  });
+
+  it('passes an empty spec when the family has no contract', async () => {
+    let seen: unknown;
+    const Api = UseCase.context<ApiContext>({
+      guard(_ctx, spec) {
+        seen = spec;
+        expectTypeOf(spec).toEqualTypeOf<Record<never, never>>();
+      },
+    });
+
+    class Work extends Api('work') {
+      constructor() {
+        super();
+      }
+
+      override async execute(
+        _ctx: ApiContext,
+        _input: unknown,
+      ): Promise<void> {}
+    }
+
+    await new Work().execute({ sessionId: 's' }, undefined);
+    expect(seen).toEqual({});
   });
 
   it('awaits an async guard before the method', async () => {

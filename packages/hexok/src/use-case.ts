@@ -77,8 +77,10 @@ const RESERVED_STATICS: ReadonlySet<string> = new Set([
  *   ApiContext,
  *   { input: StandardSchemaV1; permission: string }
  * >({
- *   guard(ctx) {
- *     if (ctx.sessionId.length < 1) throw new Error('unauthorized')
+ *   guard(ctx, spec) {
+ *     if (ctx.sessionId.length < 1 || spec.permission.length < 1) {
+ *       throw new Error('unauthorized')
+ *     }
  *   },
  * })
  *
@@ -97,9 +99,8 @@ const RESERVED_STATICS: ReadonlySet<string> = new Set([
  * ```
  */
 export namespace UseCase {
-  // biome-ignore lint/complexity/noBannedTypes: keyof {} is never, so an empty Spec takes only a token
-  export function context<Ctx, Spec = {}>(options?: {
-    guard?: (ctx: Ctx) => void | Promise<void>;
+  export function context<Ctx, Spec = NoStatics>(options?: {
+    guard?: ContextGuard<Ctx, Spec>;
   }) {
     const guard = options?.guard;
 
@@ -115,6 +116,7 @@ export namespace UseCase {
       // Conditional rest tuple: index 0 is the statics bag, or absent.
       const statics = bagOf(args as readonly unknown[]);
       const inputSchema = schemaSourceOf(statics);
+      const spec = (statics ?? {}) as Spec;
 
       abstract class Runtime {
         /** Use-case name. Literal type of the string passed to the factory. */
@@ -125,7 +127,7 @@ export namespace UseCase {
         protected constructor() {
           void this.#brand;
           if (guard === undefined && inputSchema === undefined) return;
-          installExecute(this, token, guard, inputSchema);
+          installExecute(this, token, guard, spec, inputSchema);
         }
 
         /**
@@ -142,7 +144,10 @@ export namespace UseCase {
   }
 }
 
-type ContextGuard<Ctx> = (ctx: Ctx) => void | Promise<void>;
+type ContextGuard<Ctx, Spec> = (
+  ctx: Ctx,
+  spec: NoInfer<Spec>,
+) => void | Promise<void>;
 
 function bagOf(args: readonly unknown[]): object | undefined {
   const value = args[0];
@@ -182,10 +187,11 @@ function hasStandard(value: unknown): boolean {
   return typeof value === 'object' && value !== null && '~standard' in value;
 }
 
-function installExecute<Ctx>(
+function installExecute<Ctx, Spec>(
   instance: object,
   token: string,
-  guard: ContextGuard<Ctx> | undefined,
+  guard: ContextGuard<Ctx, Spec> | undefined,
+  spec: Spec,
   inputSchema: SchemaSource | undefined,
 ): void {
   const prototype = Object.getPrototypeOf(instance) as {
@@ -198,7 +204,7 @@ function installExecute<Ctx>(
     configurable: true,
     writable: true,
     value: async (ctx: Ctx, input: unknown): Promise<unknown> => {
-      if (guard !== undefined) await guard(ctx);
+      if (guard !== undefined) await guard(ctx, spec);
       const command =
         inputSchema === undefined
           ? input

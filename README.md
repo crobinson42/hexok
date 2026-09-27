@@ -17,7 +17,7 @@ import { Adapter, Entity, Errors, Event, EventCatalog, EventHandler, Mapper, Por
 | `Port` | `Port('UserRepository')` | the abstract methods you declare on the port |
 | `Adapter` | `Adapter(UserRepository)` | every abstract port method; override `start` / `stop` when you need them |
 | `Mapper` | `Mapper('mongo.User', User, mongoUserSchema)` | `fromSource` and `toSource`; adapters call `toModel` and `fromModel` |
-| `UseCase` | `UseCase('user.create')` | `execute`. Pass ports through the constructor |
+| `UseCase` | `UseCase('user.create')` | `execute`. Pass ports through the constructor. `UseCase.context` is the family factory |
 | `Event` | `Event('user.created', UserSchema)` | the token and the payload schema are arguments |
 | `EventCatalog` | `EventCatalog('domain', { userCreated })` | the token and the event map are arguments |
 | `EventHandler` | `EventHandler('on.user.created', UserCreated)` | `handle` |
@@ -29,6 +29,7 @@ import { Adapter, Entity, Errors, Event, EventCatalog, EventHandler, Mapper, Por
 class DomainError extends Errors('domain', {
   BlankName: { message: 'Name is blank' },
   UserExists: { message: 'User already exists', data: z.object({ id: z.string() }) },
+  Unauthorized: { message: 'Unauthorized' },
 }) {}
 
 class User extends Entity('User', userSchema) {
@@ -68,6 +69,42 @@ await createUser.execute({ id: '1', name: 'Ada', email: 'ada@ex.com' })
 The string you pass is the token. Its type is that string literal. A subclass does not redeclare it, and a different literal is not assignable over the top of it.
 
 `static abstract` is not part of TypeScript, so a base class cannot force a subclass to fill in a static field. Hexok therefore takes the token and the schema as arguments of the primitive. Required behavior is an abstract instance method: omit `execute`, omit a port method on an adapter, or omit `fromSource` or `toSource` on a mapper, and the error is on that class.
+
+`UseCase.context` returns a factory for one family. `UseCase('user.create')` is unchanged: `execute(input)`, ports in the constructor. `StandardSchemaV1` and `InferSchema` are exported from `hexok`. Zod satisfies `StandardSchemaV1`.
+
+```ts
+type ApiContext = { sessionId: string }
+
+const ApiUseCase = UseCase.context<
+  ApiContext,
+  { input: StandardSchemaV1; permission: string }
+>({
+  guard(ctx) {
+    if (ctx.sessionId.length < 1) throw DomainError.Unauthorized()
+  },
+})
+
+class FindUsers extends ApiUseCase('user.find', {
+  input: z.object({ query: z.string() }),
+  permission: 'users.read',
+}) {
+  constructor(private readonly users: UserRepository) { super() }
+  async execute(
+    ctx: ApiContext,
+    input: InferSchema<(typeof FindUsers)['input']>,
+  ): Promise<User[]> {
+    return this.users.search(input.query)
+  }
+}
+
+await new FindUsers(users).execute({ sessionId: 's' }, { query: 'ada' })
+```
+
+The first type argument is the per-call context. The second is the required static contract. It defaults to no required statics, and then the factory takes only the token. Each use case passes the token and the static values. They are inherited statics: `FindUsers.token`, `FindUsers.input`, `FindUsers.permission`. The permission literal stays narrow. Extra keys are kept. `token`, `prototype`, `name`, and `length` cannot be static names.
+
+Ports stay constructor arguments. Context is an `execute` argument because a use case instance is long-lived. Annotate `execute` on the subclass. When the contract's `input` is a Standard Schema or a `Schema` class, the command parameter is that schema's output. `InferSchema<(typeof FindUsers)['input']>` follows the schema. A conflicting annotation is a compiler error on the class. `SchemaSource` is exported for a contract that accepts either a Standard Schema or a `Schema` class, the same values as `Entity` and `Event`.
+
+The optional `guard` runs first and may throw. When `input` is a schema, hexok validates with `validate` and throws `CodedError` code `VALIDATION`, message `hexok: ${token} validation failed`. Other statics are not interpreted. The application reads them (`FindUsers.permission`). `execute` is a method. Hexok does not know HTTP, sessions, or callers. The application builds the context and writes the guard.
 
 An adapter owns a mapper when the shape it stores is not the shape the port speaks.
 

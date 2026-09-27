@@ -6,7 +6,7 @@ import type { DomainEventSubscriptions } from './ports/domain-event-subscription
 import type { EmailSender } from './ports/email-sender.js';
 import type { SearchIndex } from './ports/search-index.js';
 import type { UserRepository } from './ports/user-repository.js';
-import { CreateUser } from './use-cases/create-user.js';
+import { CreateUser } from './use-cases/api/protected/create-user.js';
 
 /** Web process. Publishes user facts and subscribes the light handlers. */
 export function createWebApp(deps: {

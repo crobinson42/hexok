@@ -10,7 +10,7 @@
     "noImplicitOverride": false,
     "noFallthroughCasesInSwitch": true,
     "noUnusedLocals": true,
-    "noUnusedParameters": true,
+    "noUnusedParameters": false,
     "verbatimModuleSyntax": true,
     "isolatedModules": true,
     "esModuleInterop": true,

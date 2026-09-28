@@ -1,19 +1,19 @@
+import type { UseCase } from 'hexok';
+import { z } from 'zod';
 import { UserEntity } from '../../../entities/user.js';
 import { DomainError } from '../../../errors/domain.js';
 import { UserCreatedEvent } from '../../../events/user-created.js';
 import type { DomainEventPublisher } from '../../../ports/domain-event-publisher.js';
 import type { UserRepository } from '../../../ports/user-repository.js';
-import type { ActorApiUseCaseCtx } from '../../context.js';
 import { ActorApiUseCase } from '../../factory.js';
-import {z} from "zod";
 
 export class CreateUser extends ActorApiUseCase('user.create', {
   allowedActors: ['user'],
-    input: z.object({
-      id: z.string().uuid(),
-      name: z.string().min(1),
-      email: z.string().email(),
-    }),
+  input: z.object({
+    id: z.string().uuid(),
+    name: z.string().min(1),
+    email: z.string().email(),
+  }),
 }) {
   constructor(
     readonly deps: {
@@ -25,7 +25,7 @@ export class CreateUser extends ActorApiUseCase('user.create', {
   }
 
   async execute(
-    ctx: ActorApiUseCaseCtx,
+    ctx: UseCase.Ctx<typeof ActorApiUseCase>,
     input: {
       id: string;
       name: string;

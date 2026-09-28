@@ -1,7 +1,7 @@
+import type { UseCase } from 'hexok';
 import { describe, expect, it } from 'vitest';
 import { z } from 'zod';
 import type { Actor } from '../../schemas/actor.js';
-import type { ActorApiUseCaseCtx } from '../context.js';
 import { ActorApiUseCase } from '../factory.js';
 import { allowedActorGuard } from './allowed-actor.js';
 import { inputValidationGuard } from './input-validation-guard.js';
@@ -77,14 +77,17 @@ describe('inputValidationGuard', () => {
 });
 
 describe('ActorApiUseCase pipeline', () => {
-  const ctx: ActorApiUseCaseCtx = { traceId: 'trace-1', actor: user };
+  const ctx: UseCase.Ctx<typeof ActorApiUseCase> = {
+    traceId: 'trace-1',
+    actor: user,
+  };
 
   class Named extends ActorApiUseCase('probe.name', {
     allowedActors: ['user'],
     input: z.object({ name: z.string().min(1) }),
   }) {
     async execute(
-      _ctx: ActorApiUseCaseCtx,
+      _ctx: UseCase.Ctx<typeof ActorApiUseCase>,
       input: { name: string },
     ): Promise<string> {
       return input.name;

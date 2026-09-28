@@ -1,10 +1,10 @@
+import type { UseCase } from 'hexok';
 import type { UserRepository } from '../../../ports/user-repository.js';
-import type { ActorApiUseCaseCtx } from '../../context.js';
 import { ActorApiUseCase } from '../../factory.js';
 
 export class FindUserUseCase extends ActorApiUseCase('user.find', {
   allowedActors: ['user'],
-  input: undefined
+  input: undefined,
 }) {
   constructor(
     private deps: {
@@ -14,7 +14,10 @@ export class FindUserUseCase extends ActorApiUseCase('user.find', {
     super();
   }
 
-  async execute(ctx: ActorApiUseCaseCtx, { userId }: { userId: string }) {
+  async execute(
+    ctx: UseCase.Ctx<typeof ActorApiUseCase>,
+    { userId }: { userId: string },
+  ) {
     // Simulate fetching user data from a database or external service
     const user = await this.deps.usersRepo.get(userId);
     if (!user) {

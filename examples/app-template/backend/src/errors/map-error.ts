@@ -27,6 +27,10 @@ export function mapError(error: unknown): HttpResult {
       status: 400,
       body: { code: failure.code, message: failure.message },
     }),
+    TraceIdMissing: (failure) => ({
+      status: 400,
+      body: { code: failure.code, message: failure.message },
+    }),
     UserExists: (failure) => ({
       status: 409,
       body: {

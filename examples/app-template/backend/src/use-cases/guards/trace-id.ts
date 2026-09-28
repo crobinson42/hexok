@@ -1,12 +1,11 @@
-import type {ApiUseCaseCtx} from "../context.js";
-import {DomainError} from "../../errors/domain.js";
+import { DomainError } from '../../errors/domain.js';
+import type { ApiUseCaseCtx } from '../context.js';
 
 /**
  * Guard to ensure that the traceId is present in the context.
- * @param context
  */
-export function traceIdGuard(context: ApiUseCaseCtx): void {
-    if (typeof context.traceId === 'string' && context.traceId.length > 0) {
-        throw DomainError.TraceIdMissing();
-    }
+export function traceIdGuard(call: { readonly ctx: ApiUseCaseCtx }): void {
+  if (call.ctx.traceId.length < 1) {
+    throw DomainError.TraceIdMissing();
+  }
 }

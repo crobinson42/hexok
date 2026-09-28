@@ -195,6 +195,14 @@ describe('UseCase.context', () => {
     expectTypeOf<
       UseCase.GuardParameters<typeof OneArg>
     >().toEqualTypeOf<never>();
+    expectTypeOf<UseCase.Ctx<typeof ApiUseCase>>().toEqualTypeOf<ApiContext>();
+    expectTypeOf<UseCase.Ctx<typeof Plain>>().toEqualTypeOf<ApiContext>();
+    expectTypeOf<UseCase.Ctx<typeof OneArg>>().toEqualTypeOf<never>();
+
+    class Member extends Plain('member') {
+      override async execute(_ctx: ApiContext): Promise<void> {}
+    }
+    expectTypeOf<UseCase.Ctx<typeof Member>>().toEqualTypeOf<never>();
     expect(Object.getOwnPropertySymbols(ApiUseCase)).toEqual([]);
     expect(Object.getOwnPropertySymbols(Plain)).toEqual([]);
   });

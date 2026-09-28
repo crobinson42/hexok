@@ -60,6 +60,7 @@ const RESERVED_STATICS: ReadonlySet<string> = new Set([
  * A guard and hooks, when set, run around that method.
  * Statics are application data copied onto the class. The application validates `input`.
  * {@link UseCase.GuardParameters} reads the guard's call off the factory.
+ * {@link UseCase.Ctx} reads that call's context type.
  * {@link context} returns that factory. {@link ContextFactory.guard} and
  * {@link ContextFactory.hooks} return it again.
  *
@@ -86,7 +87,7 @@ const RESERVED_STATICS: ReadonlySet<string> = new Set([
  * }) {
  *   constructor(private readonly users: UserRepository) { super() }
  *   async execute(
- *     ctx: ApiContext,
+ *     ctx: UseCase.Ctx<typeof ApiUseCase>,
  *     input: { query: string },
  *   ): Promise<User[]> {
  *     return this.users.search(input.query)
@@ -108,6 +109,19 @@ export namespace UseCase {
     Factory extends GuardParametersSlot<infer Ctx, infer Spec>
       ? Call<Ctx, Spec>
       : never;
+
+  /**
+   * Context type of a {@link context} factory.
+   * Pass the factory. A subclass, and a plain {@link UseCase} class, are `never`.
+   *
+   * ```ts
+   * async execute(
+   *   ctx: UseCase.Ctx<typeof ApiUseCase>,
+   *   input: { query: string },
+   * ): Promise<User[]> {}
+   * ```
+   */
+  export type Ctx<Factory> = GuardParameters<Factory>['ctx'];
 
   /**
    * Factory returned by {@link context}.

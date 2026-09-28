@@ -97,7 +97,7 @@ class FindUsers extends ApiUseCase('user.find', {
 }) {
   constructor(private readonly users: UserRepository) { super() }
   async execute(
-    ctx: ApiContext,
+    ctx: UseCase.Ctx<typeof ApiUseCase>,
     input: { query: string },
   ): Promise<User[]> {
     return this.users.search(input.query)
@@ -113,7 +113,7 @@ Ports stay constructor arguments. Context is an `execute` argument because a use
 
 `UseCase.context<Ctx, Spec>()` returns that factory. The optional argument is a settings object with no keys yet. Pass nothing. `{}` is allowed. `guard` and `hooks` are methods, not fields of that object. `.guard(fn)` and `.hooks(def)` each return the same factory a class extends. Order does not matter. Either may be omitted. Another `.guard()` runs after guards already registered. A second `.hooks()` throws `hexok: UseCase hooks are already set` when the factory is created, if the first registration had at least one callback. An empty `.hooks({})` does not register hooks and does not wrap `execute`.
 
-The call is `{ ctx, spec, token, input }`. `input` is the argument passed to `execute`. The method receives that same value. `spec` is the static bag, typed as the family contract, so `permission` is `string`. `UseCase.GuardParameters<typeof ApiUseCase>` is that call. `.hooks` infers the value returned from `preExecute` as the `state` argument of `postExecute`, `onCatch`, and `onFinally`. If `preExecute` is omitted, that state is `void`. `postExecute` also receives `result`. `onFinally` receives `status: 'success'` with `result`, or `status: 'failure'` with `error`. The pipeline is guard (outside try), `preExecute`, the method, `postExecute`, `onCatch` then rethrow, `onFinally`. A guard throw does not enter the hooks. A throw inside `onCatch` replaces the error after `onFinally` sees the original one. The application reads statics (`FindUsers.permission`) and validates `input` when it needs to. `execute` is a method. Hexok does not know HTTP, sessions, or callers. The application builds the context and writes the guard.
+The call is `{ ctx, spec, token, input }`. `input` is the argument passed to `execute`. The method receives that same value. `spec` is the static bag, typed as the family contract, so `permission` is `string`. `UseCase.GuardParameters<typeof ApiUseCase>` is that call. `UseCase.Ctx<typeof ApiUseCase>` is that `ctx`. Pass the factory. `.hooks` infers the value returned from `preExecute` as the `state` argument of `postExecute`, `onCatch`, and `onFinally`. If `preExecute` is omitted, that state is `void`. `postExecute` also receives `result`. `onFinally` receives `status: 'success'` with `result`, or `status: 'failure'` with `error`. The pipeline is guard (outside try), `preExecute`, the method, `postExecute`, `onCatch` then rethrow, `onFinally`. A guard throw does not enter the hooks. A throw inside `onCatch` replaces the error after `onFinally` sees the original one. The application reads statics (`FindUsers.permission`) and validates `input` when it needs to. `execute` is a method. Hexok does not know HTTP, sessions, or callers. The application builds the context and writes the guard.
 
 An adapter owns a mapper when the shape it stores is not the shape the port speaks.
 

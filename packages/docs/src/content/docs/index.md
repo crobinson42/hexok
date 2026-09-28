@@ -24,7 +24,9 @@ The string is the token. Its type is that literal. A schema is an argument of th
 
 A use case takes its ports in the constructor. Hexok does not route HTTP or assemble the object graph.
 
-`UseCase.context` is a family factory in addition to `UseCase('user.create')`. `execute` takes a per-call context and the command. Ports stay in the constructor. The second type argument is the required static contract, such as an input schema. Annotate the command with `InferSchema` of that static `input`. An optional `guard(ctx, spec)` runs first and may throw. `spec` is the static bag, typed as that contract. When `input` is a schema, hexok validates with `validate` and throws `CodedError` code `VALIDATION`, message `hexok: ${token} validation failed`. `SchemaSource` is exported for a Standard Schema or a `Schema` class, the same values `Entity` and `Event` accept.
+`UseCase.context<Ctx, Spec>()` is a family factory in addition to `UseCase('user.create')`. It returns a factory. The optional argument is a settings object with no keys yet. Pass nothing. `{}` is allowed. `guard` and `hooks` are methods, not fields of that object. A missing `<Ctx>` type argument is a type error. `Spec` defaults to no required statics. `execute` takes a per-call context and the input. Ports stay in the constructor. Annotate `input` on the subclass.
+
+`.guard(fn)` and `.hooks(def)` each return the same factory a class extends. Order does not matter. Either may be omitted. Another `.guard()` runs after guards already registered. A second `.hooks()` throws `hexok: UseCase hooks are already set` when the factory is created, if the first registration had at least one callback. An empty `.hooks({})` does not register hooks and does not wrap `execute`. The call is `{ ctx, spec, token, input }`. `input` is the argument passed to `execute`. The method receives that same value. Hexok does not validate it. `call.spec` is the static bag, typed as that contract. `UseCase.GuardParameters<typeof ApiUseCase>` is that call. `.hooks` infers the value returned from `preExecute` as the `state` argument of `postExecute`, `onCatch`, and `onFinally`. If `preExecute` is omitted, that state is `void`. `postExecute` also receives `result`. `onFinally` receives `status: 'success'` with `result`, or `status: 'failure'` with `error`. The pipeline is guard (outside try), `preExecute`, the method, `postExecute`, `onCatch` then rethrow, `onFinally`. A guard throw does not enter the hooks. A throw inside `onCatch` replaces the error after `onFinally` sees the original one. The application validates `input`. A schema on the static bag is application data. `SchemaSource` is exported for a Standard Schema or a `Schema` class, the same values `Entity` and `Event` accept.
 
 ```ts
 type ApiContext = { sessionId: string }
@@ -32,13 +34,18 @@ type ApiContext = { sessionId: string }
 const ApiUseCase = UseCase.context<
   ApiContext,
   { input: StandardSchemaV1; permission: string }
->({
-  guard(ctx, spec) {
-    if (ctx.sessionId.length < 1 || spec.permission.length < 1) {
+>()
+  .guard((call) => {
+    if (call.ctx.sessionId.length < 1 || call.spec.permission.length < 1) {
       throw DomainError.Unauthorized()
     }
-  },
-})
+  })
+  .hooks({
+    preExecute: () => ({ started: Date.now() }),
+    postExecute(_call, state) {
+      void state.started
+    },
+  })
 
 class FindUsers extends ApiUseCase('user.find', {
   input: z.object({ query: z.string() }),
@@ -47,7 +54,7 @@ class FindUsers extends ApiUseCase('user.find', {
   constructor(private readonly users: UserRepository) { super() }
   async execute(
     ctx: ApiContext,
-    input: InferSchema<(typeof FindUsers)['input']>,
+    input: { query: string },
   ): Promise<User[]> {
     return this.users.search(input.query)
   }

@@ -78,13 +78,18 @@ type ApiContext = { sessionId: string }
 const ApiUseCase = UseCase.context<
   ApiContext,
   { input: StandardSchemaV1; permission: string }
->({
-  guard(ctx, spec) {
-    if (ctx.sessionId.length < 1 || spec.permission.length < 1) {
+>()
+  .guard((call) => {
+    if (call.ctx.sessionId.length < 1 || call.spec.permission.length < 1) {
       throw DomainError.Unauthorized()
     }
-  },
-})
+  })
+  .hooks({
+    preExecute: () => ({ started: Date.now() }),
+    postExecute(_call, state) {
+      void state.started
+    },
+  })
 
 class FindUsers extends ApiUseCase('user.find', {
   input: z.object({ query: z.string() }),
@@ -93,7 +98,7 @@ class FindUsers extends ApiUseCase('user.find', {
   constructor(private readonly users: UserRepository) { super() }
   async execute(
     ctx: ApiContext,
-    input: InferSchema<(typeof FindUsers)['input']>,
+    input: { query: string },
   ): Promise<User[]> {
     return this.users.search(input.query)
   }
@@ -102,11 +107,13 @@ class FindUsers extends ApiUseCase('user.find', {
 await new FindUsers(users).execute({ sessionId: 's' }, { query: 'ada' })
 ```
 
-The first type argument is the per-call context. The second is the required static contract. It defaults to no required statics, and then the factory takes only the token. Each use case passes the token and the static values. They are inherited statics: `FindUsers.token`, `FindUsers.input`, `FindUsers.permission`. The permission literal stays narrow. Extra keys are kept. `token`, `prototype`, `name`, and `length` cannot be static names.
+The first type argument is the per-call context. A missing `<Ctx>` type argument is a type error. The second is the required static contract. It defaults to no required statics, and then the factory takes only the token. Each use case passes the token and the static values. They are inherited statics: `FindUsers.token`, `FindUsers.input`, `FindUsers.permission`. The permission literal stays narrow. Extra keys are kept. `token`, `prototype`, `name`, and `length` cannot be static names.
 
-Ports stay constructor arguments. Context is an `execute` argument because a use case instance is long-lived. Annotate `execute` on the subclass. When the contract's `input` is a Standard Schema or a `Schema` class, the command parameter is that schema's output. `InferSchema<(typeof FindUsers)['input']>` follows the schema. A conflicting annotation is a compiler error on the class. `SchemaSource` is exported for a contract that accepts either a Standard Schema or a `Schema` class, the same values as `Entity` and `Event`.
+Ports stay constructor arguments. Context is an `execute` argument because a use case instance is long-lived. Annotate `execute` on the subclass. Callers see that annotation. Hexok passes that argument through to the method. Statics, including a schema stored under the key `input`, are application data copied onto the class (`call.spec.input`). The execute argument is `call.input`. Hexok does not validate it. `SchemaSource` is exported for a Standard Schema or a `Schema` class, the same values as `Entity` and `Event`.
 
-The optional `guard` runs first and may throw. Its second argument is the static bag, typed as the family contract, so `permission` is `string`. When `input` is a schema, hexok validates with `validate` and throws `CodedError` code `VALIDATION`, message `hexok: ${token} validation failed`. Other statics are not interpreted. The application reads them (`FindUsers.permission`). `execute` is a method. Hexok does not know HTTP, sessions, or callers. The application builds the context and writes the guard.
+`UseCase.context<Ctx, Spec>()` returns that factory. The optional argument is a settings object with no keys yet. Pass nothing. `{}` is allowed. `guard` and `hooks` are methods, not fields of that object. `.guard(fn)` and `.hooks(def)` each return the same factory a class extends. Order does not matter. Either may be omitted. Another `.guard()` runs after guards already registered. A second `.hooks()` throws `hexok: UseCase hooks are already set` when the factory is created, if the first registration had at least one callback. An empty `.hooks({})` does not register hooks and does not wrap `execute`.
+
+The call is `{ ctx, spec, token, input }`. `input` is the argument passed to `execute`. The method receives that same value. `spec` is the static bag, typed as the family contract, so `permission` is `string`. `UseCase.GuardParameters<typeof ApiUseCase>` is that call. `.hooks` infers the value returned from `preExecute` as the `state` argument of `postExecute`, `onCatch`, and `onFinally`. If `preExecute` is omitted, that state is `void`. `postExecute` also receives `result`. `onFinally` receives `status: 'success'` with `result`, or `status: 'failure'` with `error`. The pipeline is guard (outside try), `preExecute`, the method, `postExecute`, `onCatch` then rethrow, `onFinally`. A guard throw does not enter the hooks. A throw inside `onCatch` replaces the error after `onFinally` sees the original one. The application reads statics (`FindUsers.permission`) and validates `input` when it needs to. `execute` is a method. Hexok does not know HTTP, sessions, or callers. The application builds the context and writes the guard.
 
 An adapter owns a mapper when the shape it stores is not the shape the port speaks.
 

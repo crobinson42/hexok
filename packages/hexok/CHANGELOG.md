@@ -1,5 +1,11 @@
 # hexok
 
+## 2.1.0
+
+### Minor Changes
+
+- [`04a25b2`](https://github.com/crobinson42/hexok/commit/04a25b2f29fd477bdd80ea907a47ca291ad3e1e9) Thanks [@crobinson42](https://github.com/crobinson42)! - Ship an agent skill at `skills/hexok`. Install it with `npx skills add crobinson42/hexok`. `npx skills update` refreshes it from the GitHub repository. The entry skill walks a feature from the user story through entities, use cases, events, adapters, the gateway, and where handlers run, and points at a reference for each primitive.
+
 ## 2.0.0
 
 ### Major Changes

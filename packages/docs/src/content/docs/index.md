@@ -5,6 +5,14 @@ description: Primitives for hexagonal TypeScript.
 
 Hexok is a small set of classes. Import them from `hexok`. The [Concepts](/hexok/concepts/) pages say what each one is for.
 
+## Installing
+
+```bash
+npm i hexok
+```
+
+The package is [hexok](https://www.npmjs.com/package/hexok) on npm. The repository is [crobinson42/hexok](https://github.com/crobinson42/hexok) on GitHub. TypeBox 1 schematics install as [@hexok/typebox](https://www.npmjs.com/package/@hexok/typebox).
+
 ## Layers
 
 <figure class="hexok-layers">

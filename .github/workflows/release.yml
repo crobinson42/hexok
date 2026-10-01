@@ -44,7 +44,7 @@ jobs:
         uses: changesets/action@v1
         with:
           version: npm run version-packages
-          publish: npm run release
+          publish: bash scripts/ci-publish.sh
           title: Version Packages
           commit: "chore: version packages"
           createGithubReleases: true
@@ -56,7 +56,17 @@ jobs:
   build-docs:
     name: Build docs
     needs: release
-    if: needs.release.outputs.published == 'true' || (github.event_name == 'workflow_dispatch' && inputs.deploy_docs)
+    # always() lets this job run when publish fails. A failed needs job
+    # would otherwise skip the docs site. Main pushes deploy the site even
+    # when every package version is already on npm.
+    if: |
+      always() &&
+      needs.release.result != 'cancelled' &&
+      (
+        needs.release.outputs.published == 'true' ||
+        github.event_name == 'push' ||
+        (github.event_name == 'workflow_dispatch' && inputs.deploy_docs)
+      )
     runs-on: ubuntu-latest
     timeout-minutes: 20
     permissions:

@@ -70,7 +70,9 @@ The string you pass is the token. Its type is that string literal. A subclass do
 
 `static abstract` is not part of TypeScript, so a base class cannot force a subclass to fill in a static field. Hexok therefore takes the token and the schema as arguments of the primitive. Required behavior is an abstract instance method: omit `execute`, omit a port method on an adapter, or omit `fromSource` or `toSource` on a mapper, and the error is on that class.
 
-`UseCase.context` returns a factory for one family. `UseCase('user.create')` is unchanged: `execute(input)`, ports in the constructor. `StandardSchemaV1` and `InferSchema` are exported from `hexok`. Zod satisfies `StandardSchemaV1`.
+`UseCase.context` returns a factory for one family. `UseCase('user.create')` is unchanged: `execute(input)`, ports in the constructor. `StandardSchemaV1` and `InferSchema` are exported from `hexok`. Zod and the other Standard Schema libraries satisfy `StandardSchemaV1`.
+
+`@hexok/typebox` adapts a `typebox` 1 schematic to that same interface. `typebox(schema)` infers `Static`. `typeboxDecode(schema)` infers `StaticDecode` and decodes.
 
 ```ts
 type ApiContext = { sessionId: string }

@@ -1,0 +1,52 @@
+{
+  "name": "@hexok/typebox",
+  "version": "0.0.0",
+  "description": "TypeBox 1 adapter for hexok. Wraps a typebox schematic as a Standard Schema.",
+  "type": "module",
+  "license": "MIT",
+  "sideEffects": false,
+  "keywords": [
+    "hexok",
+    "typebox",
+    "standard-schema",
+    "typescript"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/crobinson42/hexok.git",
+    "directory": "packages/typebox"
+  },
+  "homepage": "https://crobinson42.github.io/hexok/",
+  "bugs": {
+    "url": "https://github.com/crobinson42/hexok/issues"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc -b",
+    "test": "vitest run",
+    "type-check": "tsc --noEmit -p tsconfig.check.json",
+    "lint": "biome check .",
+    "clean": "rm -rf dist *.tsbuildinfo"
+  },
+  "dependencies": {
+    "hexok": "^1.0.0"
+  },
+  "peerDependencies": {
+    "typebox": "^1.0.0"
+  },
+  "devDependencies": {
+    "typebox": "^1.1.24"
+  }
+}

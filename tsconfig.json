@@ -2,6 +2,7 @@
   "files": [],
   "references": [
     { "path": "packages/hexok" },
+    { "path": "packages/typebox" },
     { "path": "examples/extend" },
     { "path": "examples/app-template/backend" }
   ]

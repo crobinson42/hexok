@@ -1,5 +1,5 @@
 import { Adapter, type EventInstance } from 'hexok';
-import { DomainEvents } from '../events/domain.js';
+import { DomainEvents } from '../events/domain-catalog.js';
 import { DomainEventPublisher } from '../ports/domain-event-publisher.js';
 import {
   DomainEventSubscriptions,

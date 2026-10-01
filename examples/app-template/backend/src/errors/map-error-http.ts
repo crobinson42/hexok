@@ -18,6 +18,7 @@ export function mapError(error: unknown): HttpResult {
   if (!DomainError.is(error)) {
     return { status: 500, body: { code: 'INTERNAL' } };
   }
+
   return DomainError.match(error, {
     Unauthorized: (failure) => ({
       status: 401,

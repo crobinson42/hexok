@@ -4,6 +4,10 @@ import { UserRepository } from '../ports/user-repository.js';
 import { UserRecord, type UserRecordData } from './user-record.js';
 
 export class InMemoryUsers extends Adapter(UserRepository) {
+  async findAll(): Promise<UserEntity[]> {
+      return [] as UserEntity[];
+  }
+
   readonly #model = new UserRecord();
   #rows = new Map<string, UserRecordData>();
 

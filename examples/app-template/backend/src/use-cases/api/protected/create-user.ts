@@ -33,9 +33,13 @@ export class CreateUser extends ActorApiUseCase('user.create', {
     },
   ): Promise<UserEntity> {
     const existing = await this.deps.users.get(input.id);
+
     if (existing) throw DomainError.UserExists({ id: input.id });
+
     const user = UserEntity.create(input);
+
     await this.deps.users.save(user);
+
     await this.deps.domainEventPublisher.publish(
       new UserCreatedEvent({
         id: user.props.id,
@@ -43,6 +47,7 @@ export class CreateUser extends ActorApiUseCase('user.create', {
         email: user.props.email,
       }),
     );
+
     return user;
   }
 }

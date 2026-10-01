@@ -24,6 +24,7 @@ export const PublicApiUseCase =
 export const ActorApiUseCase = UseCase.context<ActorApiUseCaseCtx, ActorSpec>()
   .guard(traceIdGuard)
   .guard(allowedActorGuard)
+    .guard(inputValidationGuard)
   .hooks({
-    preExecute: inputValidationGuard,
+    // preExecute: inputValidationGuard,
   });

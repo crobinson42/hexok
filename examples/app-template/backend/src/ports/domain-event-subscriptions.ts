@@ -1,5 +1,5 @@
 import { type EventInstance, Port } from 'hexok';
-import type { DomainEvents } from '../events/domain.js';
+import type { DomainEvents } from '../events/domain-catalog.js';
 
 /** Handler instance a process entry passes to {@link DomainEventSubscriptions}. */
 export type DomainEventsSubscribedHandler = {

@@ -1,0 +1,93 @@
+.hexok-layers {
+  container-type: inline-size;
+  margin-block: 1.5rem 2rem;
+}
+
+.hexok-layers svg {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+
+.hexok-layers a {
+  text-decoration: none;
+}
+
+.hexok-layers svg a:hover text,
+.hexok-layers svg a:focus-visible text {
+  text-decoration: underline;
+  text-underline-offset: 0.18em;
+}
+
+.hexok-layers svg a:focus-visible {
+  outline: 2px solid currentColor;
+  outline-offset: 3px;
+}
+
+.hexok-layers .stack {
+  display: none;
+}
+
+.hexok-layers .band {
+  border-radius: 1.25rem;
+  padding: 0.85rem 0.9rem 0.95rem;
+  text-align: center;
+}
+
+.hexok-layers .band-name {
+  margin: 0;
+  font-size: 0.75rem;
+  font-weight: 650;
+  letter-spacing: 0.02em;
+}
+
+.hexok-layers .band-items {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 0.35rem 0.9rem;
+  margin: 0.2rem 0 0.8rem;
+  font-size: 1.05rem;
+  font-weight: 650;
+}
+
+.hexok-layers .domain .band-items {
+  margin-bottom: 0.15rem;
+}
+
+.hexok-layers .stack a {
+  color: inherit;
+  font-weight: 650;
+  text-decoration: underline;
+  text-underline-offset: 0.15em;
+}
+
+.hexok-layers .frameworks {
+  background: #f6e29a;
+  color: #4a3d18;
+}
+
+.hexok-layers .adapters {
+  background: #c9ddaf;
+  color: #1c3218;
+}
+
+.hexok-layers .application {
+  background: #f0b5a4;
+  color: #4a221c;
+}
+
+.hexok-layers .domain {
+  background: #2f4e7a;
+  color: #f5f8fc;
+}
+
+@container (max-width: 540px) {
+  .hexok-layers .rings {
+    display: none;
+  }
+
+  .hexok-layers .stack {
+    display: block;
+  }
+}

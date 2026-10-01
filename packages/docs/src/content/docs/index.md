@@ -3,7 +3,69 @@ title: Hexok
 description: Primitives for hexagonal TypeScript.
 ---
 
-Hexok is a small set of classes. Import them from `hexok`.
+Hexok is a small set of classes. Import them from `hexok`. The [Concepts](/hexok/concepts/) pages say what each one is for.
+
+## Layers
+
+<figure class="hexok-layers">
+<svg class="rings" viewBox="0 0 900 900" role="group" aria-labelledby="hexok-layers-title" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif">
+<title id="hexok-layers-title">Hexok primitives in the clean architecture layers</title>
+<circle cx="450" cy="450" r="432" fill="#F6E29A" stroke="#D4C06A" stroke-width="2"/>
+<circle cx="450" cy="450" r="352" fill="#C9DDAF" stroke="#A8C48C" stroke-width="2"/>
+<circle cx="450" cy="450" r="262" fill="#F0B5A4" stroke="#E09A86" stroke-width="2"/>
+<circle cx="450" cy="450" r="158" fill="#2F4E7A" stroke="#284266" stroke-width="2"/>
+<g fill="#4A3D18" font-size="18" font-weight="600" text-anchor="middle" dominant-baseline="middle">
+<text x="450" y="58">Frameworks &amp; Drivers</text>
+<text x="782" y="242">HTTP</text>
+<text x="842" y="450">Email</text>
+<text x="450" y="842">Database</text>
+<text x="58" y="450">Queue</text>
+</g>
+<g fill="#24381C" font-size="18" font-weight="600" text-anchor="middle" dominant-baseline="middle">
+<text x="450" y="143">Interface Adapters</text>
+</g>
+<a href="/hexok/concepts/adapter/">
+<text x="450" y="757" fill="#1C3218" font-size="22" font-weight="650" text-anchor="middle" dominant-baseline="middle">Adapter</text>
+</a>
+<g fill="#5C3228" font-size="18" font-weight="600" text-anchor="middle" dominant-baseline="middle">
+<text x="450" y="240">Application</text>
+</g>
+<g fill="#4A221C" font-size="20" font-weight="650" text-anchor="middle" dominant-baseline="middle">
+<a href="/hexok/concepts/use-case/"><text x="289" y="585">UseCase</text></a>
+<a href="/hexok/concepts/port/"><text x="611" y="585">Port</text></a>
+<a href="/hexok/concepts/event-handler/"><text x="450" y="668">EventHandler</text></a>
+</g>
+<g fill="#D5DEEA" font-size="16" font-weight="600" text-anchor="middle" dominant-baseline="middle">
+<text x="450" y="392">Domain</text>
+</g>
+<g fill="#FFFFFF" font-size="22" font-weight="650" text-anchor="middle" dominant-baseline="middle">
+<a href="/hexok/concepts/entity/"><text x="378" y="436">Entity</text></a>
+<a href="/hexok/concepts/schema/"><text x="522" y="436">Schema</text></a>
+<a href="/hexok/concepts/error/"><text x="378" y="474">Error</text></a>
+<a href="/hexok/concepts/event/"><text x="522" y="474">Event</text></a>
+<a href="/hexok/concepts/event-catalog/"><text x="450" y="520">EventCatalog</text></a>
+</g>
+</svg>
+<div class="stack">
+<div class="band frameworks">
+<p class="band-name">Frameworks &amp; Drivers</p>
+<p class="band-items">HTTP · Database · Queue · Email</p>
+<div class="band adapters">
+<p class="band-name">Interface Adapters</p>
+<p class="band-items"><a href="/hexok/concepts/adapter/">Adapter</a></p>
+<div class="band application">
+<p class="band-name">Application</p>
+<p class="band-items"><a href="/hexok/concepts/use-case/">UseCase</a> <a href="/hexok/concepts/port/">Port</a> <a href="/hexok/concepts/event-handler/">EventHandler</a></p>
+<div class="band domain">
+<p class="band-name">Domain</p>
+<p class="band-items"><a href="/hexok/concepts/entity/">Entity</a> <a href="/hexok/concepts/schema/">Schema</a> <a href="/hexok/concepts/error/">Error</a> <a href="/hexok/concepts/event/">Event</a> <a href="/hexok/concepts/event-catalog/">EventCatalog</a></p>
+</div>
+</div>
+</div>
+</div>
+</div>
+<figcaption>The domain is the center. Dependencies point inward. The outer layer is the HTTP gateway, database, queue, and email client you choose.</figcaption>
+</figure>
 
 | Primitive | Extend |
 | --- | --- |

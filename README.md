@@ -2,6 +2,8 @@
 
 Hexok is a small TypeScript kit for hexagonal software. You extend a primitive, and the compiler tells you what that primitive still requires. You wire objects together yourself.
 
+Documentation: [crobinson42.github.io/hexok](https://crobinson42.github.io/hexok/).
+
 ```bash
 npm i hexok
 ```

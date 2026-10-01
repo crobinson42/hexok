@@ -37,6 +37,7 @@ jobs:
       - run: corepack enable
       - run: npm ci
       - run: npm run build --workspace=hexok
+      - run: npm run build --workspace=@hexok/typebox
 
       - name: Create release pull request or publish to npm
         id: changesets

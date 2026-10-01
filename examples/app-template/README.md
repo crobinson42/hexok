@@ -1,7 +1,34 @@
 # App template
 
-A small backend that uses hexok primitives and wires them by hand.
+A blog API with two Node processes sharing Redis.
 
-`inMemoryEvents()` builds an `InMemoryEventPublisher` and an `InMemoryEventSubscriptions` over one in-memory log. Those adapters implement `DomainEventPublisher` and `DomainEventSubscriptions`. `createWebApp()` gives the publisher to `CreateUser` and subscribes `SendWelcomeEmailHandler` and `IndexUserHandler`. `createHeavyWorker()` subscribes `HeavyComputationTaskHandler` on a `DomainEventSubscriptions`. Each handler names its event and a `groupId`. Call `subscriptions.start()` before publishing. The publisher delivers to handlers registered on that same log. A broker implements the same two ports, and `groupId` is the competing-consumer name. Replace an adapter, or pass a different `UserRepository`, at the edge of the process. Hexok does not register, route, or start that graph.
+`SavePost` creates or updates a post and assigns an id when the caller omits one. `PublishPost` and `UnpublishPost` use `PostEntity`. `PublishPost` takes `emailSubscribers`. The worker `EmailSubscribersHandler` emails subscribers only when that flag is true. `SubscribeToPosts` stores an email.
 
-`DomainError` is the application's error catalog. `UserEntity.rename` and `CreateUser` throw its members. `mapError` turns a member into a status code. Hexok does not do that mapping.
+Use cases receive `{ ipAddress }` from the socket. There is no auth.
+
+`http.ts` is Express. `worker.ts` blocks on the Redis list `blog:events`.
+
+```bash
+redis-server
+npm run build -w @hexok/app-template
+npm run start -w @hexok/app-template
+npm run start:worker -w @hexok/app-template
+```
+
+`REDIS_URL` defaults to `redis://127.0.0.1:6379`. `PORT` defaults to `3000`.
+
+```bash
+curl -s -X POST http://127.0.0.1:3000/posts \
+  -H 'content-type: application/json' \
+  -d '{"title":"Hello","body":"First post"}'
+
+curl -s -X POST http://127.0.0.1:3000/posts/POST_ID/publish \
+  -H 'content-type: application/json' \
+  -d '{"emailSubscribers":true}'
+
+curl -s -X POST http://127.0.0.1:3000/posts/POST_ID/unpublish
+
+curl -s -X POST http://127.0.0.1:3000/subscribers \
+  -H 'content-type: application/json' \
+  -d '{"email":"ada@example.com"}'
+```

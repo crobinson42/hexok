@@ -4,22 +4,21 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "astro dev",
-    "build": "tsc -b backend && astro build",
-    "preview": "astro preview",
+    "build": "tsc -b",
+    "start": "node dist/http.js",
+    "start:worker": "node dist/worker.js",
     "test": "vitest run",
-    "type-check": "tsc --noEmit -p backend/tsconfig.check.json && astro check",
+    "type-check": "tsc --noEmit -p tsconfig.check.json",
     "lint": "biome check .",
-    "clean": "rm -rf dist backend/dist .astro backend/*.tsbuildinfo"
+    "clean": "rm -rf dist *.tsbuildinfo"
   },
   "dependencies": {
-    "astro": "^7.3.2",
+    "express": "^5.1.0",
     "hexok": "*",
-    "ws": "^8.18.3",
+    "redis": "^5.8.2",
     "zod": "^4.1.5"
   },
   "devDependencies": {
-    "@astrojs/check": "^0.9.10",
-    "@types/ws": "^8.18.1"
+    "@types/express": "^5.0.3"
   }
 }

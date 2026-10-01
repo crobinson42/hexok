@@ -4,6 +4,6 @@
     { "path": "packages/hexok" },
     { "path": "packages/typebox" },
     { "path": "examples/extend" },
-    { "path": "examples/app-template/backend" }
+    { "path": "examples/app-template" }
   ]
 }

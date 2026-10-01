@@ -1,6 +1,6 @@
 {
   "name": "@hexok/typebox",
-  "version": "0.0.0",
+  "version": "0.1.0",
   "description": "TypeBox 1 adapter for hexok. Wraps a typebox schematic as a Standard Schema.",
   "type": "module",
   "license": "MIT",
@@ -41,7 +41,7 @@
     "clean": "rm -rf dist *.tsbuildinfo"
   },
   "dependencies": {
-    "hexok": "^1.0.0"
+    "hexok": "^2.0.0"
   },
   "peerDependencies": {
     "typebox": "^1.0.0"

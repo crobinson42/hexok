@@ -1,5 +1,41 @@
 # hexok
 
+## 2.0.0
+
+### Major Changes
+
+- [`ee89169`](https://github.com/crobinson42/hexok/commit/ee891693e7d571391402481871691d05cac5012a) Thanks [@crobinson42](https://github.com/crobinson42)! - `UseCase` and `Entity` no longer take an error map or expose `error()`. Application refusals are thrown from an `Errors` catalog and caught by the application. `defineErrors`, `EmptyErrors`, and `ErrorArgs` are removed. Schema checks still throw `CodedError` with code `VALIDATION`.
+
+- [`50fd2dc`](https://github.com/crobinson42/hexok/commit/50fd2dcb3a633ad1238745271884ae07adccb557) Thanks [@crobinson42](https://github.com/crobinson42)! - Hexok is now the primitives only: `Schema`, `Entity`, `UseCase`, `Port`, `Adapter`, `Event`, `EventCatalog`, and `Errors`, imported from `hexok`.
+
+  `Errors` is an application error catalog. `throw DomainError.UserExists({ id })` from a use case, an entity, or an adapter. A gateway imports that catalog and maps each member.
+
+  The token and any schema are arguments of the primitive (`class User extends Entity('User', userSchema)`), so a subclass does not declare `static readonly` fields and does not write `as const`. Required behavior is an abstract method. Omitting `execute`, or a port method on an adapter, is a compiler error on that class. `start`, `stop`, `parse`, and `set` can be overridden.
+
+  `hexok/core`, `hexok/domain`, `hexok/app`, `hexok/infra`, `hexok/runtime`, and `hexok/testing` are gone, along with `App.from`, HTTP, RPC, guards, interceptors, and channels. A use case takes its ports in the constructor. The application constructs it.
+
+### Minor Changes
+
+- [`50a3c2a`](https://github.com/crobinson42/hexok/commit/50a3c2ae7258c22a958432f81b4e593138eba555) Thanks [@crobinson42](https://github.com/crobinson42)! - `Errors` member factories take an optional message as the first argument. The catalog message stays the default. A member with `data` takes that payload after the message.
+
+- [`bdeb2ee`](https://github.com/crobinson42/hexok/commit/bdeb2ee0ef8dbc16e5033eb82b3eae58e7a200b4) Thanks [@crobinson42](https://github.com/crobinson42)! - Add `EventInstance<typeof Catalog>` for the event objects in a catalog. Each instance carries its token. `Catalog.message` and `Catalog.parse` convert between an instance and `EventMessage`. `EventHandler` binds a handler class to one event.
+
+- [`6baf9b2`](https://github.com/crobinson42/hexok/commit/6baf9b255904aaa32b2590602578b9d371231f35) Thanks [@crobinson42](https://github.com/crobinson42)! - Add `EventMessage<typeof Catalog>`, the `{ key, payload }` union for an event catalog. Pass a catalog key as the second type argument to keep one entry.
+
+- [`87dd117`](https://github.com/crobinson42/hexok/commit/87dd117fc6287581417fb55840dfd60275576101) Thanks [@crobinson42](https://github.com/crobinson42)! - Add `Mapper`, which translates an entity or a schema to the shape an adapter stores, and back. Schema checks are off unless `{ validate: true }` is set on the mapper or the call. `MapperClass` is exported so an exported subclass can keep `fromSource` and `toSource` protected.
+
+- [`b33efaf`](https://github.com/crobinson42/hexok/commit/b33efaf7f03440cc3898f9218dd4c7f92f53ff8d) Thanks [@crobinson42](https://github.com/crobinson42)! - Add `UseCase.context<Ctx, Spec>()`, a family factory for a per-call context, optional guards, optional hooks, and required statics. The optional argument is a settings object with no keys yet. Pass nothing. `{}` is allowed. `guard` and `hooks` are methods, not fields of that object. A missing `<Ctx>` type argument is a type error. `Spec` defaults to no required statics. `.guard(fn)` and `.hooks(def)` each return the same factory a class extends. Order does not matter. Either may be omitted. Another `.guard()` runs after guards already registered. A second `.hooks()` throws `hexok: UseCase hooks are already set` when the factory is created, if the first registration had at least one callback. An empty `.hooks({})` does not register hooks and does not wrap `execute`. The call is `{ ctx, spec, token, input }`. `input` is the argument passed to `execute`. The method receives that same value. Hexok does not validate it. `.hooks` infers the value returned from `preExecute` as the `state` argument of `postExecute`, `onCatch`, and `onFinally`. If `preExecute` is omitted, that state is `void`. `postExecute` also receives `result`. `onFinally` receives `status: 'success'` with `result`, or `status: 'failure'` with `error`. The pipeline is guard (outside try), `preExecute`, the method, `postExecute`, `onCatch` then rethrow, `onFinally`. A guard throw does not enter the hooks. A throw inside `onCatch` replaces the error after `onFinally` sees the original one. Statics are copied onto the class. `SchemaSource` is exported.
+
+- [`be9456d`](https://github.com/crobinson42/hexok/commit/be9456db31b3396f38e455bd816299dc77ab02af) Thanks [@crobinson42](https://github.com/crobinson42)! - Add `UseCase.Ctx<typeof Factory>`, the context type of a `UseCase.context` factory. It is `ctx` on `UseCase.GuardParameters<typeof Factory>`. Pass the factory. A subclass, and a plain `UseCase(token)` class, are `never`.
+
+- [`78cb3f7`](https://github.com/crobinson42/hexok/commit/78cb3f72abfa0967369c043245e76224cf105b21) Thanks [@crobinson42](https://github.com/crobinson42)! - Add `UseCase.GuardParameters<typeof Factory>`, the call `{ ctx, spec, token, input }` passed to a `UseCase.context` guard and to `preExecute`. `input` is the argument passed to `execute`. Hexok does not validate it. `UseCase.context<Ctx, Spec>()` returns a factory. The optional argument is a settings object with no keys yet. `.guard(fn)` and `.hooks(def)` each return that factory. `.hooks` infers the value returned from `preExecute` as the `state` argument of `postExecute`, `onCatch`, and `onFinally`. If `preExecute` is omitted, that state is `void`. `postExecute` also receives `result`. `onFinally` receives `status: 'success'` with `result`, or `status: 'failure'` with `error`. `UseCase.context` returns `UseCase.ContextFactory`, so an exported factory const infers its type under declaration emit.
+
+### Patch Changes
+
+- [`2e15b21`](https://github.com/crobinson42/hexok/commit/2e15b21fa7314ee9f496c80ac8e99794003cdfc7) Thanks [@crobinson42](https://github.com/crobinson42)! - Add a package README, homepage, and npm keywords pointing at the docs site (https://crobinson42.github.io/hexok/).
+
+- [`e9fafc5`](https://github.com/crobinson42/hexok/commit/e9fafc5e361642e87d1037807553438f5a482f04) Thanks [@crobinson42](https://github.com/crobinson42)! - Document `@hexok/typebox` for `typebox` 1 schematics. `typebox(schema)` infers `Static`. `typeboxDecode(schema)` infers `StaticDecode` and decodes.
+
 ## 1.0.0
 
 ### Major Changes

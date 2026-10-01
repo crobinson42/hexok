@@ -13,6 +13,15 @@ npm i hexok
 
 The package is [hexok](https://www.npmjs.com/package/hexok) on npm. The repository is [crobinson42/hexok](https://github.com/crobinson42/hexok) on GitHub. TypeBox 1 schematics install as [@hexok/typebox](https://www.npmjs.com/package/@hexok/typebox).
 
+## Agent skill
+
+The repository includes an agent skill named `hexok`. It walks a feature from the user story through entities, use cases, events, adapters, the gateway, and where handlers run. Install it from GitHub. `npx skills update` refreshes that install from GitHub.
+
+```bash
+npx skills add crobinson42/hexok
+npx skills update
+```
+
 ## Layers
 
 <figure class="hexok-layers">

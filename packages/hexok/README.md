@@ -6,4 +6,13 @@ Import them from `hexok`. There is no HTTP layer and no composition root in this
 
 `UseCase.context<Ctx, Spec>()` is a family factory for a per-call context, optional guards, optional hooks, and required statics. The optional argument is a settings object with no keys yet. Pass nothing. `{}` is allowed. `guard` and `hooks` are methods, not fields of that object. A missing `<Ctx>` type argument is a type error. `Spec` defaults to no required statics. `.guard(fn)` and `.hooks(def)` each return the same factory. Order does not matter. Either may be omitted. Another `.guard()` runs after guards already registered. A second `.hooks()` throws `hexok: UseCase hooks are already set` when the factory is created, if the first registration had at least one callback. An empty `.hooks({})` does not register hooks and does not wrap `execute`. The call is `{ ctx, spec, token, input }`. `input` is the argument passed to `execute`. The method receives that same value. Hexok does not validate it. `UseCase.GuardParameters<typeof Factory>` is that call. `UseCase.Ctx<typeof Factory>` is that `ctx`. Pass the factory. `.hooks` infers the value returned from `preExecute` as the `state` argument of `postExecute`, `onCatch`, and `onFinally`. If `preExecute` is omitted, that state is `void`. `postExecute` also receives `result`. `onFinally` receives `status: 'success'` with `result`, or `status: 'failure'` with `error`. The pipeline is guard (outside try), `preExecute`, the method, `postExecute`, `onCatch` then rethrow, `onFinally`. A guard throw does not enter the hooks. A throw inside `onCatch` replaces the error after `onFinally` sees the original one. `UseCase(token)` still has `execute(input)`.
 
+## Agent skill
+
+This package's repository includes an agent skill named `hexok`. It walks a feature from the user story through entities, use cases, events, adapters, the gateway, and where handlers run. Install it from GitHub. `npx skills update` refreshes that install from GitHub.
+
+```bash
+npx skills add crobinson42/hexok
+npx skills update
+```
+
 The root [README](../../README.md) shows the shape. Tokens and schemas are arguments of each primitive, so they cannot be forgotten. `execute`, `handle`, and port methods are abstract, so a missing method is a compiler error on the class. `start`, `stop`, `parse`, and `set` are concrete methods you can override.

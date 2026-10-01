@@ -8,6 +8,15 @@ Documentation: [crobinson42.github.io/hexok](https://crobinson42.github.io/hexok
 npm i hexok
 ```
 
+## Agent skill
+
+This repository includes an agent skill named `hexok`. It walks a feature from the user story through entities, use cases, events, adapters, the gateway, and where handlers run. Install it from GitHub. `npx skills update` refreshes that install from GitHub.
+
+```bash
+npx skills add crobinson42/hexok
+npx skills update
+```
+
 ```ts
 import { Adapter, Entity, Errors, Event, EventCatalog, EventHandler, Mapper, Port, Schema, UseCase } from 'hexok'
 ```

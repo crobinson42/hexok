@@ -44,6 +44,8 @@ const publishPost = new PublishPost(posts, events)
 
 The defaults of `start` and `stop` resolve immediately, so this adapter can leave them alone. A database adapter overrides `start` to connect and `stop` to disconnect. The application calls them. The use case calls `get` and `save`.
 
+When the stored document is not the post, the database adapter uses a [mapper](/hexok/concepts/adapter/mapper/) to translate between them.
+
 ## API
 
 `Adapter(PortClass)` returns an abstract class that extends that port. Implement the port's methods. The compiler reports a missing one on the class.

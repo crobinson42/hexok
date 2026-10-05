@@ -90,7 +90,7 @@ npx skills update
 | Entity | `Entity('User', userSchema)` |
 | Port | `Port('UserRepository')` |
 | Adapter | `Adapter(UserRepository)` |
-| Mapper | `Mapper('mongo.User', User, mongoUserSchema)` |
+| [Mapper](/hexok/concepts/adapter/mapper/) | `Mapper('mongo.User', User, mongoUserSchema)` |
 | UseCase | `UseCase('user.create')` |
 | Event | `Event('user.created', userSchema)` |
 | EventCatalog | `EventCatalog('domain', { userCreated })` |

@@ -32,7 +32,13 @@ export default defineConfig({
               ],
             },
             { label: 'Port', slug: 'concepts/port' },
-            { label: 'Adapter', slug: 'concepts/adapter' },
+            {
+              label: 'Adapter',
+              items: [
+                { label: 'Adapter', slug: 'concepts/adapter' },
+                { label: 'Mapper', slug: 'concepts/adapter/mapper' },
+              ],
+            },
             {
               label: 'Error',
               items: [

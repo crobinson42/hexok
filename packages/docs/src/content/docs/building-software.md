@@ -27,7 +27,7 @@ Implement the handler so that it receives the published-post event and sends the
 
 ## Implement the adapters
 
-Each port needs an implementation before the feature can run. Add an adapter for saving posts, publishing events, subscribing handlers, and sending email. An adapter is the concrete implementation of a port. The use case and the handlers keep calling the ports.
+Each port needs an implementation before the feature can run. Add an adapter for saving posts, publishing events, subscribing handlers, and sending email. An adapter is the concrete implementation of a port. The use case and the handlers keep calling the ports. When the stored document is a different shape from the domain props, the adapter uses a [mapper](/hexok/concepts/adapter/mapper/).
 
 ## Add the gateway
 

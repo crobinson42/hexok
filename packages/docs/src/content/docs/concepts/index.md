@@ -11,7 +11,7 @@ Each primitive has a short page: what it is, the problem it solves, how a featur
 | Schema | [Schema](/hexok/concepts/schema/) |
 | Use case | [UseCase](/hexok/concepts/use-case/) and [UseCase.context](/hexok/concepts/use-case/context/) |
 | Port | [Port](/hexok/concepts/port/) |
-| Adapter | [Adapter](/hexok/concepts/adapter/) |
+| Adapter | [Adapter](/hexok/concepts/adapter/) and [Mapper](/hexok/concepts/adapter/mapper/) |
 | Error | [Error](/hexok/concepts/error/), [Error map](/hexok/concepts/error/map/), and [Coded error](/hexok/concepts/error/coded/) |
 | Event | [Event](/hexok/concepts/event/) |
 | Event catalog | [EventCatalog](/hexok/concepts/event-catalog/) |

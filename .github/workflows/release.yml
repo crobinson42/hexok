@@ -91,6 +91,10 @@ jobs:
   deploy-docs:
     name: Deploy docs
     needs: build-docs
+    # The github-pages environment skips this job when any other job in the
+    # run fails or is cancelled, unless an if is set. Deploy whenever the
+    # docs build succeeded and the run itself was not cancelled.
+    if: ${{ !cancelled() && needs.build-docs.result == 'success' }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:

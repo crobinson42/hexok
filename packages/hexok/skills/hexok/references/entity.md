@@ -46,6 +46,28 @@ Read `props` for the current data. Write only through `set` or a method that cal
 
 The adapter calls `commit()` after the driver write succeeds. That is what clears `isNew` and the dirty set. The use case does not commit, and a mapper does not commit.
 
+## Closing `set`
+
+`set` stays public. The instance is an `EntityInstance`, so a private or protected `set` is a type error.
+
+When every change belongs on a method, override `set` with a `never` producer and throw. Methods call `super.set`.
+
+```ts
+class User extends Entity('User', UserSchema) {
+  override set(_producer: never): never {
+    throw new Error('User.set is closed');
+  }
+
+  changeEmail(email: string): this {
+    return super.set((draft) => {
+      draft.email = email;
+    });
+  }
+}
+```
+
+`user.set(...)` fails to typecheck. A value typed as `EntityInstance` can still name `set`. That call throws.
+
 ## API
 
 `Entity(token, schema)` returns the class you extend. `token` is a string literal.

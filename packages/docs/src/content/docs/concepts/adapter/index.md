@@ -20,7 +20,7 @@ The use case asks a `PostRepository` to save. Something has to actually keep the
 
 ## How it's used
 
-An in-memory repository is enough to walk the publish story. The API process can later substitute a database class that extends the same port. The composition root constructs the adapter, starts it, and hands it to `PublishPost`.
+An in-memory repository is enough to walk the publish story. The API process can later substitute a database class that extends the same port. The composition root constructs the adapter, starts it, and hands it to `PublishPost` on `deps`. An adapter that takes a driver uses that same `deps` object.
 
 ```ts
 class InMemoryPosts extends Adapter(PostRepository) {
@@ -39,7 +39,7 @@ class InMemoryPosts extends Adapter(PostRepository) {
 
 const posts = new InMemoryPosts()
 await posts.start()
-const publishPost = new PublishPost(posts, events)
+const publishPost = new PublishPost({ posts, events })
 ```
 
 The defaults of `start` and `stop` resolve immediately, so this adapter can leave them alone. A database adapter overrides `start` to connect and `stop` to disconnect. The application calls them. The use case calls `get` and `save`.

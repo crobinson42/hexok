@@ -19,23 +19,25 @@ Publishing a post is a story with a beginning and an end. Load the post, apply t
 ```ts
 class PublishPost extends UseCase('post.publish') {
   constructor(
-    private readonly posts: PostRepository,
-    private readonly events: BlogEventPublisher,
+    private readonly deps: {
+      posts: PostRepository;
+      events: BlogEventPublisher;
+    },
   ) {
     super();
   }
 
   async execute(input: { id: string }): Promise<{ id: string }> {
-    const post = await this.posts.get(input.id);
+    const post = await this.deps.posts.get(input.id);
     post.publish(new Date());
-    await this.posts.save(post);
-    await this.events.publish(new PostPublished(post.toProps()));
+    await this.deps.posts.save(post);
+    await this.deps.events.publish(new PostPublished(post.toProps()));
     return { id: post.props.id };
   }
 }
 ```
 
-The application constructs `PublishPost` with concrete adapters and calls `execute` from a gateway. One action is one class and one token. A caller who can save a draft and later publish it gets `SavePost` (`post.save`) and `PublishPost` (`post.publish`).
+The application constructs `PublishPost` with concrete adapters (`new PublishPost({ posts, events })`) and calls `execute` from a gateway. One action is one class and one token. Pass every port on `deps`, including a use case with one port. Put the core port first in the type. Optional flags chosen for that long-lived instance are a second argument, `config`. A value the caller sends on one request stays on `execute`'s input. A value declared for the whole context family stays on the factory's static spec. A caller who can save a draft and later publish it gets `SavePost` (`post.save`) and `PublishPost` (`post.publish`).
 
 Declare `execute` as a method. A class field, or an assignment after `super()`, is the wrong shape. The class is incomplete until `execute` exists, and the compiler reports the missing method.
 
@@ -49,7 +51,7 @@ Declare `execute` as a method. A class field, or an assignment after `super()`, 
 | --- | --- |
 | `PublishPost.token` | The name you passed in. |
 | `execute(input)` | Required. Annotate the input and the return type on the subclass. |
-| `constructor` | Receive ports here and call `super()`. |
+| `constructor` | Ports arrive on `deps`. Optional instance settings arrive on `config`. Call `super()`. |
 
 A subclass of plain `UseCase(token)` takes one argument. Adding a context argument there is a type error. Reach for the family factory instead.
 
@@ -68,8 +70,10 @@ const ApiUseCase = UseCase.context<ApiContext>().guard((call) => {
 
 class PublishPost extends ApiUseCase('post.publish') {
   constructor(
-    private readonly posts: PostRepository,
-    private readonly events: BlogEventPublisher,
+    private readonly deps: {
+      posts: PostRepository;
+      events: BlogEventPublisher;
+    },
   ) {
     super();
   }
@@ -78,15 +82,15 @@ class PublishPost extends ApiUseCase('post.publish') {
     ctx: UseCase.Ctx<typeof ApiUseCase>,
     input: { id: string },
   ): Promise<{ id: string }> {
-    const post = await this.posts.get(input.id);
+    const post = await this.deps.posts.get(input.id);
     post.publish(new Date());
-    await this.posts.save(post);
-    await this.events.publish(new PostPublished(post.toProps()));
+    await this.deps.posts.save(post);
+    await this.deps.events.publish(new PostPublished(post.toProps()));
     return { id: post.props.id };
   }
 }
 
-await new PublishPost(posts, events).execute({ traceId: 'req-1' }, { id: 'p1' });
+await new PublishPost({ posts, events }).execute({ traceId: 'req-1' }, { id: 'p1' });
 ```
 
 A member that needs a static contract, such as a permission string or an input schema the application will read, declares that contract as the second type argument. The schema is data the guard can read. Validating the input stays in the guard or in `execute`.

@@ -60,7 +60,7 @@ A blog post is an id, a title, a body, and whether it is published. The schema i
 
 Define each use case as one action, and the ports that action calls, when they are not already there.
 
-Saving a post is a port. Publishing an event is a different port. The use case receives both in its constructor and calls them from `execute`. It does not import a driver. Read [references/use-case.md](references/use-case.md) and [references/port.md](references/port.md).
+Saving a post is a port. Publishing an event is a different port. The use case receives both on a `deps` object in its constructor and calls them from `execute` through `this.deps`. Add a second argument, `config`, only when the composition root sets flags on that long-lived instance. It does not import a driver. Read [references/use-case.md](references/use-case.md) and [references/port.md](references/port.md).
 
 Use `UseCase(token)` when `execute` only needs the input. Use `UseCase.context<Ctx>()` when every call in the family carries the same extra facts, such as a trace id, the actor, or the caller IP. Share one family across the gateway's use cases.
 
@@ -74,7 +74,7 @@ When the story has no consequence beyond its own write, this step is `none`. Do 
 
 ### 3.c. Event handlers
 
-When step 3.b named a side effect, implement the handler if it does not exist. The handler takes its own ports in the constructor. `handle` receives the event. Emailing subscribers loads addresses through a subscriber port and sends mail through a mail port. Read [references/event-handler.md](references/event-handler.md).
+When step 3.b named a side effect, implement the handler if it does not exist. The handler takes its own ports on a `deps` object in the constructor. `handle` receives the event. Emailing subscribers loads addresses through a subscriber port and sends mail through a mail port. Read [references/event-handler.md](references/event-handler.md).
 
 The handler does not subscribe itself. Subscription belongs to the adapter in step 4.
 
@@ -96,7 +96,7 @@ Use the HTTP library the application already depends on. Express, Hono, and Koa 
 
 The route builds the call context, calls `execute`, and maps failures to the reply. A missing entity is a 404. `CodedError` code `VALIDATION` is a 400 and `data.issues` names the fields. A catalog conflict, such as an already published post, is a 409. The catalog does not contain status codes.
 
-Construct adapters, call `start`, and construct use cases in the entry point. A use case instance is long-lived. Context is an argument to `execute`, not a field set per request.
+Construct adapters, call `start`, and construct use cases in the entry point (`new PublishPost({ posts, events })`). A use case instance is long-lived. Context is an argument to `execute`, not a field set per request.
 
 ### 6. Where handlers run
 
@@ -110,6 +110,7 @@ Do not add a broker only to create a second process. Do not move the handler's w
 
 ## Conventions
 
+- A use case, an event handler, and an adapter that takes a driver receive collaborators as one `readonly` object named `deps`, including a class with a single collaborator. Keys are the collaborator names. Write the core port first in the type. Call sites may pass keys in any order. The body uses `this.deps`. Optional instance settings are a second argument, `config?`, also `readonly`. Omit `config` when there are none. New ports go on `deps`. New flags go on `config`. Do not add a third positional argument. A per-request choice stays on `execute`'s input. A value declared for a whole `UseCase.context` family stays on that factory's static spec. Entity payloads, event payloads, error-catalog factories, and port methods stay data arguments.
 - Tokens are factory arguments: `Entity('Post', PostSchema)`, `UseCase('post.publish')`, `Port('PostRepository')`, `Event('post.published', PostSchema)`, `EventCatalog('blog', { postPublished })`, `EventHandler('email.subscribers', PostPublished)`, `Errors('blog', { ... })`. A subclass does not redeclare the token.
 - `execute`, `handle`, port methods, and a mapper's `fromSource` and `toSource` are methods on the class. The compiler reports a missing one. `start`, `stop`, `parse`, and `set` already exist and may be overridden.
 - A use case throws a catalog member when the story refuses. Schema checks throw `CodedError` with code `VALIDATION`. Catch both at the gateway or the worker.

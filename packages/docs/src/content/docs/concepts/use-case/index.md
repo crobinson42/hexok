@@ -22,23 +22,27 @@ Publishing a post is a story with a beginning and an end. Load the post, apply t
 ```ts
 class PublishPost extends UseCase('post.publish') {
   constructor(
-    private readonly posts: PostRepository,
-    private readonly events: BlogEventPublisher,
+    private readonly deps: {
+      posts: PostRepository
+      events: BlogEventPublisher
+    },
   ) {
     super()
   }
 
   async execute(input: { id: string }): Promise<{ id: string }> {
-    const post = await this.posts.get(input.id)
+    const post = await this.deps.posts.get(input.id)
     post.publish(new Date())
-    await this.posts.save(post)
-    await this.events.publish(new PostPublished(post.toProps()))
+    await this.deps.posts.save(post)
+    await this.deps.events.publish(new PostPublished(post.toProps()))
     return { id: post.props.id }
   }
 }
 ```
 
-The application constructs `PublishPost` with concrete adapters and calls `execute` from a gateway. You choose the HTTP library and assemble that object graph.
+The application constructs `PublishPost` with concrete adapters, `new PublishPost({ posts, events })`, and calls `execute` from a gateway. You choose the HTTP library and assemble that object graph.
+
+Pass every port on `deps`, including a use case with one port. Put the core port first in the type. Call them through `this.deps`. Optional flags chosen for that long-lived instance are a second argument, `config`. A value the caller sends on one request stays on the input to `execute`. A value declared for a whole context family stays on that factory's static spec. Mark both objects `readonly`.
 
 ## API
 
@@ -48,7 +52,7 @@ The application constructs `PublishPost` with concrete adapters and calls `execu
 | --- | --- |
 | `PublishPost.token` | The name you passed in. |
 | `execute(input)` | Required. Annotate the input and the return type on the subclass. Callers of that class see those types. |
-| `constructor` | Receive ports here and call `super()`. |
+| `constructor` | Ports arrive on `deps`. Optional instance settings arrive on `config`. Call `super()`. |
 
 Declare `execute` as a method. The class is incomplete until you do, and the compiler reports the missing method.
 

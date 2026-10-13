@@ -6,7 +6,7 @@
  *
  * ```ts
  * class CreateUser extends UseCase('user.create') {
- *   constructor(private readonly users: UserRepository) { super() }
+ *   constructor(private readonly deps: { users: UserRepository }) { super() }
  *   async execute(input: { email: string }): Promise<{ id: string }> {
  *     return { id: input.email }
  *   }
@@ -85,12 +85,12 @@ const RESERVED_STATICS: ReadonlySet<string> = new Set([
  *   input: z.object({ query: z.string() }),
  *   permission: 'users.read',
  * }) {
- *   constructor(private readonly users: UserRepository) { super() }
+ *   constructor(private readonly deps: { users: UserRepository }) { super() }
  *   async execute(
  *     ctx: UseCase.Ctx<typeof ApiUseCase>,
  *     input: { query: string },
  *   ): Promise<User[]> {
- *     return this.users.search(input.query)
+ *     return this.deps.users.search(input.query)
  *   }
  * }
  * ```

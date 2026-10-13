@@ -19,16 +19,18 @@ The use case that publishes a post is finished once the post is saved and the ev
 ```ts
 class EmailSubscribers extends EventHandler('email.subscribers', PostPublished) {
   constructor(
-    private readonly subscribers: SubscriberDirectory,
-    private readonly mail: MailSender,
+    private readonly deps: {
+      subscribers: SubscriberDirectory;
+      mail: MailSender;
+    },
   ) {
     super();
   }
 
   async handle(event: PostPublished): Promise<void> {
-    const addresses = await this.subscribers.list();
+    const addresses = await this.deps.subscribers.list();
     for (const address of addresses) {
-      await this.mail.send(address, event.payload.title);
+      await this.deps.mail.send(address, event.payload.title);
     }
   }
 }
@@ -51,6 +53,6 @@ A static field such as `groupId` is yours to read when you subscribe the handler
 | `EmailSubscribers.token` | The name you passed in. |
 | `EmailSubscribers.event` | The event class this handler receives. |
 | `handle(event)` | Required. Annotate `event` with that class. Return `void` or `Promise<void>`. |
-| `constructor` | Receive ports here and call `super()`. |
+| `constructor` | Ports arrive on `deps`. Call `super()`. The composition root passes `new EmailSubscribers({ subscribers, mail })`. |
 
 The compiler reports a missing `handle`. The factory records the token and the event class. It takes no consumer-group argument.

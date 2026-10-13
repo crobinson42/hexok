@@ -35,12 +35,12 @@ The domain port stays in domain types. Each adapter has its own stored shape. On
 
 ```ts
 class MongoUsers extends Adapter(UserRepository) {
-  constructor(private readonly users: MongoUser) {
+  constructor(private readonly deps: { users: MongoUser }) {
     super();
   }
 
   override async save(user: User): Promise<void> {
-    const doc = this.users.toModel(user);
+    const doc = this.deps.users.toModel(user);
     await this.collection.updateOne({ _id: doc._id }, { $set: doc }, { upsert: true });
     user.commit();
   }
@@ -48,7 +48,7 @@ class MongoUsers extends Adapter(UserRepository) {
   override async get(id: string): Promise<User | null> {
     const doc = await this.collection.findOne({ _id: id });
     if (doc === null) return null;
-    return this.users.fromModel(doc);
+    return this.deps.users.fromModel(doc);
   }
 }
 ```

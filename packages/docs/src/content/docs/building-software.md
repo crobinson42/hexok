@@ -17,13 +17,15 @@ The story names what you store. Creating and publishing a post means persisting 
 
 Write the use case as the story itself: create the post and publish it. Saving the post is a port, a dependency the use case calls. When that use case or port already exists, use it.
 
+Pass every port in one constructor argument named `deps`, including a use case with a single port. Write the core port first. The story calls those ports through `this.deps`. When the composition root chooses a setting for that long-lived instance, pass a second argument, `config`. A choice on one request stays on the input to `execute`. A value shared by a context family stays on that family's static spec.
+
 ## Publish side effects
 
 Publishing can cause work that belongs with the event, such as emailing subscribers. The use case publishes an event, and an event handler sends the email. Define the event and the handler when they are not already there. When the use case should announce the publish, give it an event-publisher port and publish inside `execute`.
 
 ## Implement the handlers
 
-Implement the handler so that it receives the published-post event and sends the email.
+Implement the handler so that it receives the published-post event and sends the email. The handler takes its ports the same way, as `deps`.
 
 ## Implement the adapters
 

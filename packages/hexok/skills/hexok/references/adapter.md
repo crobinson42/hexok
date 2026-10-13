@@ -21,7 +21,7 @@ The use case asks a `PostRepository` to save. Something has to actually keep the
 
 ## How to use it
 
-An in-memory repository is enough to walk the publish story. The API process can later substitute a database class that extends the same port. The composition root constructs the adapter, starts it, and hands it to `PublishPost`.
+An in-memory repository is enough to walk the publish story. The API process can later substitute a database class that extends the same port. The composition root constructs the adapter, starts it, and hands it to `PublishPost` on `deps`. An adapter that takes a driver or another collaborator uses that same `deps` object.
 
 ```ts
 class InMemoryPosts extends Adapter(PostRepository) {
@@ -41,7 +41,7 @@ class InMemoryPosts extends Adapter(PostRepository) {
 
 const posts = new InMemoryPosts();
 await posts.start();
-const publishPost = new PublishPost(posts, events);
+const publishPost = new PublishPost({ posts, events });
 ```
 
 Store `toProps()` (or a mapped document) and rebuild with `restore` on the way out. Call `commit()` after the write succeeds.

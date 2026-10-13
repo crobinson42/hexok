@@ -130,14 +130,14 @@ class FindUsers extends ApiUseCase('user.find', {
   input: z.object({ query: z.string() }),
   permission: 'users.read',
 }) {
-  constructor(private readonly users: UserRepository) { super() }
+  constructor(private readonly deps: { users: UserRepository }) { super() }
   async execute(
     ctx: UseCase.Ctx<typeof ApiUseCase>,
     input: { query: string },
   ): Promise<User[]> {
-    return this.users.search(input.query)
+    return this.deps.users.search(input.query)
   }
 }
 
-await new FindUsers(users).execute({ sessionId: 's' }, { query: 'ada' })
+await new FindUsers({ users }).execute({ sessionId: 's' }, { query: 'ada' })
 ```

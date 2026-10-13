@@ -27,23 +27,25 @@ abstract class BlogEventPublisher extends Port('BlogEventPublisher') {
 
 class PublishPost extends UseCase('post.publish') {
   constructor(
-    private readonly posts: PostRepository,
-    private readonly events: BlogEventPublisher,
+    private readonly deps: {
+      posts: PostRepository
+      events: BlogEventPublisher
+    },
   ) {
     super()
   }
 
   async execute(input: { id: string }): Promise<{ id: string }> {
-    const post = await this.posts.get(input.id)
+    const post = await this.deps.posts.get(input.id)
     post.publish(new Date())
-    await this.posts.save(post)
-    await this.events.publish(new PostPublished(post.toProps()))
+    await this.deps.posts.save(post)
+    await this.deps.events.publish(new PostPublished(post.toProps()))
     return { id: post.props.id }
   }
 }
 ```
 
-The methods are whatever this seam needs. A repository might offer `get` and `save`. A publisher might offer only `publish`. A mail port might offer `send`. The use case depends on the port class, and the composition root passes an adapter.
+The methods are whatever this seam needs. A repository might offer `get` and `save`. A publisher might offer only `publish`. A mail port might offer `send`. The use case depends on the port class. The composition root passes adapters on `deps`: `new PublishPost({ posts, events })`.
 
 ## API
 

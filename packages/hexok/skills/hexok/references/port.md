@@ -24,23 +24,25 @@ abstract class BlogEventPublisher extends Port('BlogEventPublisher') {
 
 class PublishPost extends UseCase('post.publish') {
   constructor(
-    private readonly posts: PostRepository,
-    private readonly events: BlogEventPublisher,
+    private readonly deps: {
+      posts: PostRepository;
+      events: BlogEventPublisher;
+    },
   ) {
     super();
   }
 
   async execute(input: { id: string }): Promise<{ id: string }> {
-    const post = await this.posts.get(input.id);
+    const post = await this.deps.posts.get(input.id);
     post.publish(new Date());
-    await this.posts.save(post);
-    await this.events.publish(new PostPublished(post.toProps()));
+    await this.deps.posts.save(post);
+    await this.deps.events.publish(new PostPublished(post.toProps()));
     return { id: post.props.id };
   }
 }
 ```
 
-The methods are whatever this seam needs. A repository offers `get` and `save`. A publisher offers `publish`. A mail port offers `send`. A subscription port offers `subscribe`. Keep publishing and subscribing as two ports. `start` and `stop` stay on the adapter. The use case depends on the port class, and the composition root passes an adapter.
+The methods are whatever this seam needs. A repository offers `get` and `save`. A publisher offers `publish`. A mail port offers `send`. A subscription port offers `subscribe`. Keep publishing and subscribing as two ports. `start` and `stop` stay on the adapter. The use case depends on the port class. The composition root passes adapters on `deps`: `new PublishPost({ posts, events })`.
 
 Search for an existing port before adding one. A second seam is a second `Port(...)` call, even when the method names match.
 

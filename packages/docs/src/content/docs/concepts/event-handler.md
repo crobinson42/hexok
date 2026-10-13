@@ -22,16 +22,18 @@ The use case that publishes a post is finished once the post is saved and the ev
 ```ts
 class EmailSubscribers extends EventHandler('email.subscribers', PostPublished) {
   constructor(
-    private readonly subscribers: SubscriberDirectory,
-    private readonly mail: MailSender,
+    private readonly deps: {
+      subscribers: SubscriberDirectory
+      mail: MailSender
+    },
   ) {
     super()
   }
 
   async handle(event: PostPublished): Promise<void> {
-    const addresses = await this.subscribers.list()
+    const addresses = await this.deps.subscribers.list()
     for (const address of addresses) {
-      await this.mail.send(address, event.payload.title)
+      await this.deps.mail.send(address, event.payload.title)
     }
   }
 }
@@ -50,7 +52,7 @@ A process that shares the API's memory can pass the instance straight to `handle
 | `EmailSubscribers.token` | The name you passed in. |
 | `EmailSubscribers.event` | The event class this handler receives. |
 | `handle(event)` | Required. Annotate `event` with that class. Return `void` or `Promise<void>`. |
-| `constructor` | Receive ports here. |
+| `constructor` | Ports arrive on `deps`. The composition root passes `new EmailSubscribers({ subscribers, mail })`. |
 
 The compiler reports a missing `handle`. One handler is bound to one event class. A second event is a second handler.
 

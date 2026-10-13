@@ -54,21 +54,23 @@ The database adapter owns the mapper and the driver collection. `save` writes th
 ```ts
 class MongoPosts extends Adapter(PostRepository) {
   constructor(
-    private readonly posts: MongoPost,
-    private readonly collection: PostCollection,
+    private readonly deps: {
+      posts: MongoPost
+      collection: PostCollection
+    },
   ) {
     super()
   }
 
   override async get(id: string): Promise<Post> {
-    const doc = await this.collection.findOne({ _id: id })
+    const doc = await this.deps.collection.findOne({ _id: id })
     if (doc === null) throw BlogError.PostMissing()
-    return this.posts.fromModel(doc)
+    return this.deps.posts.fromModel(doc)
   }
 
   override async save(post: Post): Promise<void> {
-    const doc = this.posts.toModel(post)
-    await this.collection.updateOne(
+    const doc = this.deps.posts.toModel(post)
+    await this.deps.collection.updateOne(
       { _id: doc._id },
       { $set: doc },
       { upsert: true },

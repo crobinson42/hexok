@@ -30,8 +30,10 @@ const ApiUseCase = UseCase.context<ApiContext>().guard((call) => {
 
 class PublishPost extends ApiUseCase('post.publish') {
   constructor(
-    private readonly posts: PostRepository,
-    private readonly events: BlogEventPublisher,
+    private readonly deps: {
+      posts: PostRepository
+      events: BlogEventPublisher
+    },
   ) {
     super()
   }
@@ -40,15 +42,15 @@ class PublishPost extends ApiUseCase('post.publish') {
     ctx: UseCase.Ctx<typeof ApiUseCase>,
     input: { id: string },
   ): Promise<{ id: string }> {
-    const post = await this.posts.get(input.id)
+    const post = await this.deps.posts.get(input.id)
     post.publish(new Date())
-    await this.posts.save(post)
-    await this.events.publish(new PostPublished(post.toProps()))
+    await this.deps.posts.save(post)
+    await this.deps.events.publish(new PostPublished(post.toProps()))
     return { id: post.props.id }
   }
 }
 
-await new PublishPost(posts, events).execute(
+await new PublishPost({ posts, events }).execute(
   { traceId: 'req-1' },
   { id: 'p1' },
 )

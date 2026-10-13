@@ -63,17 +63,17 @@ class InMemoryUsers extends Adapter(UserRepository) {
 }
 
 class CreateUser extends UseCase('user.create') {
-  constructor(private readonly users: UserRepository) { super() }
+  constructor(private readonly deps: { users: UserRepository }) { super() }
   async execute(input: { id: string; name: string; email: string }): Promise<User> {
-    const existing = await this.users.get(input.id)
+    const existing = await this.deps.users.get(input.id)
     if (existing) throw DomainError.UserExists({ id: input.id })
     const user = User.create(input)
-    await this.users.save(user)
+    await this.deps.users.save(user)
     return user
   }
 }
 
-const createUser = new CreateUser(new InMemoryUsers())
+const createUser = new CreateUser({ users: new InMemoryUsers() })
 await createUser.execute({ id: '1', name: 'Ada', email: 'ada@ex.com' })
 ```
 
@@ -108,21 +108,21 @@ class FindUsers extends ApiUseCase('user.find', {
   input: z.object({ query: z.string() }),
   permission: 'users.read',
 }) {
-  constructor(private readonly users: UserRepository) { super() }
+  constructor(private readonly deps: { users: UserRepository }) { super() }
   async execute(
     ctx: UseCase.Ctx<typeof ApiUseCase>,
     input: { query: string },
   ): Promise<User[]> {
-    return this.users.search(input.query)
+    return this.deps.users.search(input.query)
   }
 }
 
-await new FindUsers(users).execute({ sessionId: 's' }, { query: 'ada' })
+await new FindUsers({ users }).execute({ sessionId: 's' }, { query: 'ada' })
 ```
 
 The first type argument is the per-call context. A missing `<Ctx>` type argument is a type error. The second is the required static contract. It defaults to no required statics, and then the factory takes only the token. Each use case passes the token and the static values. They are inherited statics: `FindUsers.token`, `FindUsers.input`, `FindUsers.permission`. The permission literal stays narrow. Extra keys are kept. `token`, `prototype`, `name`, and `length` cannot be static names.
 
-Ports stay constructor arguments. Context is an `execute` argument because a use case instance is long-lived. Annotate `execute` on the subclass. Callers see that annotation. Hexok passes that argument through to the method. Statics, including a schema stored under the key `input`, are application data copied onto the class (`call.spec.input`). The execute argument is `call.input`. Hexok does not validate it. `SchemaSource` is exported for a Standard Schema or a `Schema` class, the same values as `Entity` and `Event`.
+Ports stay constructor arguments, passed as one `deps` object. Context is an `execute` argument because a use case instance is long-lived. Annotate `execute` on the subclass. Callers see that annotation. Hexok passes that argument through to the method. Statics, including a schema stored under the key `input`, are application data copied onto the class (`call.spec.input`). The execute argument is `call.input`. Hexok does not validate it. `SchemaSource` is exported for a Standard Schema or a `Schema` class, the same values as `Entity` and `Event`.
 
 `UseCase.context<Ctx, Spec>()` returns that factory. The optional argument is a settings object with no keys yet. Pass nothing. `{}` is allowed. `guard` and `hooks` are methods, not fields of that object. `.guard(fn)` and `.hooks(def)` each return the same factory a class extends. Order does not matter. Either may be omitted. Another `.guard()` runs after guards already registered. A second `.hooks()` throws `hexok: UseCase hooks are already set` when the factory is created, if the first registration had at least one callback. An empty `.hooks({})` does not register hooks and does not wrap `execute`.
 

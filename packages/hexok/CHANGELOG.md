@@ -1,5 +1,11 @@
 # hexok
 
+## 2.1.1
+
+### Patch Changes
+
+- [`dea889b`](https://github.com/crobinson42/hexok/commit/dea889b2b211fbc6bc5ff2a8972041655833ea76) Thanks [@crobinson42](https://github.com/crobinson42)! - Document a `deps` object for use-case and handler constructors in the agent skill. Optional instance settings stay on a second `config` argument.
+
 ## 2.1.0
 
 ### Minor Changes

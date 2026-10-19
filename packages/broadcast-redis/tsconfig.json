@@ -1,0 +1,7 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": { "rootDir": "src", "outDir": "dist" },
+  "references": [{ "path": "../hexok" }, { "path": "../broadcast" }],
+  "include": ["src"],
+  "exclude": ["src/**/*.test.ts"]
+}

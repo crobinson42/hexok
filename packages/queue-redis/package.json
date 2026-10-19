@@ -1,0 +1,48 @@
+{
+  "name": "@hexok/queue-redis",
+  "version": "0.0.0",
+  "description": "Redis Streams adapter for the hexok Queue port.",
+  "type": "module",
+  "license": "MIT",
+  "sideEffects": false,
+  "keywords": [
+    "hexok",
+    "queue",
+    "redis"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/crobinson42/hexok.git",
+    "directory": "packages/queue-redis"
+  },
+  "homepage": "https://crobinson42.github.io/hexok/",
+  "bugs": {
+    "url": "https://github.com/crobinson42/hexok/issues"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "default": "./dist/index.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc -b",
+    "test": "vitest run",
+    "type-check": "tsc --noEmit -p tsconfig.check.json",
+    "lint": "biome check .",
+    "clean": "rm -rf dist *.tsbuildinfo"
+  },
+  "dependencies": {
+    "@hexok/queue": "^0.0.0",
+    "hexok": "^2.1.0",
+    "ioredis": "^5"
+  }
+}

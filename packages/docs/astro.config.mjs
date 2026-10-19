@@ -13,7 +13,13 @@ export default defineConfig({
       plugins: [starlightLinksValidator()],
       customCss: ['./src/styles/layers.css'],
       sidebar: [
-        { label: 'Start', items: ['index'] },
+        {
+          label: 'Start',
+          items: [
+            'index',
+            { label: 'Company infrastructure', slug: 'infrastructure' },
+          ],
+        },
         {
           label: 'Building Software - The Patterns',
           slug: 'building-software',

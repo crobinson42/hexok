@@ -8,5 +8,15 @@ export class DomainError extends Errors('domain', {
     message: 'Post was not found',
     data: z.object({ id: z.string() }),
   },
-  IpAddressMissing: { message: 'IP address is missing' },
+  InternalCallerRequired: {
+    message: 'This use case only runs from inside the application',
+  },
+  InvalidScheduleDate: {
+    message: 'Schedule date is invalid',
+    data: z.object({ value: z.string() }),
+  },
+  InvalidTimezone: {
+    message: 'Schedule timezone is invalid',
+    data: z.object({ timezone: z.string() }),
+  },
 }) {}

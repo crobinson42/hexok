@@ -13,13 +13,18 @@ import { DomainError } from './errors/domain.js';
 import type { EventPublisher } from './ports/event-publisher.js';
 import type { PostRepository } from './ports/post-repository.js';
 import type { SubscriberRepository } from './ports/subscriber-repository.js';
-import { PublishPost } from './use-cases/publish-post.js';
-import { SavePost } from './use-cases/save-post.js';
-import { SubscribeToPosts } from './use-cases/subscribe.js';
-import { UnpublishPost } from './use-cases/unpublish-post.js';
+import { PublishPost } from './use-cases/posts/api/command/publish-post.js';
+import { SavePost } from './use-cases/posts/api/command/save-post.js';
+import { UnpublishPost } from './use-cases/posts/api/command/unpublish-post.js';
+import { SubscribeToPosts } from './use-cases/subscribers/api/command/subscribe.js';
 
 function text(value: unknown): string {
   return typeof value === 'string' ? value : '';
+}
+
+function apiCtx(req: Request): { authToken?: string } {
+  const header = req.header('authorization');
+  return header === undefined ? {} : { authToken: header };
 }
 
 export function createHttpApp(deps: {
@@ -36,44 +41,36 @@ export function createHttpApp(deps: {
   const subscribeToPosts = new SubscribeToPosts(deps.subscribers);
 
   app.post('/posts', async (req, res) => {
-    const entity = await savePost.execute(
-      { ipAddress: req.socket.remoteAddress ?? '' },
-      {
-        id: typeof req.body?.id === 'string' ? req.body.id : undefined,
-        title: text(req.body?.title),
-        body: text(req.body?.body),
-      },
-    );
+    const entity = await savePost.execute(apiCtx(req), {
+      id: typeof req.body?.id === 'string' ? req.body.id : undefined,
+      title: text(req.body?.title),
+      body: text(req.body?.body),
+    });
     res.json(entity.toJSON());
   });
 
   app.post('/posts/:id/publish', async (req: Request<{ id: string }>, res) => {
-    const entity = await publishPost.execute(
-      { ipAddress: req.socket.remoteAddress ?? '' },
-      {
-        id: req.params.id,
-        emailSubscribers: req.body?.emailSubscribers === true,
-      },
-    );
+    const entity = await publishPost.execute(apiCtx(req), {
+      id: req.params.id,
+      emailSubscribers: req.body?.emailSubscribers === true,
+    });
     res.json(entity.toJSON());
   });
 
   app.post(
     '/posts/:id/unpublish',
     async (req: Request<{ id: string }>, res) => {
-      const entity = await unpublishPost.execute(
-        { ipAddress: req.socket.remoteAddress ?? '' },
-        { id: req.params.id },
-      );
+      const entity = await unpublishPost.execute(apiCtx(req), {
+        id: req.params.id,
+      });
       res.json(entity.toJSON());
     },
   );
 
   app.post('/subscribers', async (req, res) => {
-    const entity = await subscribeToPosts.execute(
-      { ipAddress: req.socket.remoteAddress ?? '' },
-      { email: text(req.body?.email) },
-    );
+    const entity = await subscribeToPosts.execute(apiCtx(req), {
+      email: text(req.body?.email),
+    });
     res.json(entity.toJSON());
   });
 

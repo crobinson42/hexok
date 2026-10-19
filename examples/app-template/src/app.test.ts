@@ -1,22 +1,28 @@
 import { Adapter, type EventInstance } from 'hexok';
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { PostEntity } from './entities/post.js';
 import { SubscriberEntity } from './entities/subscriber.js';
 import { DomainError } from './errors/domain.js';
 import type { BlogEvents } from './events/catalog.js';
 import { PostPublishedEvent } from './events/post-published.js';
-import { EmailSubscribersHandler } from './handlers/email-subscribers.js';
 import { createHttpApp } from './http.js';
 import { EmailSender } from './ports/email-sender.js';
 import { EventPublisher } from './ports/event-publisher.js';
 import { PostRepository } from './ports/post-repository.js';
 import { SubscriberRepository } from './ports/subscriber-repository.js';
-import { PublishPost } from './use-cases/publish-post.js';
-import { SavePost } from './use-cases/save-post.js';
-import { SubscribeToPosts } from './use-cases/subscribe.js';
-import { UnpublishPost } from './use-cases/unpublish-post.js';
+import { type InternalCtx, internalCall } from './use-cases/context.js';
+import { PublishPost } from './use-cases/posts/api/command/publish-post.js';
+import { SavePost } from './use-cases/posts/api/command/save-post.js';
+import { UnpublishPost } from './use-cases/posts/api/command/unpublish-post.js';
+import { EmailSubscribersHandler } from './use-cases/posts/event-handlers/email-subscribers.js';
+import { EmailSubscribers } from './use-cases/posts/internal/email-subscribers.js';
+import {
+  SubscriberReminder,
+  scheduleSubscriberReminder,
+} from './use-cases/posts/scheduled/subscriber-reminder.js';
+import { SubscribeToPosts } from './use-cases/subscribers/api/command/subscribe.js';
 
-const ctx = { ipAddress: '127.0.0.1' };
+const ctx = { authToken: 'token-1' };
 
 class InMemoryPosts extends Adapter(PostRepository) {
   readonly #rows = new Map<string, PostEntity>();
@@ -79,7 +85,7 @@ function publishedEvent(
 }
 
 async function expectDomainCode(
-  code: 'IpAddressMissing' | 'PostNotFound',
+  code: 'InternalCallerRequired' | 'PostNotFound',
   run: () => Promise<unknown>,
 ): Promise<void> {
   try {
@@ -163,17 +169,6 @@ describe('SavePost', () => {
     const stored = await posts.get(saved.props.id);
     expect(stored?.props.title).toBe('Next');
     expect(stored?.props.status).toBe('draft');
-  });
-
-  it('throws IpAddressMissing before saving when ipAddress is empty', async () => {
-    const posts = new InMemoryPosts();
-    await expectDomainCode('IpAddressMissing', () =>
-      new SavePost(posts).execute(
-        { ipAddress: '' },
-        { id: 'post-1', title: 'Hello', body: 'Text' },
-      ),
-    );
-    expect(await posts.get('post-1')).toBeNull();
   });
 });
 
@@ -282,7 +277,9 @@ describe('EmailSubscribersHandler', () => {
     );
     const email = new RecordingEmail();
     return {
-      handler: new EmailSubscribersHandler(subscribers, email),
+      handler: new EmailSubscribersHandler(
+        new EmailSubscribers(subscribers, email),
+      ),
       email,
     };
   }
@@ -311,6 +308,91 @@ describe('EmailSubscribersHandler', () => {
     expect(email.sent).toEqual([
       { to: 'ada@ex.com', subject: 'New post', body: 'Hello' },
     ]);
+  });
+});
+
+describe('EmailSubscribers', () => {
+  it('sends one message per subscriber and returns the count', async () => {
+    const subscribers = new InMemorySubscribers();
+    await subscribers.save(
+      SubscriberEntity.create({ id: 'sub-1', email: 'ada@ex.com' }),
+    );
+    await subscribers.save(
+      SubscriberEntity.create({ id: 'sub-2', email: 'bea@ex.com' }),
+    );
+    const email = new RecordingEmail();
+
+    const sent = await new EmailSubscribers(subscribers, email).execute(
+      internalCall(),
+      {
+        subject: 'New post',
+        body: 'Hello',
+      },
+    );
+
+    expect(sent).toBe(2);
+    expect(email.sent).toEqual([
+      { to: 'ada@ex.com', subject: 'New post', body: 'Hello' },
+      { to: 'bea@ex.com', subject: 'New post', body: 'Hello' },
+    ]);
+  });
+
+  it('rejects a context that does not carry the internal symbol', async () => {
+    const email = new RecordingEmail();
+    await expectDomainCode('InternalCallerRequired', () =>
+      new EmailSubscribers(new InMemorySubscribers(), email).execute(
+        {} as InternalCtx,
+        { subject: 'New post', body: 'Hello' },
+      ),
+    );
+    expect(email.sent).toEqual([]);
+  });
+});
+
+describe('SubscriberReminder', () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('sends the standing reminder to each subscriber', async () => {
+    const subscribers = new InMemorySubscribers();
+    await subscribers.save(
+      SubscriberEntity.create({ id: 'sub-1', email: 'ada@ex.com' }),
+    );
+    const email = new RecordingEmail();
+
+    const sent = await new SubscriberReminder(
+      new EmailSubscribers(subscribers, email),
+    ).execute(internalCall());
+
+    expect(sent).toBe(1);
+    expect(email.sent).toEqual([
+      {
+        to: 'ada@ex.com',
+        subject: 'Posts you follow',
+        body: 'A published post is waiting.',
+      },
+    ]);
+  });
+
+  it('runs the reminder on the interval and stops when asked', async () => {
+    vi.useFakeTimers();
+    const subscribers = new InMemorySubscribers();
+    await subscribers.save(
+      SubscriberEntity.create({ id: 'sub-1', email: 'ada@ex.com' }),
+    );
+    const email = new RecordingEmail();
+    const job = scheduleSubscriberReminder(
+      new SubscriberReminder(new EmailSubscribers(subscribers, email)),
+      1000,
+    );
+
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(email.sent).toHaveLength(1);
+
+    job.stop();
+    await vi.advanceTimersByTimeAsync(5000);
+    expect(email.sent).toHaveLength(1);
   });
 });
 

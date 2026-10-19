@@ -1,16 +1,16 @@
 import type { UseCase } from 'hexok';
-import type { PostEntity } from '../entities/post.js';
-import { DomainError } from '../errors/domain.js';
-import type { PostRepository } from '../ports/post-repository.js';
-import { AppUseCase } from './context.js';
+import type { PostEntity } from '../../../../entities/post.js';
+import { DomainError } from '../../../../errors/domain.js';
+import type { PostRepository } from '../../../../ports/post-repository.js';
+import { ApiUseCase } from '../../../context.js';
 
-export class UnpublishPost extends AppUseCase('post.unpublish') {
+export class UnpublishPost extends ApiUseCase('post.unpublish') {
   constructor(private readonly posts: PostRepository) {
     super();
   }
 
   async execute(
-    _ctx: UseCase.Ctx<typeof AppUseCase>,
+    _ctx: UseCase.Ctx<typeof ApiUseCase>,
     input: { id: string },
   ): Promise<PostEntity> {
     const post = await this.posts.get(input.id);

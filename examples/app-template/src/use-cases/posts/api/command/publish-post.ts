@@ -1,12 +1,12 @@
 import type { UseCase } from 'hexok';
-import type { PostEntity } from '../entities/post.js';
-import { DomainError } from '../errors/domain.js';
-import { PostPublishedEvent } from '../events/post-published.js';
-import type { EventPublisher } from '../ports/event-publisher.js';
-import type { PostRepository } from '../ports/post-repository.js';
-import { AppUseCase } from './context.js';
+import type { PostEntity } from '../../../../entities/post.js';
+import { DomainError } from '../../../../errors/domain.js';
+import { PostPublishedEvent } from '../../../../events/post-published.js';
+import type { EventPublisher } from '../../../../ports/event-publisher.js';
+import type { PostRepository } from '../../../../ports/post-repository.js';
+import { ApiUseCase } from '../../../context.js';
 
-export class PublishPost extends AppUseCase('post.publish') {
+export class PublishPost extends ApiUseCase('post.publish') {
   constructor(
     private readonly posts: PostRepository,
     private readonly publisher: EventPublisher,
@@ -15,7 +15,7 @@ export class PublishPost extends AppUseCase('post.publish') {
   }
 
   async execute(
-    _ctx: UseCase.Ctx<typeof AppUseCase>,
+    _ctx: UseCase.Ctx<typeof ApiUseCase>,
     input: { id: string; emailSubscribers: boolean },
   ): Promise<PostEntity> {
     const post = await this.posts.get(input.id);

@@ -1,16 +1,16 @@
 import { randomUUID } from 'node:crypto';
 import type { UseCase } from 'hexok';
-import { PostEntity } from '../entities/post.js';
-import type { PostRepository } from '../ports/post-repository.js';
-import { AppUseCase } from './context.js';
+import { PostEntity } from '../../../../entities/post.js';
+import type { PostRepository } from '../../../../ports/post-repository.js';
+import { ApiUseCase } from '../../../context.js';
 
-export class SavePost extends AppUseCase('post.save') {
+export class SavePost extends ApiUseCase('post.save') {
   constructor(private readonly posts: PostRepository) {
     super();
   }
 
   async execute(
-    _ctx: UseCase.Ctx<typeof AppUseCase>,
+    _ctx: UseCase.Ctx<typeof ApiUseCase>,
     input: { id: string | undefined; title: string; body: string },
   ): Promise<PostEntity> {
     const id =

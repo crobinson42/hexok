@@ -133,4 +133,37 @@ describe.skipIf(!process.env.REDIS_URL)('RedisQueue integration', () => {
     );
     expect(await probe.xlen(`${prefix}encoded`)).toBe(before);
   });
+
+  it('removes the local consumer on unsubscribe and leaves the group', async () => {
+    const url = process.env.REDIS_URL ?? '';
+    const probe = new Redis(url);
+    open.push(probe);
+    const prefix = `hexok:queue:it:${randomUUID()}:`;
+    const queue = new RedisQueue({
+      redis: url,
+      keyPrefix: prefix,
+      visibilityMs: 5000,
+      blockMs: 200,
+    });
+    queues.push(queue);
+    await queue.start();
+    await queue.subscribe('jobs', {
+      consumerGroup: 'workers',
+      handler: async () => 'ack',
+    });
+    const key = `${prefix}jobs`;
+    await waitFor(async () => {
+      const consumers = (await probe.xinfo(
+        'CONSUMERS',
+        key,
+        'workers',
+      )) as unknown[];
+      return consumers.length === 1;
+    });
+    await queue.unsubscribe('jobs', { consumerGroup: 'workers' });
+    expect(await probe.xinfo('CONSUMERS', key, 'workers')).toEqual([]);
+    const groups = (await probe.xinfo('GROUPS', key)) as unknown[];
+    expect(groups).toHaveLength(1);
+    expect(await probe.exists(key)).toBe(1);
+  });
 });

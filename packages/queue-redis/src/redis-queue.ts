@@ -11,6 +11,20 @@ import { Adapter } from 'hexok';
 import type { Redis, RedisOptions } from 'ioredis';
 import { decodeJson, encodeJson, openRedis } from './codec.js';
 import { type LogSink, noopSink } from './log-sink.js';
+import {
+  maintainStreams,
+  type RedisQueueMaintainOptions,
+  type RedisQueueMaintainReport,
+  type RedisQueueMaintainSkipReason,
+  type RedisQueueStuckReason,
+} from './maintain.js';
+
+export type {
+  RedisQueueMaintainOptions,
+  RedisQueueMaintainReport,
+  RedisQueueMaintainSkipReason,
+  RedisQueueStuckReason,
+};
 
 export interface RedisQueueConfig {
   readonly redis: string | RedisOptions;
@@ -194,14 +208,33 @@ export class RedisQueue extends Adapter(Queue) {
     const mapKey = `${topic}\0${options.consumerGroup}`;
     const sub = this.#subs.get(mapKey);
     if (!sub) return;
+    const idle = sub.inflight.size === 0;
     await this.#closeSub(sub, false);
+    if (idle && sub.inflight.size === 0) {
+      await this.#releaseConsumer(sub);
+    }
     this.#subs.delete(mapKey);
   }
 
+  async maintain(
+    options: RedisQueueMaintainOptions = {},
+  ): Promise<RedisQueueMaintainReport> {
+    const commands = this.#requireCommands();
+    return maintainStreams({
+      commands,
+      keyPrefix: this.#keyPrefix,
+      retentionMs: this.#retentionMs,
+      options,
+      logger: this.#logger,
+    });
+  }
+
   override async stop(): Promise<void> {
+    const idleSubs: Subscription[] = [];
     for (const sub of this.#subs.values()) {
       sub.aborted = true;
       this.#clearSubTimers(sub);
+      if (sub.inflight.size === 0) idleSubs.push(sub);
     }
     if (this.#trimTimer) {
       clearInterval(this.#trimTimer);
@@ -216,6 +249,9 @@ export class RedisQueue extends Adapter(Queue) {
         setTimeout(resolve, this.#visibilityMs);
       }),
     ]);
+    for (const sub of idleSubs) {
+      if (sub.inflight.size === 0) await this.#releaseConsumer(sub);
+    }
     for (const sub of this.#subs.values()) {
       sub.inflight.clear();
     }
@@ -232,6 +268,20 @@ export class RedisQueue extends Adapter(Queue) {
       await sub.blocking.quit().catch(() => undefined);
     }
     this.#subs.clear();
+  }
+
+  async #releaseConsumer(sub: Subscription): Promise<void> {
+    if (sub.inflight.size > 0) return;
+    const commands = this.#commands;
+    if (!commands) return;
+    try {
+      await commands.xgroup('DELCONSUMER', sub.key, sub.group, sub.consumer);
+    } catch (error) {
+      this.#logger.error(
+        error instanceof Error ? error : new Error('queue: DELCONSUMER failed'),
+        { topic: sub.topic, group: sub.group },
+      );
+    }
   }
 
   async #closeSub(sub: Subscription, wait: boolean): Promise<void> {

@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import type { ParkInput } from './park.js';
 
 interface Pending {
   resolve: (value: unknown) => void;
@@ -10,6 +11,7 @@ class FakeRedis {
   readonly calls: unknown[][] = [];
   pending: Pending | undefined;
   failTrim = false;
+  failXadd = false;
 
   constructor(..._args: unknown[]) {
     FakeRedis.instances.push(this);
@@ -17,6 +19,7 @@ class FakeRedis {
 
   xadd(...args: unknown[]): Promise<string> {
     this.calls.push(['xadd', ...args]);
+    if (this.failXadd) return Promise.reject(new Error('xadd failed'));
     return Promise.resolve('1-0');
   }
 
@@ -142,6 +145,153 @@ describe('RedisQueue commands', () => {
     await expect(queue.publish('jobs', { ok: true })).resolves.toBe('1-0');
     await queue.stop();
     await encodedThrow.stop();
+  });
+
+  it('parks a failed publish and encode, and not a failed trim', async () => {
+    const parked: ParkInput[] = [];
+    const quarantine = {
+      async park(input: ParkInput) {
+        parked.push(input);
+        return { id: 'q1' };
+      },
+    };
+    const queue = new RedisQueue({
+      redis: 'redis://127.0.0.1:6379',
+      quarantine,
+    });
+    await queue.start();
+    const commands = FakeRedis.instances[0];
+    if (!commands) throw new Error('missing commands client');
+    commands.failXadd = true;
+    await expect(queue.publish('jobs', { a: 1 })).rejects.toThrow(
+      'xadd failed',
+    );
+    expect(parked[0]).toMatchObject({
+      source: 'queue',
+      operation: 'publish',
+      subject: 'jobs',
+      payload: { a: 1 },
+      context: { adapter: 'redis' },
+    });
+
+    commands.failXadd = false;
+    commands.failTrim = true;
+    await expect(queue.publish('jobs', { ok: true })).resolves.toBe('1-0');
+    expect(parked).toHaveLength(1);
+
+    const encodedThrow = new RedisQueue({
+      redis: 'redis://127.0.0.1:6379',
+      quarantine,
+      encode: () => {
+        throw new Error('bad encode');
+      },
+    });
+    await encodedThrow.start();
+    await expect(encodedThrow.publish('jobs', { b: 2 })).rejects.toThrow(
+      'bad encode',
+    );
+    expect(parked.at(-1)).toMatchObject({
+      operation: 'publish',
+      payload: { b: 2 },
+      error: { message: 'bad encode' },
+    });
+
+    const throwing = new RedisQueue({
+      redis: 'redis://127.0.0.1:6379',
+      quarantine: {
+        async park() {
+          throw new Error('store down');
+        },
+      },
+    });
+    await throwing.start();
+    const failing = FakeRedis.instances.at(-1);
+    if (!failing) throw new Error('missing commands client');
+    failing.failXadd = true;
+    await expect(throwing.publish('jobs', { c: 3 })).rejects.toThrow(
+      'xadd failed',
+    );
+    await queue.stop();
+    await encodedThrow.stop();
+    await throwing.stop();
+  });
+
+  it('parks a missing payload and a decode failure, and not a handler drop', async () => {
+    vi.useFakeTimers();
+    const parked: ParkInput[] = [];
+    const quarantine = {
+      async park(input: ParkInput) {
+        parked.push(input);
+        return { id: 'q1' };
+      },
+    };
+    const queue = new RedisQueue({
+      redis: 'redis://127.0.0.1:6379',
+      visibilityMs: 30_000,
+      blockMs: 1000,
+      quarantine,
+      decode: () => {
+        throw new Error('bad decode');
+      },
+    });
+    await queue.start();
+    await queue.subscribe('jobs', {
+      consumerGroup: 'billing',
+      handler: async () => 'drop',
+    });
+    FakeRedis.instances[1]?.pending?.resolve([
+      [
+        'hexok:queue:jobs',
+        [
+          ['4-1', ['other', 'x']],
+          ['4-2', ['payload', 'not-json']],
+        ],
+      ],
+    ]);
+    await vi.waitFor(() => {
+      const acks =
+        FakeRedis.instances[0]?.calls.filter((call) => call[0] === 'xack') ??
+        [];
+      expect(acks).toHaveLength(2);
+    });
+    expect(parked.map((item) => item.payload)).toEqual([
+      { reason: 'missing-payload' },
+      { reason: 'decode-failed', raw: 'not-json' },
+    ]);
+    expect(parked[0]?.subject).toBe('jobs:4-1');
+    expect(parked[1]?.operation).toBe('deliver');
+    await queue.stop();
+
+    const dropped: ParkInput[] = [];
+    const plain = new RedisQueue({
+      redis: 'redis://127.0.0.1:6379',
+      visibilityMs: 30_000,
+      blockMs: 1000,
+      quarantine: {
+        async park(input: ParkInput) {
+          dropped.push(input);
+          return { id: 'q2' };
+        },
+      },
+    });
+    await plain.start();
+    await plain.subscribe('jobs', {
+      consumerGroup: 'billing',
+      handler: async () => 'drop',
+    });
+    const started = FakeRedis.instances.length;
+    FakeRedis.instances[started - 1]?.pending?.resolve([
+      ['hexok:queue:jobs', [['8-1', ['payload', '{"n":1}']]]],
+    ]);
+    await vi.waitFor(() => {
+      expect(
+        FakeRedis.instances[started - 2]?.calls.some(
+          (call) => call[0] === 'xack',
+        ),
+      ).toBe(true);
+    });
+    expect(dropped).toHaveLength(0);
+    await plain.stop();
   });
 
   it('does not XCLAIM an empty snapshot and places JUSTID after ids', async () => {

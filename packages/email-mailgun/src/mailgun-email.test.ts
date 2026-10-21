@@ -1,6 +1,7 @@
 import { EmailError, type EmailMessage } from '@hexok/email';
 import { describe, expect, it } from 'vitest';
 import { MailgunEmailSender, type MailgunLike } from './mailgun-email.js';
+import type { ParkInput } from './park.js';
 
 const message: EmailMessage = {
   to: ['person@example.com'],
@@ -58,5 +59,40 @@ describe('MailgunEmailSender', () => {
     expect(
       EmailError.is(await sender.send(message).catch((error) => error)),
     ).toBe(true);
+  });
+
+  it('parks unavailable and rate limited sends and skips a rejection', async () => {
+    const parked: ParkInput[] = [];
+    const quarantine = {
+      async park(input: ParkInput) {
+        parked.push(input);
+        return { id: 'q1' };
+      },
+    };
+    const cases: Array<[unknown, string]> = [
+      [{ status: 500, message: 'down' }, 'Unavailable'],
+      [{ status: 429, message: 'slow' }, 'RateLimited'],
+      [{ status: 400, message: 'bad' }, 'Rejected'],
+    ];
+    for (const [thrown, code] of cases) {
+      const sender = new MailgunEmailSender({
+        client: {
+          messages: {
+            async create() {
+              throw thrown;
+            },
+          },
+        },
+        domain: 'mg.example',
+        quarantine,
+      });
+      await expect(sender.send(message)).rejects.toMatchObject({ code });
+    }
+    expect(parked.map((item) => item.error.code)).toEqual([
+      'Unavailable',
+      'RateLimited',
+    ]);
+    expect(parked[0]?.subject).toBe('key-1');
+    expect(parked[0]?.context).toEqual({ adapter: 'mailgun' });
   });
 });

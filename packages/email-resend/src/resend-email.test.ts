@@ -1,5 +1,6 @@
 import { EmailError, type EmailMessage } from '@hexok/email';
 import { describe, expect, it } from 'vitest';
+import type { ParkInput } from './park.js';
 import { ResendEmailSender, type ResendLike } from './resend-email.js';
 import { retryOptions } from './retry.js';
 
@@ -88,5 +89,115 @@ describe('ResendEmailSender', () => {
       tags: [{ name: 'env', value: 'test' }],
     });
     expect(options).toEqual({ idempotencyKey: 'key-1' });
+  });
+
+  it('parks an exhausted outage once and does not park a rejection', async () => {
+    const parked: ParkInput[] = [];
+    const quarantine = {
+      async park(input: ParkInput) {
+        parked.push(input);
+        return { id: 'q1' };
+      },
+    };
+    let calls = 0;
+    const client: ResendLike = {
+      emails: {
+        async send() {
+          calls += 1;
+          return {
+            data: null,
+            error: {
+              message: 'down',
+              name: 'internal_server_error',
+              statusCode: 500,
+            },
+          };
+        },
+      },
+    };
+    const sender = new ResendEmailSender({
+      client,
+      quarantine,
+      retry: { retries: 1, minTimeout: 0, maxTimeout: 0, randomize: false },
+    });
+    await expect(
+      sender.send({
+        ...base,
+        attachments: [
+          {
+            data: Buffer.from('x'),
+            filename: 'a.txt',
+            contentType: 'text/plain',
+          },
+        ],
+      }),
+    ).rejects.toMatchObject({ code: 'Unavailable' });
+    expect(calls).toBe(2);
+    expect(parked).toHaveLength(1);
+    expect(parked[0]).toMatchObject({
+      source: 'email',
+      operation: 'send',
+      subject: 'key-1',
+      attempts: 2,
+      context: { adapter: 'resend' },
+      error: { code: 'Unavailable', catalog: 'email' },
+    });
+    expect(parked[0]?.payload).toMatchObject({
+      text: 'body',
+      attachmentCount: 1,
+    });
+    expect(parked[0]?.payload).not.toHaveProperty('attachments');
+
+    const rejected: ResendLike = {
+      emails: {
+        async send() {
+          return {
+            data: null,
+            error: {
+              message: 'nope',
+              name: 'validation_error',
+              statusCode: 422,
+            },
+          };
+        },
+      },
+    };
+    await expect(
+      new ResendEmailSender({
+        client: rejected,
+        quarantine,
+        retry: { retries: 3, minTimeout: 0, maxTimeout: 0, randomize: false },
+      }).send(base),
+    ).rejects.toMatchObject({ code: 'Rejected' });
+    expect(parked).toHaveLength(1);
+  });
+
+  it('still throws Unavailable when park throws', async () => {
+    const client: ResendLike = {
+      emails: {
+        async send() {
+          return {
+            data: null,
+            error: {
+              message: 'down',
+              name: 'internal_server_error',
+              statusCode: 500,
+            },
+          };
+        },
+      },
+    };
+    const sender = new ResendEmailSender({
+      client,
+      quarantine: {
+        async park() {
+          throw new Error('store down');
+        },
+      },
+      retry: { retries: 0, minTimeout: 0, maxTimeout: 0, randomize: false },
+    });
+    await expect(sender.send(base)).rejects.toMatchObject({
+      code: 'Unavailable',
+    });
   });
 });

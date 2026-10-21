@@ -7,7 +7,13 @@ import {
 import { Adapter } from 'hexok';
 import pRetry, { AbortError } from 'p-retry';
 import { type LogSink, noopSink } from './log-sink.js';
-import { retryOptions, type RetrySettings } from './retry.js';
+import {
+  attemptOf,
+  courtesyPark,
+  emailParkInput,
+  type ParkSink,
+} from './park.js';
+import { type RetrySettings, retryOptions } from './retry.js';
 
 export interface ResendEmailPayload {
   from: string;
@@ -46,6 +52,7 @@ export interface ResendEmailSenderConfig {
   readonly sandbox?: boolean;
   readonly logger?: LogSink;
   readonly retry?: Partial<RetrySettings>;
+  readonly quarantine?: ParkSink;
 }
 
 function terminal(
@@ -92,6 +99,22 @@ function shouldRetry(error: {
   );
 }
 
+function mapSendError(error: unknown) {
+  const kind = emailKind(error);
+  if (kind === 'rejected') {
+    return EmailError.Rejected(
+      error instanceof Error ? error.message : 'Email was rejected',
+    );
+  }
+  if (kind === 'unavailable') return EmailError.Unavailable();
+  const status = statusOf(error);
+  const name = error instanceof Error ? error.name : '';
+  if (status === 429 || name === 'rate_limit_exceeded') {
+    return EmailError.RateLimited();
+  }
+  return EmailError.Unavailable();
+}
+
 function statusOf(error: unknown): number | undefined {
   if (typeof error === 'object' && error !== null && 'statusCode' in error) {
     const status = error.statusCode;
@@ -105,6 +128,7 @@ export class ResendEmailSender extends Adapter(EmailSender) {
   readonly #sandbox: boolean;
   readonly #logger: LogSink;
   readonly #retry: Partial<RetrySettings> | undefined;
+  readonly #quarantine: ParkSink | undefined;
 
   constructor(config: ResendEmailSenderConfig) {
     super();
@@ -112,6 +136,7 @@ export class ResendEmailSender extends Adapter(EmailSender) {
     this.#sandbox = config.sandbox ?? false;
     this.#logger = config.logger ?? noopSink;
     this.#retry = config.retry;
+    this.#quarantine = config.quarantine;
   }
 
   async send(message: EmailMessage): Promise<{ id: string }> {
@@ -176,19 +201,15 @@ export class ResendEmailSender extends Adapter(EmailSender) {
       );
       return { id };
     } catch (error) {
-      const kind = emailKind(error);
-      if (kind === 'rejected') {
-        throw EmailError.Rejected(
-          error instanceof Error ? error.message : 'Email was rejected',
+      const mapped = mapSendError(error);
+      if (mapped.code === 'Unavailable' || mapped.code === 'RateLimited') {
+        await courtesyPark(
+          this.#quarantine,
+          emailParkInput(message, mapped, 'resend', attemptOf(error)),
+          this.#logger,
         );
       }
-      if (kind === 'unavailable') throw EmailError.Unavailable();
-      const status = statusOf(error);
-      const name = error instanceof Error ? error.name : '';
-      if (status === 429 || name === 'rate_limit_exceeded') {
-        throw EmailError.RateLimited();
-      }
-      throw EmailError.Unavailable();
+      throw mapped;
     }
   }
 }

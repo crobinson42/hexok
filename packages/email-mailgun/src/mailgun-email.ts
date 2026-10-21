@@ -6,6 +6,7 @@ import {
 } from '@hexok/email';
 import { Adapter } from 'hexok';
 import { type LogSink, noopSink } from './log-sink.js';
+import { courtesyPark, emailParkInput, type ParkSink } from './park.js';
 
 export interface MailgunLike {
   messages: {
@@ -21,6 +22,7 @@ export interface MailgunEmailSenderConfig {
   readonly domain: string;
   readonly sandbox?: boolean;
   readonly logger?: LogSink;
+  readonly quarantine?: ParkSink;
 }
 
 function formatFrom(message: EmailMessage): string {
@@ -41,6 +43,7 @@ export class MailgunEmailSender extends Adapter(EmailSender) {
   readonly #domain: string;
   readonly #sandbox: boolean;
   readonly #logger: LogSink;
+  readonly #quarantine: ParkSink | undefined;
 
   constructor(config: MailgunEmailSenderConfig) {
     super();
@@ -48,6 +51,17 @@ export class MailgunEmailSender extends Adapter(EmailSender) {
     this.#domain = config.domain;
     this.#sandbox = config.sandbox ?? false;
     this.#logger = config.logger ?? noopSink;
+    this.#quarantine = config.quarantine;
+  }
+
+  async #park(message: EmailMessage, error: unknown): Promise<void> {
+    if (!EmailError.is(error)) return;
+    if (error.code !== 'Unavailable' && error.code !== 'RateLimited') return;
+    await courtesyPark(
+      this.#quarantine,
+      emailParkInput(message, error, 'mailgun'),
+      this.#logger,
+    );
   }
 
   async send(message: EmailMessage): Promise<{ id: string }> {
@@ -89,9 +103,12 @@ export class MailgunEmailSender extends Adapter(EmailSender) {
       }
       return { id: result.id };
     } catch (error) {
-      if (EmailError.is(error)) throw error;
+      if (EmailError.is(error)) {
+        await this.#park(message, error);
+        throw error;
+      }
       const status = statusOf(error);
-      const message =
+      const messageText =
         error instanceof Error ? error.message : 'Email was rejected';
       const text =
         typeof error === 'object' &&
@@ -99,9 +116,17 @@ export class MailgunEmailSender extends Adapter(EmailSender) {
         'message' in error &&
         typeof error.message === 'string'
           ? error.message
-          : message;
-      if (status === undefined || status >= 500) throw EmailError.Unavailable();
-      if (status === 429) throw EmailError.RateLimited();
+          : messageText;
+      if (status === undefined || status >= 500) {
+        const mapped = EmailError.Unavailable();
+        await this.#park(message, mapped);
+        throw mapped;
+      }
+      if (status === 429) {
+        const mapped = EmailError.RateLimited();
+        await this.#park(message, mapped);
+        throw mapped;
+      }
       throw EmailError.Rejected(text);
     }
   }

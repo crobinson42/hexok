@@ -6,6 +6,7 @@ import {
 } from '@hexok/sms';
 import { Adapter } from 'hexok';
 import { type LogSink, noopSink } from './log-sink.js';
+import { courtesyPark, type ParkSink, smsParkInput } from './park.js';
 
 export interface TwilioLike {
   messages: {
@@ -21,6 +22,7 @@ export interface TwilioSmsSenderConfig {
   readonly client: TwilioLike;
   readonly from: string;
   readonly logger?: LogSink;
+  readonly quarantine?: ParkSink;
 }
 
 const retryAfterMs = 30000;
@@ -36,12 +38,14 @@ export class TwilioSmsSender extends Adapter(SmsSender) {
   readonly #client: TwilioLike;
   readonly #from: string;
   readonly #logger: LogSink;
+  readonly #quarantine: ParkSink | undefined;
 
   constructor(config: TwilioSmsSenderConfig) {
     super();
     this.#client = config.client;
     this.#from = config.from;
     this.#logger = config.logger ?? noopSink;
+    this.#quarantine = config.quarantine;
   }
 
   async send(message: SmsMessage): Promise<{ id: string; acceptedAt: Date }> {
@@ -68,10 +72,22 @@ export class TwilioSmsSender extends Adapter(SmsSender) {
         throw SmsError.InvalidRecipient();
       }
       if (code === 20429 || status === 429) {
-        throw SmsError.RateLimited({ retryAfterMs });
+        const mapped = SmsError.RateLimited({ retryAfterMs });
+        await courtesyPark(
+          this.#quarantine,
+          smsParkInput(message, mapped),
+          this.#logger,
+        );
+        throw mapped;
       }
       if (typeof status !== 'number' || status >= 500) {
-        throw SmsError.Unavailable({ retryAfterMs });
+        const mapped = SmsError.Unavailable({ retryAfterMs });
+        await courtesyPark(
+          this.#quarantine,
+          smsParkInput(message, mapped),
+          this.#logger,
+        );
+        throw mapped;
       }
       throw SmsError.Rejected(messageText);
     }

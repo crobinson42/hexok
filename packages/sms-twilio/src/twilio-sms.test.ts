@@ -1,5 +1,6 @@
 import { SmsError } from '@hexok/sms';
 import { describe, expect, it } from 'vitest';
+import type { ParkInput } from './park.js';
 import { type TwilioLike, TwilioSmsSender } from './twilio-sms.js';
 
 function sender(create: TwilioLike['messages']['create']): TwilioSmsSender {
@@ -46,5 +47,42 @@ describe('TwilioSmsSender', () => {
         expect(error.data).toEqual({ retryAfterMs: 30000 });
       }
     }
+  });
+
+  it('parks rate limits and outages and skips an unsubscribe', async () => {
+    const parked: ParkInput[] = [];
+    const quarantine = {
+      async park(input: ParkInput) {
+        parked.push(input);
+        return { id: 'q1' };
+      },
+    };
+    const cases: Array<[unknown, string, boolean]> = [
+      [{ status: 500 }, 'Unavailable', true],
+      [{ code: 20429 }, 'RateLimited', true],
+      [{ code: 21610 }, 'Unsubscribed', false],
+    ];
+    for (const [thrown, code, parkedOnce] of cases) {
+      const before = parked.length;
+      const error = await new TwilioSmsSender({
+        from: '+100',
+        client: {
+          messages: {
+            async create() {
+              throw thrown;
+            },
+          },
+        },
+        quarantine,
+      })
+        .send({ to: '+1555', body: 'hi' })
+        .catch((caught) => caught);
+      expect(SmsError.is(error)).toBe(true);
+      if (SmsError.is(error)) expect(error.code).toBe(code);
+      expect(parked.length).toBe(before + (parkedOnce ? 1 : 0));
+    }
+    expect(parked[0]?.payload).toEqual({ to: '+1555', body: 'hi' });
+    expect(parked[0]?.subject).toBeUndefined();
+    expect(parked[0]?.context).toEqual({ adapter: 'twilio' });
   });
 });

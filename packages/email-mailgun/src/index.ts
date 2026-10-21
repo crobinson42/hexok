@@ -4,3 +4,4 @@ export {
   type MailgunEmailSenderConfig,
   type MailgunLike,
 } from './mailgun-email.js';
+export type { ParkSink } from './park.js';

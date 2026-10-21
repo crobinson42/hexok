@@ -18,6 +18,7 @@ import {
   type RedisQueueMaintainSkipReason,
   type RedisQueueStuckReason,
 } from './maintain.js';
+import { courtesyPark, type ParkSink, parkedError } from './park.js';
 
 export type {
   RedisQueueMaintainOptions,
@@ -37,6 +38,7 @@ export interface RedisQueueConfig {
   readonly encode?: (payload: unknown) => string;
   readonly decode?: (raw: string) => unknown;
   readonly logger?: LogSink;
+  readonly quarantine?: ParkSink;
 }
 
 interface Subscription {
@@ -92,6 +94,7 @@ export class RedisQueue extends Adapter(Queue) {
   readonly #encode: (payload: unknown) => string;
   readonly #decode: (raw: string) => unknown;
   readonly #logger: LogSink;
+  readonly #quarantine: ParkSink | undefined;
   #commands: Redis | undefined;
   #trimTimer: ReturnType<typeof setInterval> | undefined;
   readonly #topics = new Set<string>();
@@ -109,6 +112,7 @@ export class RedisQueue extends Adapter(Queue) {
     this.#encode = config.encode ?? encodeJson;
     this.#decode = config.decode ?? decodeJson;
     this.#logger = config.logger ?? noopSink;
+    this.#quarantine = config.quarantine;
   }
 
   async start(): Promise<void> {
@@ -121,7 +125,13 @@ export class RedisQueue extends Adapter(Queue) {
 
   async publish(topic: string, payload: unknown): Promise<string> {
     const commands = this.#requireCommands();
-    const encoded = this.#encode(payload);
+    let encoded: string;
+    try {
+      encoded = this.#encode(payload);
+    } catch (error) {
+      await this.#parkPublish(topic, payload, error);
+      throw error;
+    }
     const key = this.#key(topic);
     let id: string;
     try {
@@ -139,6 +149,7 @@ export class RedisQueue extends Adapter(Queue) {
       }
       id = written;
     } catch (error) {
+      await this.#parkPublish(topic, payload, error);
       throw error instanceof Error ? error : new Error('queue: XADD failed');
     }
     this.#topics.add(topic);
@@ -362,6 +373,46 @@ export class RedisQueue extends Adapter(Queue) {
     }
   }
 
+  async #parkPublish(
+    topic: string,
+    payload: unknown,
+    error: unknown,
+  ): Promise<void> {
+    await courtesyPark(
+      this.#quarantine,
+      {
+        source: 'queue',
+        operation: 'publish',
+        subject: topic,
+        payload,
+        error: parkedError(error),
+        occurredAt: new Date(),
+        context: { adapter: 'redis' },
+      },
+      this.#logger,
+    );
+  }
+
+  async #parkDeliver(
+    sub: Subscription,
+    id: string,
+    record: { payload: unknown; error: ReturnType<typeof parkedError> },
+  ): Promise<void> {
+    await courtesyPark(
+      this.#quarantine,
+      {
+        source: 'queue',
+        operation: 'deliver',
+        subject: `${sub.topic}:${id}`,
+        payload: record.payload,
+        error: record.error,
+        occurredAt: new Date(),
+        context: { adapter: 'redis' },
+      },
+      this.#logger,
+    );
+  }
+
   async #dispatch(
     sub: Subscription,
     id: string,
@@ -369,6 +420,10 @@ export class RedisQueue extends Adapter(Queue) {
   ): Promise<void> {
     const raw = payloadField(fields);
     if (raw === undefined) {
+      await this.#parkDeliver(sub, id, {
+        payload: { reason: 'missing-payload' },
+        error: { name: 'Error', message: 'queue: missing payload' },
+      });
       await this.#settle(sub, id, 'drop', false);
       return;
     }
@@ -380,6 +435,10 @@ export class RedisQueue extends Adapter(Queue) {
         error instanceof Error ? error : new Error('queue: decode failed'),
         { topic: sub.topic, id },
       );
+      await this.#parkDeliver(sub, id, {
+        payload: { reason: 'decode-failed', raw },
+        error: parkedError(error),
+      });
       await this.#settle(sub, id, 'drop', false);
       return;
     }

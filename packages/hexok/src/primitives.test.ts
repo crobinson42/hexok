@@ -7,7 +7,7 @@ import {
   type EventMessage,
 } from './catalog.js';
 import { CodedError } from './coded-error.js';
-import { Entity } from './entity.js';
+import { type DeepReadonly, Entity } from './entity.js';
 import { Errors } from './errors.js';
 import { Event } from './event.js';
 import { EventHandler } from './event-handler.js';
@@ -228,6 +228,52 @@ describe('Entity', () => {
     expect(incident.toProps().closedAt).toEqual(now);
     incident.commit();
     expect(incident.isDirty()).toBe(false);
+  });
+
+  it('keeps branded primitives on props and toProps', () => {
+    const CustomerId = z.string().brand<'CustomerId'>();
+    type CustomerId = z.output<typeof CustomerId>;
+    const Count = z.number().brand<'Count'>();
+    type Count = z.output<typeof Count>;
+    type NominalId = string & { readonly __brand: 'NominalId' };
+
+    const customerSchema = z.object({
+      id: CustomerId,
+      count: Count,
+      tags: z.array(CustomerId),
+      nested: z.object({
+        ownerId: CustomerId,
+        when: z.date(),
+      }),
+    });
+
+    class Customer extends Entity('Customer', customerSchema) {}
+
+    const when = new Date('2026-01-01T00:00:00Z');
+    const id = CustomerId.parse('c1');
+    const customer = Customer.create({
+      id,
+      count: Count.parse(2),
+      tags: [id],
+      nested: { ownerId: id, when },
+    });
+
+    expect(customer.props.id).toBe('c1');
+    expectTypeOf(customer.props.id).toEqualTypeOf<CustomerId>();
+    expectTypeOf(customer.props.count).toEqualTypeOf<Count>();
+    expectTypeOf(customer.props.tags).toEqualTypeOf<readonly CustomerId[]>();
+    expectTypeOf(customer.props.nested).toEqualTypeOf<{
+      readonly ownerId: CustomerId;
+      readonly when: Date;
+    }>();
+    expectTypeOf(customer.toProps().id).toEqualTypeOf<CustomerId>();
+    expectTypeOf(customer.toJSON().nested.ownerId).toEqualTypeOf<CustomerId>();
+    expectTypeOf<
+      NonNullable<Customer['original']>['id']
+    >().toEqualTypeOf<CustomerId>();
+    expectTypeOf<
+      DeepReadonly<{ id: NominalId }>['id']
+    >().toEqualTypeOf<NominalId>();
   });
 
   it('throws a catalog member when a rule refuses', () => {

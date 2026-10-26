@@ -1,6 +1,6 @@
 {
   "name": "@hexok/sms",
-  "version": "0.0.0",
+  "version": "0.1.0",
   "description": "SMS port and SmsError catalog for hexok.",
   "type": "module",
   "license": "MIT",
@@ -40,6 +40,6 @@
     "clean": "rm -rf dist *.tsbuildinfo"
   },
   "dependencies": {
-    "hexok": "^2.1.0"
+    "hexok": "^2.2.0"
   }
 }

@@ -4,7 +4,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "build": "tsc -b",
+    "build": "tsc -b tsconfig.build.json",
     "start": "node dist/servers/http.js",
     "start:worker": "node dist/servers/worker.js",
     "start:ws": "node dist/servers/ws.js",

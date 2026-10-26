@@ -32,6 +32,10 @@ export function EventHandler<
     static readonly event: E = event;
     /** Nominal marker. Each `EventHandler(...)` call is a distinct class. */
     readonly #brand = true;
+    /** Handler name. Same literal as the static token. */
+    readonly token: Token = token;
+    /** Event class this handler receives. Same class as the static event. */
+    readonly event: E = event;
 
     constructor() {
       void this.#brand;

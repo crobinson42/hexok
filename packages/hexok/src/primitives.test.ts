@@ -78,7 +78,7 @@ class InMemoryUsers extends Adapter(UserRepository) {
 }
 
 class CreateUser extends UseCase('user.create') {
-  constructor(private readonly users: UserRepository) {
+  constructor(private readonly deps: { users: UserRepository }) {
     super();
   }
 
@@ -87,10 +87,10 @@ class CreateUser extends UseCase('user.create') {
     name: string;
     email: string;
   }): Promise<{ id: string; email: string }> {
-    const existing = await this.users.get(input.id);
+    const existing = await this.deps.users.get(input.id);
     if (existing) throw DomainError.UserExists();
     const user = User.create(input);
-    await this.users.save(user);
+    await this.deps.users.save(user);
     return { id: user.props.id, email: user.props.email };
   }
 }
@@ -124,7 +124,7 @@ describe('tokens and required members', () => {
   });
 
   it('types execute from the subclass method', () => {
-    const create = new CreateUser(new InMemoryUsers());
+    const create = new CreateUser({ users: new InMemoryUsers() });
     expectTypeOf(create.execute).parameters.toEqualTypeOf<
       [{ id: string; name: string; email: string }]
     >();
@@ -293,14 +293,14 @@ describe('UseCase, Adapter, Event, Schema', () => {
   it('wires a use case by constructor', async () => {
     const users = new InMemoryUsers();
     await users.start();
-    const created = await new CreateUser(users).execute({
+    const created = await new CreateUser({ users }).execute({
       id: '1',
       name: 'Ada',
       email: 'ada@ex.com',
     });
     expect(created).toEqual({ id: '1', email: 'ada@ex.com' });
     await expect(
-      new CreateUser(users).execute({
+      new CreateUser({ users }).execute({
         id: '1',
         name: 'Ada',
         email: 'ada@ex.com',
@@ -462,7 +462,10 @@ describe('UseCase, Adapter, Event, Schema', () => {
     });
     expect(OnCreated.token).toBe('on.user.created');
     expect(OnCreated.event).toBe(UserCreated);
-    new OnCreated().handle(created);
+    const handler = new OnCreated();
+    expect(handler.token).toBe(OnCreated.token);
+    expect(handler.event).toBe(OnCreated.event);
+    handler.handle(created);
 
     // @ts-expect-error handle is required
     class Missing extends EventHandler('missing', UserCreated) {}

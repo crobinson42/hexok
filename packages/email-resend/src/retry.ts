@@ -6,7 +6,9 @@ export interface RetrySettings {
   readonly randomize: boolean;
 }
 
-export function retryOptions(overrides?: Partial<RetrySettings>): RetrySettings {
+export function retryOptions(
+  overrides?: Partial<RetrySettings>,
+): RetrySettings {
   return {
     retries: overrides?.retries ?? 3,
     factor: overrides?.factor ?? 2,

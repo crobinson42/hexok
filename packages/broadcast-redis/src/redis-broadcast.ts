@@ -1,4 +1,8 @@
-import { Broadcast, type BroadcastHandler } from '@hexok/broadcast';
+import {
+  Broadcast,
+  type BroadcastHandler,
+  type Channel,
+} from '@hexok/broadcast';
 import { Adapter } from 'hexok';
 import type { Redis, RedisOptions } from 'ioredis';
 import { decodeJson, encodeJson, openRedis } from './codec.js';
@@ -40,34 +44,37 @@ export class RedisBroadcast extends Adapter(Broadcast) {
     });
   }
 
-  async publish(channel: string, payload: unknown): Promise<void> {
+  async publish<Name extends string, T>(
+    channel: Channel<Name, T>,
+    payload: T,
+  ): Promise<void> {
     const publisher = this.#requirePublisher();
     const encoded = this.#encode(payload);
-    await publisher.publish(this.#wire(channel), encoded);
+    await publisher.publish(this.#wire(channel.name), encoded);
   }
 
-  async subscribe<T>(
-    channel: string,
-    handler: BroadcastHandler<T>,
+  async subscribe<Name extends string, T>(
+    channel: Channel<Name, T>,
+    handler: BroadcastHandler<T, Name>,
   ): Promise<void> {
     const subscriber = this.#requireSubscriber();
-    const set = this.#handlers.get(channel) ?? new Set();
+    const set = this.#handlers.get(channel.name) ?? new Set();
     const first = set.size === 0;
     set.add(handler as BroadcastHandler<unknown>);
-    this.#handlers.set(channel, set);
-    if (first) await subscriber.subscribe(this.#wire(channel));
+    this.#handlers.set(channel.name, set);
+    if (first) await subscriber.subscribe(this.#wire(channel.name));
   }
 
-  async unsubscribe(
-    channel: string,
-    handler: BroadcastHandler<unknown>,
+  async unsubscribe<Name extends string, T>(
+    channel: Channel<Name, T>,
+    handler: BroadcastHandler<T, Name>,
   ): Promise<void> {
-    const set = this.#handlers.get(channel);
+    const set = this.#handlers.get(channel.name);
     if (!set) return;
-    set.delete(handler);
+    set.delete(handler as BroadcastHandler<unknown>);
     if (set.size > 0) return;
-    this.#handlers.delete(channel);
-    await this.#subscriber?.unsubscribe(this.#wire(channel));
+    this.#handlers.delete(channel.name);
+    await this.#subscriber?.unsubscribe(this.#wire(channel.name));
   }
 
   override async stop(): Promise<void> {

@@ -1,1 +1,6 @@
-export { Broadcast, type BroadcastHandler } from './broadcast.js';
+export {
+  Broadcast,
+  type BroadcastHandler,
+  type Channel,
+  channel,
+} from './broadcast.js';

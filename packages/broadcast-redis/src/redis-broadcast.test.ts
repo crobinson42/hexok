@@ -50,6 +50,8 @@ class FakeRedis {
 vi.mock('ioredis', () => ({ Redis: FakeRedis, default: FakeRedis }));
 
 const { RedisBroadcast } = await import('./redis-broadcast.js');
+const { channel } = await import('@hexok/broadcast');
+const news = channel('news');
 
 describe('RedisBroadcast', () => {
   it('rejects an encode failure before PUBLISH and logs a handler throw', async () => {
@@ -70,7 +72,7 @@ describe('RedisBroadcast', () => {
       },
     });
     await bus.start();
-    await expect(bus.publish('news', { a: 1 })).rejects.toThrow('bad encode');
+    await expect(bus.publish(news, { a: 1 })).rejects.toThrow('bad encode');
     expect(published).toHaveLength(0);
 
     const live = new RedisBroadcast({
@@ -86,14 +88,14 @@ describe('RedisBroadcast', () => {
     });
     await live.start();
     const seen: unknown[] = [];
-    await live.subscribe('news', () => {
+    await live.subscribe(news, () => {
       throw new Error('handler');
     });
-    await live.subscribe('news', async (message) => {
+    await live.subscribe(news, async (message) => {
       seen.push(message.payload);
     });
     const started = Date.now();
-    await live.publish('news', { ok: true });
+    await live.publish(news, { ok: true });
     expect(Date.now() - started).toBeLessThan(1000);
     await vi.waitFor(() => {
       expect(seen).toEqual([{ ok: true }]);

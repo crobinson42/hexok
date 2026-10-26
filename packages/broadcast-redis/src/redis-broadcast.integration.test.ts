@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import { channel } from '@hexok/broadcast';
 import { afterEach, describe, expect, it } from 'vitest';
 import { RedisBroadcast } from './redis-broadcast.js';
 
@@ -24,13 +25,14 @@ describe.skipIf(!process.env.REDIS_URL)('RedisBroadcast integration', () => {
     buses.push(publisher, subscriber);
     await publisher.start();
     await subscriber.start();
+    const news = channel<{ n: number }>('news');
     const seen: unknown[] = [];
-    await subscriber.subscribe('news', async (message) => {
+    await subscriber.subscribe(news, async (message) => {
       seen.push({ channel: message.channel, payload: message.payload });
       await new Promise((resolve) => setTimeout(resolve, 50));
     });
     const started = Date.now();
-    await publisher.publish('news', { n: 1 });
+    await publisher.publish(news, { n: 1 });
     expect(Date.now() - started).toBeLessThan(40);
     const deadline = Date.now() + 3000;
     while (seen.length === 0 && Date.now() < deadline) {

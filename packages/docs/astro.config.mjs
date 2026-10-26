@@ -21,6 +21,10 @@ export default defineConfig({
           ],
         },
         {
+          label: 'Packages',
+          items: [{ autogenerate: { directory: 'packages' } }],
+        },
+        {
           label: 'Building Software - The Patterns',
           slug: 'building-software',
         },

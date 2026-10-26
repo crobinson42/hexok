@@ -4,8 +4,9 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "astro dev",
-    "build": "astro build",
+    "sync-package-docs": "node scripts/sync-package-docs.mjs",
+    "dev": "node scripts/sync-package-docs.mjs && astro dev",
+    "build": "node scripts/sync-package-docs.mjs && astro build",
     "preview": "astro preview",
     "type-check": "astro check",
     "lint": "biome check .",

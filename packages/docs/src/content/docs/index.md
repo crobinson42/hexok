@@ -13,7 +13,7 @@ npm i hexok
 
 The package is [hexok](https://www.npmjs.com/package/hexok) on npm. The repository is [crobinson42/hexok](https://github.com/crobinson42/hexok) on GitHub. TypeBox 1 schematics install as [@hexok/typebox](https://www.npmjs.com/package/@hexok/typebox).
 
-Company infrastructure packages (`@hexok/logger`, `@hexok/queue`, `@hexok/broadcast`, `@hexok/email`, `@hexok/sms`, `@hexok/schedule-coordinator`, `@hexok/quarantine`, and their adapters) are documented on [Company infrastructure](/hexok/infrastructure/).
+Company infrastructure packages are documented on [Packages](/hexok/packages/). [Company infrastructure](/hexok/infrastructure/) says how they sit beside `hexok`.
 
 ## Agent skill
 

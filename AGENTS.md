@@ -61,7 +61,7 @@ REDIS_URL=redis://127.0.0.1:6379 npm run test
 
 ## Adding a package
 
-Copy the `package.json` scripts, `tsconfig.json`, `tsconfig.check.json`, and `vitest.config.ts` from a sibling package. Add the package to the `references` in the root `tsconfig.json`. A package that will publish needs a changeset.
+Copy the `package.json` scripts, `tsconfig.json`, `tsconfig.check.json`, and `vitest.config.ts` from a sibling package. Add the package to the `references` in the root `tsconfig.json`. A package that will publish needs a changeset and a `README.md`. That README is its docs page. Do not add a hand-written page under `concepts/` for a package.
 
 ## Changesets
 
@@ -85,6 +85,8 @@ A change to a hexok primitive's public behavior usually touches more than `src`:
 - the concept page under `packages/docs/src/content/docs/concepts/`
 - the skill reference under `packages/hexok/skills/hexok/references/`
 - `examples/app-template` when it uses that primitive
+
+A published package other than `hexok` does not get a concept page. Its README is the docs page. The docs `dev` and `build` scripts copy it to `packages/docs/src/content/docs/packages/`. Those files are generated and gitignored. Do not edit them. The copy fails when a published package has no README.
 
 The skill ships inside the `hexok` npm package (`files` includes `skills`), so a stale reference reaches users.
 

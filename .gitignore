@@ -10,3 +10,4 @@ coverage
 *.log
 .env
 .env.*
+packages/docs/src/content/docs/packages/

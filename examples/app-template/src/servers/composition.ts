@@ -12,6 +12,8 @@ import { RedisScheduleCoordinator } from '@hexok/schedule-coordinator-redis';
 import type { SmsSender } from '@hexok/sms';
 import { type TwilioLike, TwilioSmsSender } from '@hexok/sms-twilio';
 import { connectRedis } from '../infra/clients/redis-client.js';
+import { BroadcastClientEventPublisher } from '../infra/events/broadcasters/client-events-channel.js';
+import { QueueDomainEventPublisher } from '../infra/events/queues/domain-events.js';
 import { RedisPosts } from '../infra/repos/redis-posts.js';
 import { RedisSubscribers } from '../infra/repos/redis-subscribers.js';
 import { ConsoleSms } from '../infra/services/console-sms.js';
@@ -150,45 +152,86 @@ async function createSmsService(
   });
 }
 
-export async function createRuntime(): Promise<{
+/** Infrastructure every process shares. Mail and SMS are in {@link createNotifications}. */
+export type Runtime = {
   logger: Logger;
+  quarantine: MemoryQuarantine;
   posts: RedisPosts;
   subscribers: RedisSubscribers;
   domainEventsQueue: RedisQueue;
   clientEventsBroadcast: RedisBroadcast;
   scheduleCoordinator: RedisScheduleCoordinator;
-  email: EmailSender;
-  sms: SmsSender;
-  from: EmailAddress;
-}> {
+  /** Stop the queue, broadcast, and coordinator, then close Redis. */
+  stop(): Promise<void>;
+};
+
+export async function createRuntime(): Promise<Runtime> {
   const url = process.env.REDIS_URL ?? 'redis://127.0.0.1:6379';
   const logger = await createLogger();
   const sink = logSink(logger);
   const quarantine = new MemoryQuarantine();
   const redis = await connectRedis(url);
-  const email = await createEmailService(logger, quarantine);
+  const domainEventsQueue = new RedisQueue({
+    redis: url,
+    keyPrefix: 'domain:',
+    logger: sink,
+    quarantine,
+  });
+  const clientEventsBroadcast = new RedisBroadcast({
+    redis: url,
+    channelPrefix: 'client-events:',
+    logger: sink,
+  });
+  const scheduleCoordinator = new RedisScheduleCoordinator({
+    redis: url,
+    keyPrefix: 'domain:schedule:',
+    logger: sink,
+  });
   return {
     logger,
+    quarantine,
     posts: new RedisPosts({ redis }),
     subscribers: new RedisSubscribers({ redis }),
-    domainEventsQueue: new RedisQueue({
-      redis: url,
-      keyPrefix: 'domain:',
-      logger: sink,
-      quarantine,
+    domainEventsQueue,
+    clientEventsBroadcast,
+    scheduleCoordinator,
+    async stop() {
+      await scheduleCoordinator.stop();
+      await domainEventsQueue.stop();
+      await clientEventsBroadcast.stop();
+      await redis.close();
+    },
+  };
+}
+
+/** The ports use cases publish domain and client events through. */
+export function createPublishers(runtime: Runtime): {
+  domainEvents: QueueDomainEventPublisher;
+  clientEvents: BroadcastClientEventPublisher;
+} {
+  return {
+    domainEvents: new QueueDomainEventPublisher({
+      queue: runtime.domainEventsQueue,
     }),
-    clientEventsBroadcast: new RedisBroadcast({
-      redis: url,
-      channelPrefix: 'client-events:',
-      logger: sink,
+    clientEvents: new BroadcastClientEventPublisher({
+      broadcast: runtime.clientEventsBroadcast,
     }),
-    scheduleCoordinator: new RedisScheduleCoordinator({
-      redis: url,
-      keyPrefix: 'domain:schedule:',
-      logger: sink,
-    }),
+  };
+}
+
+/**
+ * Mail and SMS senders. Only the worker sends, so only the worker needs
+ * `FROM_EMAIL` and the provider keys.
+ */
+export async function createNotifications(runtime: Runtime): Promise<{
+  email: EmailSender;
+  sms: SmsSender;
+  from: EmailAddress;
+}> {
+  const email = await createEmailService(runtime.logger, runtime.quarantine);
+  return {
     email: email.email,
-    sms: await createSmsService(logger, quarantine),
+    sms: await createSmsService(runtime.logger, runtime.quarantine),
     from: email.from,
   };
 }

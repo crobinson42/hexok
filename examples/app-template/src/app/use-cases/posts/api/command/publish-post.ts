@@ -1,4 +1,5 @@
 import type { UseCase } from 'hexok';
+import { z } from 'zod';
 import type { PostEntity } from '../../../../../domain/entities/post.js';
 import { DomainError } from '../../../../../domain/errors/domain.js';
 import type { ClientEventPublisher } from '../../../../ports/events/client-event-publisher.js';
@@ -7,7 +8,18 @@ import type { PostRepository } from '../../../../ports/repos/post-repository.js'
 import { ApiUseCase, internalCall } from '../../../context.js';
 import { CommitPublishedPost } from '../../internal/commit-published-post.js';
 
-export class PublishPost extends ApiUseCase('post.publish') {
+/** `emailSubscribers` defaults to false. A missing `publishAt` publishes now. */
+export const publishPostInput = z.object({
+  id: z.string().min(1),
+  emailSubscribers: z.boolean().optional(),
+  publishAt: z.string().min(1).optional(),
+});
+
+export type PublishPostInput = z.infer<typeof publishPostInput>;
+
+export class PublishPost extends ApiUseCase('post.publish', {
+  input: publishPostInput,
+}) {
   readonly #commit: CommitPublishedPost;
 
   constructor(
@@ -23,24 +35,22 @@ export class PublishPost extends ApiUseCase('post.publish') {
 
   async execute(
     _ctx: UseCase.Ctx<typeof ApiUseCase>,
-    input: { id: string; emailSubscribers: boolean; publishAt?: string },
+    input: PublishPostInput,
   ): Promise<PostEntity> {
     const publishAt = input.publishAt;
+    const emailSubscribers = input.emailSubscribers === true;
     if (publishAt !== undefined && isFuture(publishAt)) {
       const post = await this.deps.posts.get(input.id);
       if (post === null) {
         throw DomainError.PostNotFound({ id: input.id });
       }
-      post.schedule({
-        publishAt,
-        emailSubscribers: input.emailSubscribers,
-      });
+      post.schedule({ publishAt, emailSubscribers });
       await this.deps.posts.save(post);
       return post;
     }
     return this.#commit.execute(internalCall(), {
       id: input.id,
-      emailSubscribers: input.emailSubscribers,
+      emailSubscribers,
     });
   }
 }

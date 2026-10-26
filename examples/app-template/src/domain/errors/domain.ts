@@ -1,7 +1,8 @@
-import { Errors } from 'hexok';
+import { type ErrorMap, Errors } from 'hexok';
 import { z } from 'zod';
 
-export class DomainError extends Errors('domain', {
+/** The definitions. The RPC contract reuses them as declared errors. */
+export const domainErrorDefs = {
   AlreadyPublished: { message: 'Post is already published' },
   NotPublished: { message: 'Post is not published' },
   NotScheduled: { message: 'Post is not scheduled' },
@@ -19,4 +20,6 @@ export class DomainError extends Errors('domain', {
   ChannelsRequired: { message: 'Choose email, sms, or both' },
   ChannelsInvalid: { message: 'channels must be email, sms, or both' },
   SmsRequiresPhone: { message: 'SMS requires a phone' },
-}) {}
+} satisfies ErrorMap;
+
+export class DomainError extends Errors('domain', domainErrorDefs) {}

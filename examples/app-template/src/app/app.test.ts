@@ -3,8 +3,11 @@ import { EmailSender } from '@hexok/email';
 import { NoopLogger } from '@hexok/logger';
 import type { SmsMessage, SmsReceipt } from '@hexok/sms';
 import { SmsError, SmsSender } from '@hexok/sms';
-import { Adapter, type EventInstance } from 'hexok';
-import { describe, expect, it } from 'vitest';
+import { asResult, createClient } from '@ts-pf/client';
+import { FetchLink } from '@ts-pf/client-http';
+import { SseCodec } from '@ts-pf/sse';
+import { Adapter, CodedError, type EventInstance } from 'hexok';
+import { describe, expect, it, vi } from 'vitest';
 import type { PostEntity } from '../domain/entities/post.js';
 import { SubscriberEntity } from '../domain/entities/subscriber.js';
 import { DomainError } from '../domain/errors/domain.js';
@@ -14,7 +17,15 @@ import { PostPublishedEvent } from '../domain/events/post-published.js';
 import { PostPublishedClientEvent } from '../domain/events/post-published-client.js';
 import { PostUnpublishedEvent } from '../domain/events/post-unpublished.js';
 import { SubscriberJoinedEvent } from '../domain/events/subscriber-joined.js';
-import { createHttpApp } from '../servers/http.js';
+import {
+  BroadcastClientEventPublisher,
+  clientEventsChannel,
+} from '../infra/events/broadcasters/client-events-channel.js';
+import { MemoryBroadcast } from '../infra/events/broadcasters/memory-broadcast.js';
+import { createApi } from '../servers/api.js';
+import { createHttpHandler } from '../servers/http/handler.js';
+import { createApiApp, createEventsApp } from '../servers/rpc/app.js';
+import type { apiContract, eventsContract } from '../servers/rpc/contract.js';
 import { ClientEventPublisher } from './ports/events/client-event-publisher.js';
 import { DomainEventPublisher } from './ports/events/domain-event-publisher.js';
 import { PostRepository } from './ports/repos/post-repository.js';
@@ -167,39 +178,63 @@ async function expectDomainCode(
   expect.fail(`expected ${code}`);
 }
 
-async function withHttp(
-  deps: Parameters<typeof createHttpApp>[0],
-  run: (base: string) => Promise<void>,
-): Promise<void> {
-  const server = createHttpApp(deps).listen(0);
-  try {
-    await new Promise<void>((resolve, reject) => {
-      const onError = (error: Error) => reject(error);
-      server.once('error', onError);
-      server.once('listening', () => {
-        server.off('error', onError);
-        resolve();
-      });
-    });
-    const address = server.address();
-    if (address === null || typeof address === 'string') {
-      throw new Error('expected a tcp port');
-    }
-    await run(`http://127.0.0.1:${address.port}`);
-  } finally {
-    if (server.listening) {
-      await new Promise<void>((resolve, reject) => {
-        server.close((error) => {
-          if (error) {
-            reject(error);
-            return;
-          }
-          resolve();
-        });
-      });
-    }
-  }
+/**
+ * The HTTP handler over in-memory ports. The typed clients call it without a
+ * socket. `post` sends a raw body to check the wire.
+ */
+function http(broadcast = new MemoryBroadcast()) {
+  const publishers = recordingPublishers();
+  const handle = createHttpHandler({
+    api: createApiApp(
+      createApi({
+        posts: new InMemoryPosts(),
+        subscribers: new InMemorySubscribers(),
+        ...publishers,
+      }),
+    ),
+    events: createEventsApp(broadcast),
+  });
+  const fetch: typeof globalThis.fetch = (input, init) =>
+    handle(new Request(input, init));
+  return {
+    publishers,
+    api: createClient<typeof apiContract>(
+      new FetchLink({ url: 'http://test/rpc', fetch }),
+    ),
+    events: createClient<typeof eventsContract>(
+      new FetchLink({
+        url: 'http://test/events',
+        fetch,
+        codec: new SseCodec(),
+      }),
+    ),
+    post: (path: string, body: string) =>
+      handle(
+        new Request(`http://test${path}`, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body,
+        }),
+      ),
+  };
 }
+
+describe('ApiUseCase', () => {
+  it('rejects input the schema does not accept before execute runs', async () => {
+    const save = new SavePost({ posts: new InMemoryPosts() });
+    const error = await save
+      .execute(ctx, { title: 1, body: 'Text' } as never)
+      .then(
+        () => undefined,
+        (caught: unknown) => caught,
+      );
+
+    expect(error).toBeInstanceOf(CodedError);
+    expect((error as CodedError).code).toBe('VALIDATION');
+    // The guard's message. `PostEntity.create` would fail with its own.
+    expect((error as CodedError).message).toBe('post.save input is invalid');
+  });
+});
 
 describe('SavePost', () => {
   it('assigns an id and stores a draft when id is omitted', async () => {
@@ -887,109 +922,128 @@ describe('WelcomeSubscriberHandler', () => {
   });
 });
 
-describe('createHttpApp', () => {
-  it('POST /posts returns a draft with an id', async () => {
-    await withHttp(
-      {
-        posts: new InMemoryPosts(),
-        subscribers: new InMemorySubscribers(),
-        ...recordingPublishers(),
-      },
-      async (base) => {
-        const response = await fetch(`${base}/posts`, {
-          method: 'POST',
-          headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({ title: 'Hello', body: 'Text' }),
-        });
-        expect(response.status).toBe(200);
-        const body = (await response.json()) as {
-          id: string;
-          title: string;
-          status: string;
-        };
-        expect(body.title).toBe('Hello');
-        expect(body.id.length).toBeGreaterThan(0);
-        expect(body.status).toBe('draft');
-      },
-    );
+describe('HTTP', () => {
+  it('posts.save returns a draft with an id', async () => {
+    const { api } = http();
+
+    const draft = await api.posts.save({ title: 'Hello', body: 'Text' });
+
+    expect(draft.title).toBe('Hello');
+    expect(draft.id.length).toBeGreaterThan(0);
+    expect(draft.status).toBe('draft');
   });
 
-  it('POST /posts/:id/publish returns published and records the flag', async () => {
-    const publishers = recordingPublishers();
-    await withHttp(
-      {
-        posts: new InMemoryPosts(),
-        subscribers: new InMemorySubscribers(),
-        ...publishers,
-      },
-      async (base) => {
-        const created = await fetch(`${base}/posts`, {
-          method: 'POST',
-          headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({ title: 'Hello', body: 'Text' }),
-        });
-        const draft = (await created.json()) as { id: string };
-        const response = await fetch(`${base}/posts/${draft.id}/publish`, {
-          method: 'POST',
-          headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({ emailSubscribers: true }),
-        });
-        expect(response.status).toBe(200);
-        const body = (await response.json()) as { status: string };
-        expect(body.status).toBe('published');
-        expect(publishers.domainEvents.events).toHaveLength(1);
-        expect(
-          publishedEvent(publishers.domainEvents.events[0]).payload
-            .emailSubscribers,
-        ).toBe(true);
-        const client = publishers.clientEvents.events[0];
-        expect(client).toBeInstanceOf(PostPublishedClientEvent);
-        if (!(client instanceof PostPublishedClientEvent)) {
-          throw new Error('expected PostPublishedClientEvent');
-        }
-        expect(client.payload).toEqual({
-          postId: draft.id,
-          title: 'Hello',
-        });
-      },
-    );
+  it('posts.publish returns published and records the flag', async () => {
+    const { api, publishers } = http();
+    const draft = await api.posts.save({ title: 'Hello', body: 'Text' });
+
+    const post = await api.posts.publish({
+      id: draft.id,
+      emailSubscribers: true,
+    });
+
+    expect(post.status).toBe('published');
+    expect(publishers.domainEvents.events).toHaveLength(1);
+    expect(
+      publishedEvent(publishers.domainEvents.events[0]).payload
+        .emailSubscribers,
+    ).toBe(true);
+    const client = publishers.clientEvents.events[0];
+    if (!(client instanceof PostPublishedClientEvent)) {
+      throw new Error('expected PostPublishedClientEvent');
+    }
+    expect(client.payload).toEqual({ postId: draft.id, title: 'Hello' });
   });
 
-  it('POST /subscribers returns the email', async () => {
-    await withHttp(
-      {
-        posts: new InMemoryPosts(),
-        subscribers: new InMemorySubscribers(),
-        ...recordingPublishers(),
-      },
-      async (base) => {
-        const response = await fetch(`${base}/subscribers`, {
-          method: 'POST',
-          headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({ email: 'ada@ex.com' }),
-        });
-        expect(response.status).toBe(200);
-        const body = (await response.json()) as { email: string };
-        expect(body.email).toBe('ada@ex.com');
-      },
-    );
+  it('subscribers.subscribe returns the email', async () => {
+    const { api } = http();
+
+    const subscriber = await api.subscribers.subscribe({ email: 'ada@ex.com' });
+
+    expect(subscriber.email).toBe('ada@ex.com');
   });
 
-  it('POST /posts/:id/publish returns 404 for an unknown id', async () => {
-    await withHttp(
-      {
-        posts: new InMemoryPosts(),
-        subscribers: new InMemorySubscribers(),
-        ...recordingPublishers(),
-      },
-      async (base) => {
-        const response = await fetch(`${base}/posts/missing/publish`, {
-          method: 'POST',
-          headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({ emailSubscribers: true }),
-        });
-        expect(response.status).toBe(404);
-      },
+  it('sends a declared domain error with its data', async () => {
+    const { api } = http();
+
+    const result = await asResult(api.posts.publish({ id: 'missing' }));
+
+    if (result.ok) throw new Error('expected an error');
+    expect(result.error.status).toBe(404);
+    if (result.error.code !== 'PostNotFound') throw result.error;
+    expect(result.error.data.id).toBe('missing');
+  });
+
+  it('answers a published post with 409 and the error envelope', async () => {
+    const { api, post } = http();
+    const draft = await api.posts.save({ title: 'Hello', body: 'Text' });
+    await api.posts.publish({ id: draft.id });
+
+    const response = await post(
+      '/rpc/posts/publish',
+      JSON.stringify({ input: { id: draft.id } }),
     );
+
+    expect(response.status).toBe(409);
+    expect(await response.json()).toEqual({
+      ok: false,
+      error: { code: 'AlreadyPublished', message: 'Post is already published' },
+    });
+  });
+
+  it('answers invalid input with 422 and the issues', async () => {
+    const { post } = http();
+
+    const response = await post(
+      '/rpc/subscribers/subscribe',
+      JSON.stringify({ input: { email: 'ada@ex.com', channels: ['fax'] } }),
+    );
+
+    expect(response.status).toBe(422);
+    const body = (await response.json()) as {
+      error: { code: string; data: { issues: Array<{ path: unknown[] }> } };
+    };
+    expect(body.error.code).toBe('VALIDATION');
+    expect(body.error.data.issues[0]?.path).toEqual(['channels', 0]);
+  });
+
+  it('answers malformed JSON with 400', async () => {
+    const { post } = http();
+
+    const response = await post('/rpc/posts/save', '{"input":');
+
+    expect(response.status).toBe(400);
+    const body = (await response.json()) as { error: { code: string } };
+    expect(body.error.code).toBe('BAD_REQUEST');
+  });
+
+  it('answers a path outside both prefixes with 404', async () => {
+    const { post } = http();
+
+    const response = await post('/posts', '{}');
+
+    expect(response.status).toBe(404);
+  });
+
+  it('streams client events as server-sent events', async () => {
+    const broadcast = new MemoryBroadcast();
+    const { events } = http(broadcast);
+
+    // The call resolves with the first event, so publish before awaiting it.
+    const stream = events.subscribe({});
+    await vi.waitFor(() =>
+      expect(broadcast.count(clientEventsChannel)).toBe(1),
+    );
+    await new BroadcastClientEventPublisher({ broadcast }).publish(
+      new PostPublishedClientEvent({ postId: 'p1', title: 'Hi' }),
+    );
+
+    for await (const event of await stream) {
+      expect(event).toEqual({
+        key: 'postPublished',
+        payload: { postId: 'p1', title: 'Hi' },
+      });
+      break;
+    }
   });
 });

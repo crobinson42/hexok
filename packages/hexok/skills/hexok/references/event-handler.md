@@ -38,7 +38,7 @@ class EmailSubscribers extends EventHandler('email.subscribers', PostPublished) 
 
 Annotate `event` with `PostPublished`. An unannotated `handle(event)` is implicit `any`. Keep `handle` a method.
 
-A process that shares the API's memory can pass the instance straight to `handle`. A worker in another process reads a catalog message, runs `BlogEvents.parse`, and then calls `handle` with the result. Subscription, ack, and retry belong to that adapter.
+A process that shares the API's memory can pass the instance straight to `handle`. A worker in another process can parse with `handler.event.parse` when the message is that event's payload, or read a catalog message, run `BlogEvents.parse`, and then call `handle`. Subscription, ack, and retry belong to that adapter. The instance `token` and `event` are the same values as the statics.
 
 One handler is bound to one event class. A second event is a second handler.
 
@@ -50,8 +50,8 @@ A static field such as `groupId` is yours to read when you subscribe the handler
 
 | Member | Role |
 | --- | --- |
-| `EmailSubscribers.token` | The name you passed in. |
-| `EmailSubscribers.event` | The event class this handler receives. |
+| `EmailSubscribers.token` | The name you passed in. The instance has the same `token`. |
+| `EmailSubscribers.event` | The event class this handler receives. The instance has the same `event`. |
 | `handle(event)` | Required. Annotate `event` with that class. Return `void` or `Promise<void>`. |
 | `constructor` | Ports arrive on `deps`. Call `super()`. The composition root passes `new EmailSubscribers({ subscribers, mail })`. |
 

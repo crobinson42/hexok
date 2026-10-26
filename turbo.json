@@ -7,7 +7,8 @@
     },
     "test": {
       "dependsOn": ["^build"],
-      "outputs": []
+      "outputs": [],
+      "env": ["REDIS_URL"]
     },
     "type-check": {
       "dependsOn": ["^build"],

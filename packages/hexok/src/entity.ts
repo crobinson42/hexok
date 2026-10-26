@@ -16,14 +16,27 @@ import { validate } from './validate.js';
 
 const EMPTY_CHANGED_KEYS: string[] = Object.freeze([]) as unknown as string[];
 
-/** Recursively readonly view of entity props. `Date` values stay `Date`. */
-export type DeepReadonly<T> = T extends Date
+/**
+ * Recursively readonly view of entity props. `Date` values stay `Date`.
+ * Primitives are returned as-is, so a brand (`string & { … }`) is not
+ * mapped as an object and dropped.
+ */
+export type DeepReadonly<T> = T extends
+  | string
+  | number
+  | boolean
+  | bigint
+  | symbol
+  | null
+  | undefined
   ? T
-  : T extends readonly (infer U)[]
-    ? ReadonlyArray<DeepReadonly<U>>
-    : T extends object
-      ? { readonly [K in keyof T]: DeepReadonly<T[K]> }
-      : T;
+  : T extends Date
+    ? T
+    : T extends readonly (infer U)[]
+      ? ReadonlyArray<DeepReadonly<U>>
+      : T extends object
+        ? { readonly [K in keyof T]: DeepReadonly<T[K]> }
+        : T;
 
 type EntityConstructor = {
   readonly token: string;

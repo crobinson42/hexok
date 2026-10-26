@@ -95,7 +95,9 @@ describe('UseCase.context', () => {
     area: 'billing',
   }) {
     constructor(
-      private readonly users: { search(query: string): Promise<string[]> },
+      private readonly deps: {
+        users: { search(query: string): Promise<string[]> };
+      },
     ) {
       super();
     }
@@ -104,14 +106,16 @@ describe('UseCase.context', () => {
       _ctx: ApiContext,
       input: InferSchema<(typeof FindUsers)['input']>,
     ): Promise<string[]> {
-      return this.users.search(input.query);
+      return this.deps.users.search(input.query);
     }
   }
 
   it('copies statics onto the class', () => {
     const find = new FindUsers({
-      async search(query) {
-        return [query];
+      users: {
+        async search(query) {
+          return [query];
+        },
       },
     });
     expectTypeOf(FindUsers.token).toEqualTypeOf<'user.find'>();

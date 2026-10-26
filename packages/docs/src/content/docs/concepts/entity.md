@@ -93,4 +93,4 @@ Build instances with `create`, `restore`, or `parse`.
 
 A schema failure throws a [coded error](/hexok/concepts/error/coded/) with code `VALIDATION` and the message `hexok: Post validation failed`. A domain rule throws a member of your [error catalog](/hexok/concepts/error/).
 
-`DeepReadonly<T>` is the type of `props`, `original`, and `toProps()`. `Date` values stay `Date`.
+`DeepReadonly<T>` is the type of `props`, `original`, and `toProps()`. `Date` values stay `Date`. A branded primitive stays that brand.

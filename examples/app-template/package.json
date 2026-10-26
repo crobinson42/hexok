@@ -4,21 +4,39 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "build": "tsc -b",
-    "start": "node dist/http.js",
-    "start:worker": "node dist/worker.js",
+    "build": "tsc -b tsconfig.build.json",
+    "start": "node dist/servers/http.js",
+    "start:worker": "node dist/servers/worker.js",
+    "start:ws": "node dist/servers/ws.js",
     "test": "vitest run",
     "type-check": "tsc --noEmit -p tsconfig.check.json",
     "lint": "biome check .",
     "clean": "rm -rf dist *.tsbuildinfo"
   },
   "dependencies": {
+    "@hexok/broadcast": "*",
+    "@hexok/broadcast-redis": "*",
+    "@hexok/email": "*",
+    "@hexok/email-mailgun": "*",
+    "@hexok/email-resend": "*",
+    "@hexok/logger": "*",
+    "@hexok/logger-newrelic": "*",
+    "@hexok/logger-sentry": "*",
+    "@hexok/quarantine": "*",
+    "@hexok/queue": "*",
+    "@hexok/queue-redis": "*",
+    "@hexok/schedule-coordinator": "*",
+    "@hexok/schedule-coordinator-redis": "*",
+    "@hexok/sms": "*",
+    "@hexok/sms-twilio": "*",
     "express": "^5.1.0",
     "hexok": "*",
     "redis": "^5.8.2",
+    "ws": "^8.22.0",
     "zod": "^4.1.5"
   },
   "devDependencies": {
-    "@types/express": "^5.0.3"
+    "@types/express": "^5.0.3",
+    "@types/ws": "^8.18.2"
   }
 }

@@ -120,7 +120,7 @@ Do not add a broker only to create a second process. Do not move the handler's w
 - Publish `new PostPublished(payload)`. Compare events with `instanceof` or `event.token`. The catalog map key (`postPublished`) and the event token (`post.published`) are different strings.
 - After a successful driver write, the adapter calls `commit()` on the entity. The mapper does not commit.
 - Tests construct the use case with adapters of the same ports. A test of the story does not need a live broker.
-- Put one concept in one file. A practical layout is `schemas/`, `entities/`, `errors/`, `events/`, `ports/`, `use-cases/`, `handlers/`, `adapters/`, an HTTP entry, and a worker entry when step 6 splits a process.
+- Put one concept in one file. A practical layout is `domain/` (schemas, entities, errors, events), `app/` (ports, use cases, handlers), `infra/` (adapters), and `servers/` (the HTTP entry and a worker entry when step 6 splits a process).
 - Zod, Valibot, and ArkType are passed straight to the primitives. A TypeBox 1 schematic goes through `@hexok/typebox` (`typebox(schema)` or `typeboxDecode(schema)`) before it reaches `Schema`, `Entity`, or `Event`.
 
 ## When a primitive changes

@@ -3,6 +3,20 @@
   "references": [
     { "path": "packages/hexok" },
     { "path": "packages/typebox" },
+    { "path": "packages/logger" },
+    { "path": "packages/logger-sentry" },
+    { "path": "packages/logger-newrelic" },
+    { "path": "packages/queue" },
+    { "path": "packages/queue-redis" },
+    { "path": "packages/broadcast" },
+    { "path": "packages/broadcast-redis" },
+    { "path": "packages/email" },
+    { "path": "packages/email-resend" },
+    { "path": "packages/email-mailgun" },
+    { "path": "packages/sms" },
+    { "path": "packages/sms-twilio" },
+    { "path": "packages/schedule-coordinator" },
+    { "path": "packages/schedule-coordinator-redis" },
     { "path": "examples/extend" },
     { "path": "examples/app-template" }
   ]

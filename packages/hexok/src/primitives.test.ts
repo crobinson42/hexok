@@ -7,7 +7,7 @@ import {
   type EventMessage,
 } from './catalog.js';
 import { CodedError } from './coded-error.js';
-import { Entity } from './entity.js';
+import { type DeepReadonly, Entity } from './entity.js';
 import { Errors } from './errors.js';
 import { Event } from './event.js';
 import { EventHandler } from './event-handler.js';
@@ -78,7 +78,7 @@ class InMemoryUsers extends Adapter(UserRepository) {
 }
 
 class CreateUser extends UseCase('user.create') {
-  constructor(private readonly users: UserRepository) {
+  constructor(private readonly deps: { users: UserRepository }) {
     super();
   }
 
@@ -87,10 +87,10 @@ class CreateUser extends UseCase('user.create') {
     name: string;
     email: string;
   }): Promise<{ id: string; email: string }> {
-    const existing = await this.users.get(input.id);
+    const existing = await this.deps.users.get(input.id);
     if (existing) throw DomainError.UserExists();
     const user = User.create(input);
-    await this.users.save(user);
+    await this.deps.users.save(user);
     return { id: user.props.id, email: user.props.email };
   }
 }
@@ -124,7 +124,7 @@ describe('tokens and required members', () => {
   });
 
   it('types execute from the subclass method', () => {
-    const create = new CreateUser(new InMemoryUsers());
+    const create = new CreateUser({ users: new InMemoryUsers() });
     expectTypeOf(create.execute).parameters.toEqualTypeOf<
       [{ id: string; name: string; email: string }]
     >();
@@ -230,6 +230,52 @@ describe('Entity', () => {
     expect(incident.isDirty()).toBe(false);
   });
 
+  it('keeps branded primitives on props and toProps', () => {
+    const CustomerId = z.string().brand<'CustomerId'>();
+    type CustomerId = z.output<typeof CustomerId>;
+    const Count = z.number().brand<'Count'>();
+    type Count = z.output<typeof Count>;
+    type NominalId = string & { readonly __brand: 'NominalId' };
+
+    const customerSchema = z.object({
+      id: CustomerId,
+      count: Count,
+      tags: z.array(CustomerId),
+      nested: z.object({
+        ownerId: CustomerId,
+        when: z.date(),
+      }),
+    });
+
+    class Customer extends Entity('Customer', customerSchema) {}
+
+    const when = new Date('2026-01-01T00:00:00Z');
+    const id = CustomerId.parse('c1');
+    const customer = Customer.create({
+      id,
+      count: Count.parse(2),
+      tags: [id],
+      nested: { ownerId: id, when },
+    });
+
+    expect(customer.props.id).toBe('c1');
+    expectTypeOf(customer.props.id).toEqualTypeOf<CustomerId>();
+    expectTypeOf(customer.props.count).toEqualTypeOf<Count>();
+    expectTypeOf(customer.props.tags).toEqualTypeOf<readonly CustomerId[]>();
+    expectTypeOf(customer.props.nested).toEqualTypeOf<{
+      readonly ownerId: CustomerId;
+      readonly when: Date;
+    }>();
+    expectTypeOf(customer.toProps().id).toEqualTypeOf<CustomerId>();
+    expectTypeOf(customer.toJSON().nested.ownerId).toEqualTypeOf<CustomerId>();
+    expectTypeOf<
+      NonNullable<Customer['original']>['id']
+    >().toEqualTypeOf<CustomerId>();
+    expectTypeOf<
+      DeepReadonly<{ id: NominalId }>['id']
+    >().toEqualTypeOf<NominalId>();
+  });
+
   it('throws a catalog member when a rule refuses', () => {
     const incident = Incident.create({ id: 'i', status: 'closed' });
     expect(() => incident.close(new Date())).toThrow(DomainError);
@@ -247,14 +293,14 @@ describe('UseCase, Adapter, Event, Schema', () => {
   it('wires a use case by constructor', async () => {
     const users = new InMemoryUsers();
     await users.start();
-    const created = await new CreateUser(users).execute({
+    const created = await new CreateUser({ users }).execute({
       id: '1',
       name: 'Ada',
       email: 'ada@ex.com',
     });
     expect(created).toEqual({ id: '1', email: 'ada@ex.com' });
     await expect(
-      new CreateUser(users).execute({
+      new CreateUser({ users }).execute({
         id: '1',
         name: 'Ada',
         email: 'ada@ex.com',
@@ -416,7 +462,10 @@ describe('UseCase, Adapter, Event, Schema', () => {
     });
     expect(OnCreated.token).toBe('on.user.created');
     expect(OnCreated.event).toBe(UserCreated);
-    new OnCreated().handle(created);
+    const handler = new OnCreated();
+    expect(handler.token).toBe(OnCreated.token);
+    expect(handler.event).toBe(OnCreated.event);
+    handler.handle(created);
 
     // @ts-expect-error handle is required
     class Missing extends EventHandler('missing', UserCreated) {}

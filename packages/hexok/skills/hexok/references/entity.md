@@ -93,4 +93,4 @@ class User extends Entity('User', UserSchema) {
 
 A schema failure throws `CodedError` with code `VALIDATION` and the message `hexok: Post validation failed`. A domain rule throws a member of the error catalog.
 
-`DeepReadonly<T>` is the type of `props`, `original`, and `toProps()`. `Date` values stay `Date`. `EntityInstance` is the props-only instance type.
+`DeepReadonly<T>` is the type of `props`, `original`, and `toProps()`. `Date` values stay `Date`. A branded primitive stays that brand. `EntityInstance` is the props-only instance type.

@@ -52,6 +52,8 @@ A port parameter typed as the catalog class does not check event key or payload,
 
 `parse` throws `hexok: catalog "blog" expected { key, payload }` when `value` lacks a string `key` or a `payload`. An unknown key throws `hexok: event "<key>" is not in catalog "blog"`. A payload the event schema rejects throws `CodedError` `VALIDATION` from that event's `parse`.
 
+`examples/app-template` keeps two catalogs in the app. `DomainEventPublisher` calls `DomainEvents.message` and `@hexok/queue` carries that message. The worker calls `DomainEvents.parse` before `handle`. `ClientEventPublisher` calls `ClientEvents.message` and `@hexok/broadcast` carries that message. The websocket process calls `ClientEvents.parse` and sends the event to subscribed sockets. Neither package owns a catalog.
+
 `EventInstance<typeof BlogEvents>` is the union of event instances in the catalog. Each instance carries its token. `EventMessage<typeof BlogEvents>` is the matching `{ key, payload }` union. The second type argument keeps one entry. `key` on a message is the map key. The event token is `BlogEvents.get(message.key).token`, and `event.token` on the instance.
 
 Narrow a handler or a switch with `event.token` or `instanceof`. Indexing a handler map by `event.token` does not narrow the payload. A `never` default on the whole event reports an unhandled catalog entry.

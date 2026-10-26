@@ -12,7 +12,7 @@ export const subscriberSchema = z
     id: z.string().min(1),
     email: z.string().email(),
     phone: z.string().min(1).optional(),
-    channels: z.array(notificationChannelSchema).min(1),
+    channels: z.array(notificationChannelSchema).min(1).readonly(),
   })
   .superRefine((value, ctx) => {
     if (new Set(value.channels).size !== value.channels.length) {

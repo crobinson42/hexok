@@ -5,9 +5,9 @@
   "type": "module",
   "scripts": {
     "build": "tsc -b tsconfig.build.json",
-    "start": "node dist/servers/http.js",
+    "start": "node dist/servers/http/main.js",
     "start:worker": "node dist/servers/worker.js",
-    "start:ws": "node dist/servers/ws.js",
+    "start:ws": "node dist/servers/ws/main.js",
     "test": "vitest run",
     "type-check": "tsc --noEmit -p tsconfig.check.json",
     "lint": "biome check .",
@@ -29,14 +29,24 @@
     "@hexok/schedule-coordinator-redis": "*",
     "@hexok/sms": "*",
     "@hexok/sms-twilio": "*",
-    "express": "^5.1.0",
+    "@ts-pf/contract": "^0.2.2",
+    "@ts-pf/message": "^0.2.1",
+    "@ts-pf/message-server": "^0.3.2",
+    "@ts-pf/protocol": "^0.2.1",
+    "@ts-pf/server": "^0.4.2",
+    "@ts-pf/server-http": "^0.3.2",
+    "@ts-pf/sse": "^0.2.2",
+    "@ts-pf/stream": "^0.2.2",
     "hexok": "*",
     "redis": "^5.8.2",
+    "srvx": "^1.0.7",
     "ws": "^8.22.0",
     "zod": "^4.1.5"
   },
   "devDependencies": {
-    "@types/express": "^5.0.3",
+    "@ts-pf/client": "^0.2.2",
+    "@ts-pf/client-http": "^0.2.2",
+    "@ts-pf/message-client": "^0.2.2",
     "@types/ws": "^8.18.2"
   }
 }

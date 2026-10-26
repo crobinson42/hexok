@@ -5,9 +5,11 @@ import { EmailSubscribers } from '../app/use-cases/posts/internal/email-subscrib
 import { PublishDuePosts } from '../app/use-cases/posts/scheduled/publish-due-posts.js';
 import { SubscriberReminder } from '../app/use-cases/posts/scheduled/subscriber-reminder.js';
 import { WelcomeSubscriberHandler } from '../app/use-cases/subscribers/event-handlers/welcome-subscriber.js';
-import { BroadcastClientEventPublisher } from '../infra/events/broadcasters/client-events-channel.js';
-import { QueueDomainEventPublisher } from '../infra/events/queues/domain-events.js';
-import { createRuntime } from './composition.js';
+import {
+  createNotifications,
+  createPublishers,
+  createRuntime,
+} from './composition.js';
 import {
   assertDistinctHandlerGroups,
   subscribeHandler,
@@ -15,20 +17,20 @@ import {
 
 export async function main(): Promise<void> {
   const runtime = await createRuntime();
+  /** Adapters connect in `start`. `register` and `subscribe` need that connection. */
+  await runtime.scheduleCoordinator.start();
+  await runtime.domainEventsQueue.start();
+  await runtime.clientEventsBroadcast.start();
+
+  const notifications = await createNotifications(runtime);
+  const { domainEvents, clientEvents } = createPublishers(runtime);
 
   const emailSubscribers = new EmailSubscribers({
     subscribers: runtime.subscribers,
-    email: runtime.email,
-    sms: runtime.sms,
-    from: runtime.from,
+    email: notifications.email,
+    sms: notifications.sms,
+    from: notifications.from,
     logger: runtime.logger,
-  });
-
-  const domainEvents = new QueueDomainEventPublisher({
-    queue: runtime.domainEventsQueue,
-  });
-  const clientEvents = new BroadcastClientEventPublisher({
-    broadcast: runtime.clientEventsBroadcast,
   });
 
   /** Setup domain event handlers. */
@@ -36,9 +38,9 @@ export async function main(): Promise<void> {
     new EmailSubscribersHandler({ emailSubscribers }),
     new EmailUnpublishedHandler({ emailSubscribers }),
     new WelcomeSubscriberHandler({
-      email: runtime.email,
-      sms: runtime.sms,
-      from: runtime.from,
+      email: notifications.email,
+      sms: notifications.sms,
+      from: notifications.from,
       logger: runtime.logger,
     }),
   ];
@@ -66,13 +68,6 @@ export async function main(): Promise<void> {
       await subscribeHandler(runtime.domainEventsQueue, handler),
     );
   }
-
-  /**
-   * Start the runtime.
-   */
-  await runtime.scheduleCoordinator.start();
-  await runtime.domainEventsQueue.start();
-  await runtime.clientEventsBroadcast.start();
 
   runtime.logger.info('domain events queue subscriptions', { subscriptions });
 }

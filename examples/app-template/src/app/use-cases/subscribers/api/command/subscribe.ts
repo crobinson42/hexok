@@ -1,17 +1,30 @@
 import { randomUUID } from 'node:crypto';
 import type { UseCase } from 'hexok';
+import { z } from 'zod';
 import { SubscriberEntity } from '../../../../../domain/entities/subscriber.js';
 import { DomainError } from '../../../../../domain/errors/domain.js';
 import { SubscriberJoinedEvent } from '../../../../../domain/events/subscriber-joined.js';
 import {
   type NotificationChannel,
+  notificationChannelSchema,
   notificationChannels,
 } from '../../../../../domain/schemas/subscriber.js';
 import type { DomainEventPublisher } from '../../../../ports/events/domain-event-publisher.js';
 import type { SubscriberRepository } from '../../../../ports/repos/subscriber-repository.js';
 import { ApiUseCase } from '../../../context.js';
 
-export class SubscribeToPosts extends ApiUseCase('subscriber.subscribe') {
+/** Omitted `channels` means email. Channel rules are checked in `execute`. */
+export const subscribeToPostsInput = z.object({
+  email: z.string(),
+  phone: z.string().optional(),
+  channels: z.array(notificationChannelSchema).optional(),
+});
+
+export type SubscribeToPostsInput = z.infer<typeof subscribeToPostsInput>;
+
+export class SubscribeToPosts extends ApiUseCase('subscriber.subscribe', {
+  input: subscribeToPostsInput,
+}) {
   constructor(
     private readonly deps: {
       subscribers: SubscriberRepository;
@@ -23,7 +36,7 @@ export class SubscribeToPosts extends ApiUseCase('subscriber.subscribe') {
 
   async execute(
     _ctx: UseCase.Ctx<typeof ApiUseCase>,
-    input: { email: string; phone?: string; channels?: NotificationChannel[] },
+    input: SubscribeToPostsInput,
   ): Promise<SubscriberEntity> {
     const existing = await this.deps.subscribers.getByEmail(input.email);
     if (existing !== null) {

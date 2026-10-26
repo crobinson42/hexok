@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { Redis } from 'ioredis';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { CronScheduler } from './cron-scheduler.js';
 import { RedisScheduleCoordinator } from './redis-schedule.js';
 
@@ -58,7 +58,7 @@ describe.skipIf(!process.env.REDIS_URL)(
       coordinators.push(a, b);
       await a.start();
       await b.start();
-      let release: () => void = () => {};
+      let release: (() => void) | undefined;
       let ranB = 0;
       a.register({
         name: 'cleanup',
@@ -76,17 +76,18 @@ describe.skipIf(!process.env.REDIS_URL)(
         },
       });
       const ticking = left.jobs[0]?.fire();
-      await new Promise((resolve) => setTimeout(resolve, 50));
+      // `onTick` runs only once A holds the lock.
+      await vi.waitFor(() => expect(release).toBeDefined());
       await right.jobs[0]?.fire();
       expect(ranB).toBe(0);
       const key = `${prefix}lock:cleanup`;
       expect(await probe.get(key)).toEqual(expect.any(String));
-      release();
+      release?.();
       await ticking;
       expect(await probe.get(key)).toBeNull();
 
       let aborted = false;
-      let releaseStop: () => void = () => {};
+      let releaseStop: (() => void) | undefined;
       a.register({
         name: 'stop-me',
         cron: '0 * * * *',
@@ -99,10 +100,10 @@ describe.skipIf(!process.env.REDIS_URL)(
           }),
       });
       const stoppingTick = left.jobs[1]?.fire();
-      await new Promise((resolve) => setTimeout(resolve, 30));
+      await vi.waitFor(() => expect(releaseStop).toBeDefined());
       await a.stop();
       expect(await probe.get(`${prefix}lock:stop-me`)).toBeNull();
-      releaseStop();
+      releaseStop?.();
       await stoppingTick;
       expect(aborted).toBe(true);
     });

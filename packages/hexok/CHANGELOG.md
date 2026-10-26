@@ -1,5 +1,15 @@
 # hexok
 
+## 2.2.0
+
+### Minor Changes
+
+- [#5](https://github.com/crobinson42/hexok/pull/5) [`faf7f47`](https://github.com/crobinson42/hexok/commit/faf7f472b56ad6e2b1b17dac86908e20ee6540a6) Thanks [@crobinson42](https://github.com/crobinson42)! - `EventHandler` instances carry `token` and `event`, the same values as the statics.
+
+### Patch Changes
+
+- [#5](https://github.com/crobinson42/hexok/pull/5) [`11e10cd`](https://github.com/crobinson42/hexok/commit/11e10cd90b636215324f3f54c03acdd91a3da159) Thanks [@crobinson42](https://github.com/crobinson42)! - `DeepReadonly` leaves branded primitives alone, so `z.string().brand()` stays that brand on `props`, `original`, and `toProps()`.
+
 ## 2.1.1
 
 ### Patch Changes

@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import { createServer, type Socket, connect as tcpConnect } from 'node:net';
 import { channel } from '@hexok/broadcast';
 import type { RedisOptions } from 'ioredis';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -92,6 +93,36 @@ describe.skipIf(!process.env.REDIS_URL)('RedisBroadcast integration', () => {
       }
       expect(seen).toEqual([run]);
     }
+  });
+
+  it('stops while Redis is unreachable after subscribing', async () => {
+    const target = new URL(process.env.REDIS_URL ?? '');
+    const sockets = new Set<Socket>();
+    const proxy = createServer((client) => {
+      const upstream = tcpConnect(Number(target.port || 6379), target.hostname);
+      sockets.add(client).add(upstream);
+      client.pipe(upstream).pipe(client);
+      client.on('error', () => upstream.destroy());
+      upstream.on('error', () => client.destroy());
+    });
+    await new Promise<void>((resolve) => proxy.listen(0, resolve));
+    const address = proxy.address();
+    if (address === null || typeof address === 'string') {
+      throw new Error('proxy has no port');
+    }
+    const bus = new RedisBroadcast({
+      redis: { host: '127.0.0.1', port: address.port },
+      channelPrefix: `hexok:broadcast:it:${randomUUID()}:`,
+    });
+    buses.push(bus);
+    await bus.start();
+    await bus.subscribe(channel('news'), () => {});
+    await new Promise<void>((resolve) => {
+      proxy.close(() => resolve());
+      for (const socket of sockets) socket.destroy();
+    });
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    await within(bus.stop(), 1000);
   });
 
   async function startSubscribePublish(

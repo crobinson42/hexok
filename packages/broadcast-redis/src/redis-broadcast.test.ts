@@ -16,7 +16,7 @@ class FakeRedis {
   disconnects = 0;
   quits = 0;
   stalled = false;
-  failUnsubscribe = false;
+  hangUnsubscribe = false;
 
   constructor(...args: unknown[]) {
     const options = args.at(-1) as { lazyConnect?: boolean } | undefined;
@@ -96,8 +96,7 @@ class FakeRedis {
 
   async unsubscribe(...channels: string[]): Promise<void> {
     this.commands.push(['unsubscribe', ...channels]);
-    if (this.stalled) await new Promise(() => {});
-    if (this.failUnsubscribe) throw new Error('unsubscribe failed');
+    if (this.stalled || this.hangUnsubscribe) await new Promise(() => {});
   }
 
   async quit(): Promise<string> {
@@ -357,7 +356,6 @@ describe('RedisBroadcast', () => {
       expect(subscriber.commands).toEqual([
         ['subscribe', wire],
         ['subscribe', wire],
-        ['unsubscribe', wire],
       ]);
     });
 
@@ -409,13 +407,18 @@ describe('RedisBroadcast', () => {
       }
     });
 
-    it('closes both clients when UNSUBSCRIBE rejects', async () => {
+    it('quits a ready subscriber without waiting on UNSUBSCRIBE', async () => {
       const bus = new RedisBroadcast({ redis: 'redis://127.0.0.1:6379' });
       await bus.start();
       await bus.subscribe(news, () => {});
       const [publisher, subscriber] = lastPair();
-      subscriber.failUnsubscribe = true;
-      await expect(bus.stop()).rejects.toThrow('unsubscribe failed');
+      subscriber.hangUnsubscribe = true;
+      const stopped = track(bus.stop());
+      await tick();
+      expect(stopped).toEqual({ settled: true, error: undefined });
+      expect(subscriber.commands).toEqual([
+        ['subscribe', 'hexok:broadcast:news'],
+      ]);
       expect(publisher.quits).toBe(1);
       expect(subscriber.quits).toBe(1);
     });

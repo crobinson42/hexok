@@ -17,9 +17,9 @@ import {
 
 export async function main(): Promise<void> {
   const runtime = await createRuntime();
-  /** Adapters connect in `start`. `register` and `subscribe` need that connection. */
-  await runtime.scheduleCoordinator.start();
+  /** Adapters connect in `start`. `register` and `subscribe` need that connection. Scheduled jobs publish to the queue, so the queue starts first and stops last. */
   await runtime.domainEventsQueue.start();
+  await runtime.scheduleCoordinator.start();
 
   const notifications = await createNotifications(runtime);
   const { domainEvents } = createPublishers(runtime);

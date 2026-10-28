@@ -3,10 +3,14 @@ import {
   type BroadcastHandler,
   type Channel,
 } from '@hexok/broadcast';
+import {
+  type LogSink,
+  openRedis,
+  RedisLifecycle,
+} from '@hexok/ioredis-lifecycle';
 import { Adapter } from 'hexok';
 import type { Redis, RedisOptions } from 'ioredis';
-import { decodeJson, encodeJson, openRedis, untilReady } from './codec.js';
-import { type LogSink, noopSink } from './log-sink.js';
+import { decodeJson, encodeJson } from './codec.js';
 
 export interface RedisBroadcastConfig {
   readonly redis: string | RedisOptions;
@@ -14,28 +18,26 @@ export interface RedisBroadcastConfig {
   readonly encode?: (payload: unknown) => string;
   readonly decode?: (raw: string) => unknown;
   readonly logger?: LogSink;
+  /**
+   * The total time `stop()` may take. Default 1000.
+   * Pub/sub holds no state to drain, so stop only needs time for `QUIT`.
+   */
+  readonly stopTimeoutMs?: number;
+  /** Rejects `start()` with `StartTimeout` when Redis is not ready in time. Unset, `start()` waits for Redis. */
+  readonly startTimeoutMs?: number;
 }
 
-const QUIT_TIMEOUT_MS = 1000;
+const ADAPTER = 'broadcast';
+
+interface Clients extends Record<string, Redis> {
+  publisher: Redis;
+  subscriber: Redis;
+}
 
 interface Listening {
   readonly handlers: Set<BroadcastHandler<unknown>>;
+  /** The channel's one `SUBSCRIBE`. A later `subscribe` to the channel awaits it. */
   readonly subscribed: Promise<void>;
-}
-
-async function settledWithin(
-  promise: Promise<unknown>,
-  ms: number,
-): Promise<boolean> {
-  let timer: ReturnType<typeof setTimeout> | undefined;
-  const deadline = new Promise<boolean>((resolve) => {
-    timer = setTimeout(() => resolve(false), ms);
-  });
-  try {
-    return await Promise.race([promise.then(() => true), deadline]);
-  } finally {
-    clearTimeout(timer);
-  }
 }
 
 export class RedisBroadcast extends Adapter(Broadcast) {
@@ -43,11 +45,8 @@ export class RedisBroadcast extends Adapter(Broadcast) {
   readonly #channelPrefix: string;
   readonly #encode: (payload: unknown) => string;
   readonly #decode: (raw: string) => unknown;
-  readonly #logger: LogSink;
-  #publisher: Redis | undefined;
-  #subscriber: Redis | undefined;
-  #started: Promise<void> | undefined;
-  #starting: AbortController | undefined;
+  readonly #logger: LogSink | undefined;
+  readonly #lifecycle: RedisLifecycle<Clients>;
   readonly #channels = new Map<string, Listening>();
 
   constructor(config: RedisBroadcastConfig) {
@@ -56,31 +55,42 @@ export class RedisBroadcast extends Adapter(Broadcast) {
     this.#channelPrefix = config.channelPrefix ?? 'hexok:broadcast:';
     this.#encode = config.encode ?? encodeJson;
     this.#decode = config.decode ?? decodeJson;
-    this.#logger = config.logger ?? noopSink;
+    this.#logger = config.logger;
+    this.#lifecycle = new RedisLifecycle({
+      adapter: ADAPTER,
+      stopTimeoutMs: config.stopTimeoutMs ?? 1000,
+      startTimeoutMs: config.startTimeoutMs,
+      logger: this.#logger,
+    });
   }
 
   start(): Promise<void> {
-    this.#started ??= this.#open();
-    return this.#started;
+    return this.#lifecycle.start(() => {
+      const publisher = openRedis(this.#redis);
+      const subscriber = openRedis(this.#redis);
+      subscriber.on('message', (wire: string, raw: string) => {
+        void this.#deliver(wire, raw);
+      });
+      return { publisher, subscriber };
+    });
   }
 
   async publish<Name extends string, T>(
     channel: Channel<Name, T>,
     payload: T,
   ): Promise<void> {
-    const publisher = this.#requirePublisher();
-    const encoded = this.#encode(payload);
-    await publisher.publish(this.#wire(channel.name), encoded);
+    // Encoding inside the command lets a state error win, and a failed encode never sends PUBLISH.
+    await this.#lifecycle.run('publish', ({ publisher }) =>
+      publisher.publish(this.#wire(channel.name), this.#encode(payload)),
+    );
   }
 
   async subscribe<Name extends string, T>(
     channel: Channel<Name, T>,
     handler: BroadcastHandler<T, Name>,
   ): Promise<void> {
-    const subscriber = this.#requireSubscriber();
     const listening =
-      this.#channels.get(channel.name) ??
-      this.#listen(subscriber, channel.name);
+      this.#channels.get(channel.name) ?? this.#listen(channel.name);
     listening.handlers.add(handler as BroadcastHandler<unknown>);
     await listening.subscribed;
   }
@@ -94,93 +104,34 @@ export class RedisBroadcast extends Adapter(Broadcast) {
     listening.handlers.delete(handler as BroadcastHandler<unknown>);
     if (listening.handlers.size > 0) return;
     this.#channels.delete(channel.name);
-    await this.#subscriber?.unsubscribe(this.#wire(channel.name));
-  }
-
-  override async stop(): Promise<void> {
-    const publisher = this.#publisher;
-    const subscriber = this.#subscriber;
-    const starting = this.#starting;
-    this.#publisher = undefined;
-    this.#subscriber = undefined;
-    this.#started = undefined;
-    this.#starting = undefined;
-    this.#channels.clear();
-    if (starting) {
-      starting.abort(new Error('broadcast: stop() was called before ready'));
-      publisher?.disconnect();
-      subscriber?.disconnect();
-      return;
-    }
-    await Promise.all([this.#close(subscriber), this.#close(publisher)]);
-  }
-
-  // A client that is not ready would queue QUIT until Redis comes back. A
-  // ready client gets QUIT_TIMEOUT_MS before it is disconnected.
-  async #close(client: Redis | undefined): Promise<void> {
-    if (!client) return;
-    if (client.status === 'ready') {
-      const quit = client.quit().catch((error: unknown) => {
-        this.#logger.error(
-          error instanceof Error ? error : new Error('broadcast: quit failed'),
-        );
-      });
-      if (await settledWithin(quit, QUIT_TIMEOUT_MS)) return;
-    }
-    client.disconnect();
-  }
-
-  async #open(): Promise<void> {
-    const starting = new AbortController();
-    const publisher = this.#connect('publisher');
-    const subscriber = this.#connect('subscriber');
-    this.#starting = starting;
-    this.#publisher = publisher;
-    this.#subscriber = subscriber;
-    subscriber.on('message', (wire: string, raw: string) => {
-      void this.#deliver(wire, raw);
-    });
-    try {
-      await Promise.all([
-        untilReady(publisher, starting.signal),
-        untilReady(subscriber, starting.signal),
-      ]);
-      starting.signal.throwIfAborted();
-    } catch (error) {
-      // stop() aborts and closes the clients itself. Otherwise a client ended.
-      if (this.#starting === starting) {
-        starting.abort(error);
-        this.#publisher = undefined;
-        this.#subscriber = undefined;
-        this.#started = undefined;
-        this.#starting = undefined;
-        publisher.disconnect();
-        subscriber.disconnect();
-      }
-      throw error;
-    }
-    this.#starting = undefined;
-  }
-
-  #connect(connection: 'publisher' | 'subscriber'): Redis {
-    const redis = openRedis(this.#redis);
-    redis.on('error', (error: Error) => {
-      this.#logger.error(error, { connection });
-    });
-    return redis;
-  }
-
-  #listen(subscriber: Redis, name: string): Listening {
-    const handlers = new Set<BroadcastHandler<unknown>>();
-    const subscribed = subscriber.subscribe(this.#wire(name)).then(
-      () => undefined,
-      (error: unknown) => {
-        if (this.#channels.get(name)?.handlers === handlers) {
-          this.#channels.delete(name);
-        }
-        throw error;
-      },
+    // run() sends UNSUBSCRIBE synchronously, so it follows any SUBSCRIBE already sent for the channel.
+    await this.#lifecycle.run('unsubscribe', ({ subscriber }) =>
+      subscriber.unsubscribe(this.#wire(channel.name)),
     );
+  }
+
+  /** Sends no `UNSUBSCRIBE`. `QUIT` ends the subscriptions, and a dead Redis would never answer it. */
+  override stop(): Promise<void> {
+    this.#channels.clear();
+    return this.#lifecycle.stop();
+  }
+
+  #listen(name: string): Listening {
+    const handlers = new Set<BroadcastHandler<unknown>>();
+    const subscribed = this.#lifecycle
+      .run('subscribe', ({ subscriber }) =>
+        subscriber.subscribe(this.#wire(name)),
+      )
+      .then(
+        () => undefined,
+        (error: unknown) => {
+          // An unsubscribe and a new subscribe may have replaced this entry. Keep theirs.
+          if (this.#channels.get(name)?.handlers === handlers) {
+            this.#channels.delete(name);
+          }
+          throw error;
+        },
+      );
     const listening = { handlers, subscribed };
     this.#channels.set(name, listening);
     return listening;
@@ -190,13 +141,14 @@ export class RedisBroadcast extends Adapter(Broadcast) {
     const channel = wire.startsWith(this.#channelPrefix)
       ? wire.slice(this.#channelPrefix.length)
       : wire;
+    const fields = { adapter: ADAPTER, connection: 'subscriber', channel };
     let payload: unknown;
     try {
       payload = this.#decode(raw);
     } catch (error) {
-      this.#logger.error(
+      this.#logger?.error(
         error instanceof Error ? error : new Error('broadcast: decode failed'),
-        { channel },
+        fields,
       );
       return;
     }
@@ -205,11 +157,11 @@ export class RedisBroadcast extends Adapter(Broadcast) {
       try {
         await Promise.resolve(handler({ channel, payload }));
       } catch (error) {
-        this.#logger.error(
+        this.#logger?.error(
           error instanceof Error
             ? error
             : new Error('broadcast: handler failed'),
-          { channel },
+          fields,
         );
       }
     }
@@ -217,15 +169,5 @@ export class RedisBroadcast extends Adapter(Broadcast) {
 
   #wire(channel: string): string {
     return `${this.#channelPrefix}${channel}`;
-  }
-
-  #requirePublisher(): Redis {
-    if (!this.#publisher) throw new Error('broadcast: start() was not called');
-    return this.#publisher;
-  }
-
-  #requireSubscriber(): Redis {
-    if (!this.#subscriber) throw new Error('broadcast: start() was not called');
-    return this.#subscriber;
   }
 }

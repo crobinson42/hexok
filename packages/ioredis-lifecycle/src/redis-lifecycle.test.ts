@@ -172,18 +172,108 @@ describe('state', () => {
     expect(lifecycle.state).toBe('idle');
   });
 
-  it('rejects a negative or non-finite budget', () => {
+  it('rejects a negative or non-finite budget with the adapter name', () => {
     expect(
-      () => new RedisLifecycle({ adapter: 'test', stopTimeoutMs: -1 }),
-    ).toThrow(RangeError);
+      () => new RedisLifecycle({ adapter: 'queue', stopTimeoutMs: -1 }),
+    ).toThrow(
+      new RangeError('queue: stopTimeoutMs must be a finite number of ms >= 0'),
+    );
     expect(
       () =>
         new RedisLifecycle({
-          adapter: 'test',
+          adapter: 'queue',
           stopTimeoutMs: 1,
           startTimeoutMs: Number.NaN,
         }),
-    ).toThrow(RangeError);
+    ).toThrow(
+      new RangeError(
+        'queue: startTimeoutMs must be a finite number of ms >= 0',
+      ),
+    );
+  });
+});
+
+describe('ended after ready', () => {
+  const ended =
+    'test: the main connection ended after start(). Commands fail until you call stop() and start() again.';
+
+  it('a client that ends while ready is logged at error with adapter and connection', async () => {
+    const { logger, fake } = await started();
+    fake.end();
+    expect(logger.error).toHaveBeenCalledTimes(1);
+    expect(logger.error).toHaveBeenCalledWith(ended, {
+      adapter: 'test',
+      connection: 'main',
+    });
+  });
+
+  it('state stays ready after a client ends, and commands still run', async () => {
+    const { lifecycle, fake } = await started();
+    fake.end();
+    expect(lifecycle.state).toBe('ready');
+    await expect(lifecycle.run('get', async () => 'OK')).resolves.toBe('OK');
+  });
+
+  it('an attached client that ends while ready is logged with its fields', async () => {
+    const { lifecycle, logger } = await started();
+    const blocking = new FakeRedis('ready');
+    lifecycle.attach({
+      operation: 'subscribe',
+      connection: 'blocking',
+      open: () => blocking.redis,
+      fields: { topic: 'jobs' },
+    });
+    blocking.end();
+    expect(logger.error).toHaveBeenCalledWith(
+      'test: the blocking connection ended after start(). Commands fail until you call stop() and start() again.',
+      { topic: 'jobs', adapter: 'test', connection: 'blocking' },
+    );
+  });
+
+  it('stop does not log the end of the clients it closes', async () => {
+    const { lifecycle, logger, fake } = await started();
+    const quitting = new FakeRedis('ready');
+    lifecycle.attach({
+      operation: 'subscribe',
+      connection: 'blocking',
+      open: () => quitting.redis,
+    });
+    fake.status = 'reconnecting';
+    await lifecycle.stop();
+    fake.end();
+    expect(quitting.status).toBe('end');
+    expect(logger.error).not.toHaveBeenCalled();
+  });
+
+  it('detach does not log the end of the detached client', async () => {
+    const { lifecycle, logger } = await started();
+    const blocking = new FakeRedis('ready');
+    const client = lifecycle.attach({
+      operation: 'subscribe',
+      connection: 'blocking',
+      open: () => blocking.redis,
+    });
+    lifecycle.detach(client);
+    expect(blocking.status).toBe('end');
+    expect(logger.error).not.toHaveBeenCalled();
+  });
+
+  it('a failed start does not log the end of the clients it disconnects', async () => {
+    const logger = sink();
+    const lifecycle = new RedisLifecycle<{ a: Redis; b: Redis }>({
+      adapter: 'test',
+      stopTimeoutMs: 1000,
+      logger,
+    });
+    const a = new FakeRedis('ready');
+    const b = new FakeRedis();
+    const starting = caught(
+      lifecycle.start(() => ({ a: a.redis, b: b.redis })),
+    );
+    b.end();
+    expectCode(await starting, 'EndedBeforeReady');
+    expect(a.status).toBe('end');
+    expect(logger.error).not.toHaveBeenCalled();
   });
 });
 
@@ -715,16 +805,17 @@ describe('stop', () => {
     expect(vi.getTimerCount()).toBe(0);
   });
 
-  it('listener counts return to zero, except the lifetime error listener', async () => {
+  it('stop returns listener counts to zero, except the lifetime error listener', async () => {
     const { lifecycle, fake, open } = setup({ startTimeoutMs: 1000 });
     const signal = new AbortController().signal;
     const starting = lifecycle.start(open);
     expect(fake.listenerCount('ready')).toBe(1);
-    expect(fake.listenerCount('end')).toBe(1);
+    // The readiness wait's, and the one that logs an end after ready.
+    expect(fake.listenerCount('end')).toBe(2);
     fake.ready();
     await starting;
     expect(fake.listenerCount('ready')).toBe(0);
-    expect(fake.listenerCount('end')).toBe(0);
+    expect(fake.listenerCount('end')).toBe(1);
     const pending = caught(
       lifecycle.run('publish', () => fake.command().promise, { signal }),
     );

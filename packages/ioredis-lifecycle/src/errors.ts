@@ -34,6 +34,8 @@ export const messages = {
     `${adapter}: stop() is closing the connections. Call start() again to connect.`,
   stoppedBeforeReply: (adapter: string, operation: string) =>
     `${adapter}: stop() was called before Redis replied to ${operation}(). Redis may or may not have run it. Check Redis before you retry.`,
+  endedAfterReady: (adapter: string, connection: string) =>
+    `${adapter}: the ${connection} connection ended after start(). Commands fail until you call stop() and start() again.`,
   startTimeout: (adapter: string, ms: number) =>
     `${adapter}: Redis was not ready within ${ms}ms. Check that Redis is reachable, or raise startTimeoutMs.`,
   endedBeforeReady: (adapter: string, connection: string) =>

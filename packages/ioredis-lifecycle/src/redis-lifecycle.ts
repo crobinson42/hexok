@@ -53,8 +53,8 @@ export type StopCleanup<Clients> = (
 
 interface Session<Clients> {
   readonly clients: Clients;
-  /** Each open client, started or attached. */
-  readonly connections: Set<Redis>;
+  /** Each open client, started or attached, and how to remove its `end` listener. */
+  readonly connections: Map<Redis, () => void>;
   /** Cancels the readiness wait. */
   readonly opening: AbortController;
   /** Rejects guarded commands that are still pending. `stop()` aborts it after cleanup. */
@@ -80,9 +80,9 @@ export class RedisLifecycle<
   #stopping: Promise<void> | undefined;
 
   constructor(options: RedisLifecycleOptions) {
-    assertDuration('stopTimeoutMs', options.stopTimeoutMs);
+    assertDuration(options.adapter, 'stopTimeoutMs', options.stopTimeoutMs);
     if (options.startTimeoutMs !== undefined) {
-      assertDuration('startTimeoutMs', options.startTimeoutMs);
+      assertDuration(options.adapter, 'startTimeoutMs', options.startTimeoutMs);
     }
     this.#adapter = options.adapter;
     this.#stopTimeoutMs = options.stopTimeoutMs;
@@ -163,7 +163,7 @@ export class RedisLifecycle<
    * A guarded command on that client may never settle if the client was reconnecting, so pass that command a `signal` and abort it first.
    */
   detach(client: Redis): void {
-    this.#session?.connections.delete(client);
+    if (this.#session) forget(this.#session, client);
     client.disconnect();
   }
 
@@ -203,7 +203,7 @@ export class RedisLifecycle<
     }
     const session: Session<Clients> = {
       clients,
-      connections: new Set(),
+      connections: new Map(),
       opening: new AbortController(),
       guard: new AbortController(),
       inflight: 0,
@@ -264,7 +264,10 @@ export class RedisLifecycle<
   #discard(session: Session<Clients>): void {
     this.#session = undefined;
     this.#state = 'idle';
-    for (const client of session.connections) client.disconnect();
+    for (const client of [...session.connections.keys()]) {
+      forget(session, client);
+      client.disconnect();
+    }
   }
 
   async #shutdown(
@@ -293,10 +296,9 @@ export class RedisLifecycle<
     session.guard.abort(
       LifecycleError.Stopped(messages.closing(this.#adapter)),
     );
-    await Promise.all(
-      [...session.connections].map((client) => this.#close(client, remaining)),
-    );
-    session.connections.clear();
+    const clients = [...session.connections.keys()];
+    for (const client of clients) forget(session, client);
+    await Promise.all(clients.map((client) => this.#close(client, remaining)));
     if (this.#session === session) this.#session = undefined;
     this.#state = 'stopped';
   }
@@ -359,7 +361,17 @@ export class RedisLifecycle<
     };
     // This listener stays after stop(). ioredis can emit while a socket closes, and with no listener it prints "Unhandled error event".
     client.on('error', onError);
-    session.connections.add(client);
+    // `state` stays `ready` when a client ends, such as when `retryStrategy` gives up, so the log is the only signal.
+    const onEnd = () => {
+      if (this.#session !== session || this.#state !== 'ready') return;
+      this.#logger.error(messages.endedAfterReady(this.#adapter, connection), {
+        ...fields,
+        adapter: this.#adapter,
+        connection,
+      });
+    };
+    client.on('end', onEnd);
+    session.connections.set(client, () => client.off('end', onEnd));
   }
 
   #guarded<T>(
@@ -435,12 +447,18 @@ export class RedisLifecycle<
   }
 }
 
-function assertDuration(name: string, ms: number): void {
+function assertDuration(adapter: string, name: string, ms: number): void {
   if (!Number.isFinite(ms) || ms < 0) {
     throw new RangeError(
-      `ioredis-lifecycle: ${name} must be a finite number of ms >= 0`,
+      `${adapter}: ${name} must be a finite number of ms >= 0`,
     );
   }
+}
+
+/** Removes the client's `end` listener and drops it from the session. Its `error` listener stays. */
+function forget(session: Session<unknown>, client: Redis): void {
+  session.connections.get(client)?.();
+  session.connections.delete(client);
 }
 
 /** Resolves when no guarded command of `session` is in flight. */

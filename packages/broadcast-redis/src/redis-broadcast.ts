@@ -5,7 +5,7 @@ import {
 } from '@hexok/broadcast';
 import { Adapter } from 'hexok';
 import type { Redis, RedisOptions } from 'ioredis';
-import { decodeJson, encodeJson, openRedis, waitForReady } from './codec.js';
+import { decodeJson, encodeJson, openRedis, untilReady } from './codec.js';
 import { type LogSink, noopSink } from './log-sink.js';
 
 export interface RedisBroadcastConfig {
@@ -14,6 +14,11 @@ export interface RedisBroadcastConfig {
   readonly encode?: (payload: unknown) => string;
   readonly decode?: (raw: string) => unknown;
   readonly logger?: LogSink;
+}
+
+interface Listening {
+  readonly handlers: Set<BroadcastHandler<unknown>>;
+  readonly subscribed: Promise<void>;
 }
 
 export class RedisBroadcast extends Adapter(Broadcast) {
@@ -25,7 +30,8 @@ export class RedisBroadcast extends Adapter(Broadcast) {
   #publisher: Redis | undefined;
   #subscriber: Redis | undefined;
   #started: Promise<void> | undefined;
-  readonly #handlers = new Map<string, Set<BroadcastHandler<unknown>>>();
+  #starting: AbortController | undefined;
+  readonly #channels = new Map<string, Listening>();
 
   constructor(config: RedisBroadcastConfig) {
     super();
@@ -55,68 +61,88 @@ export class RedisBroadcast extends Adapter(Broadcast) {
     handler: BroadcastHandler<T, Name>,
   ): Promise<void> {
     const subscriber = this.#requireSubscriber();
-    const set = this.#handlers.get(channel.name) ?? new Set();
-    const first = set.size === 0;
-    set.add(handler as BroadcastHandler<unknown>);
-    this.#handlers.set(channel.name, set);
-    if (first) await subscriber.subscribe(this.#wire(channel.name));
+    const listening =
+      this.#channels.get(channel.name) ??
+      this.#listen(subscriber, channel.name);
+    listening.handlers.add(handler as BroadcastHandler<unknown>);
+    await listening.subscribed;
   }
 
   async unsubscribe<Name extends string, T>(
     channel: Channel<Name, T>,
     handler: BroadcastHandler<T, Name>,
   ): Promise<void> {
-    const set = this.#handlers.get(channel.name);
-    if (!set) return;
-    set.delete(handler as BroadcastHandler<unknown>);
-    if (set.size > 0) return;
-    this.#handlers.delete(channel.name);
+    const listening = this.#channels.get(channel.name);
+    if (!listening) return;
+    listening.handlers.delete(handler as BroadcastHandler<unknown>);
+    if (listening.handlers.size > 0) return;
+    this.#channels.delete(channel.name);
     await this.#subscriber?.unsubscribe(this.#wire(channel.name));
   }
 
   override async stop(): Promise<void> {
-    const channels = [...this.#handlers.keys()];
-    this.#handlers.clear();
-    if (this.#subscriber && channels.length > 0) {
-      await this.#subscriber.unsubscribe(
+    const publisher = this.#publisher;
+    const subscriber = this.#subscriber;
+    const starting = this.#starting;
+    const channels = [...this.#channels.keys()];
+    this.#publisher = undefined;
+    this.#subscriber = undefined;
+    this.#started = undefined;
+    this.#starting = undefined;
+    this.#channels.clear();
+    if (starting) {
+      starting.abort(new Error('broadcast: stop() was called before ready'));
+      publisher?.disconnect();
+      subscriber?.disconnect();
+      return;
+    }
+    if (subscriber && channels.length > 0) {
+      await subscriber.unsubscribe(
         ...channels.map((channel) => this.#wire(channel)),
       );
     }
-    await this.#subscriber?.quit().catch((error: unknown) => {
+    await subscriber?.quit().catch((error: unknown) => {
       this.#logger.error(
         error instanceof Error ? error : new Error('broadcast: quit failed'),
       );
     });
-    await this.#publisher?.quit().catch((error: unknown) => {
+    await publisher?.quit().catch((error: unknown) => {
       this.#logger.error(
         error instanceof Error ? error : new Error('broadcast: quit failed'),
       );
     });
-    this.#subscriber = undefined;
-    this.#publisher = undefined;
-    this.#started = undefined;
   }
 
   async #open(): Promise<void> {
+    const starting = new AbortController();
     const publisher = this.#connect('publisher');
     const subscriber = this.#connect('subscriber');
+    this.#starting = starting;
     this.#publisher = publisher;
     this.#subscriber = subscriber;
     subscriber.on('message', (wire: string, raw: string) => {
       void this.#deliver(wire, raw);
     });
     try {
-      await Promise.all([waitForReady(publisher), waitForReady(subscriber)]);
+      await Promise.all([
+        untilReady(publisher, starting.signal),
+        untilReady(subscriber, starting.signal),
+      ]);
+      starting.signal.throwIfAborted();
     } catch (error) {
-      publisher.disconnect();
-      subscriber.disconnect();
-      if (this.#publisher === publisher) {
+      // stop() aborts and closes the clients itself. Otherwise a client ended.
+      if (this.#starting === starting) {
+        starting.abort(error);
         this.#publisher = undefined;
         this.#subscriber = undefined;
         this.#started = undefined;
+        this.#starting = undefined;
+        publisher.disconnect();
+        subscriber.disconnect();
       }
       throw error;
     }
+    this.#starting = undefined;
   }
 
   #connect(connection: 'publisher' | 'subscriber'): Redis {
@@ -125,6 +151,22 @@ export class RedisBroadcast extends Adapter(Broadcast) {
       this.#logger.error(error, { connection });
     });
     return redis;
+  }
+
+  #listen(subscriber: Redis, name: string): Listening {
+    const handlers = new Set<BroadcastHandler<unknown>>();
+    const subscribed = subscriber.subscribe(this.#wire(name)).then(
+      () => undefined,
+      (error: unknown) => {
+        if (this.#channels.get(name)?.handlers === handlers) {
+          this.#channels.delete(name);
+        }
+        throw error;
+      },
+    );
+    const listening = { handlers, subscribed };
+    this.#channels.set(name, listening);
+    return listening;
   }
 
   async #deliver(wire: string, raw: string): Promise<void> {
@@ -141,7 +183,7 @@ export class RedisBroadcast extends Adapter(Broadcast) {
       );
       return;
     }
-    const handlers = [...(this.#handlers.get(channel) ?? [])];
+    const handlers = [...(this.#channels.get(channel)?.handlers ?? [])];
     for (const handler of handlers) {
       try {
         await Promise.resolve(handler({ channel, payload }));

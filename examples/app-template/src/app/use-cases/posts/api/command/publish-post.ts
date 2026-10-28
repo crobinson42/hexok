@@ -2,7 +2,6 @@ import type { UseCase } from 'hexok';
 import { z } from 'zod';
 import type { PostEntity } from '../../../../../domain/entities/post.js';
 import { DomainError } from '../../../../../domain/errors/domain.js';
-import type { ClientEventPublisher } from '../../../../ports/events/client-event-publisher.js';
 import type { DomainEventPublisher } from '../../../../ports/events/domain-event-publisher.js';
 import type { PostRepository } from '../../../../ports/repos/post-repository.js';
 import { ApiUseCase, internalCall } from '../../../context.js';
@@ -26,7 +25,6 @@ export class PublishPost extends ApiUseCase('post.publish', {
     private readonly deps: {
       posts: PostRepository;
       domainEvents: DomainEventPublisher;
-      clientEvents: ClientEventPublisher;
     },
   ) {
     super();

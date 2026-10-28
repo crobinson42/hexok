@@ -10,7 +10,7 @@ import { InternalUseCase } from '../../context.js';
 /**
  * Internal use case. `execute` requires `InternalCtx` from `internalCall()`.
  * The guard rejects a context that does not carry this codebase's symbol.
- * API commands extend `ApiUseCase` and take `{ authToken?: string }` instead.
+ * API commands extend `ApiUseCase` and take `ApiCtx` instead.
  */
 export class EmailSubscribers extends InternalUseCase(
   'post.email-subscribers',

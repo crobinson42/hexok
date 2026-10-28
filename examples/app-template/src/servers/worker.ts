@@ -20,10 +20,9 @@ export async function main(): Promise<void> {
   /** Adapters connect in `start`. `register` and `subscribe` need that connection. */
   await runtime.scheduleCoordinator.start();
   await runtime.domainEventsQueue.start();
-  await runtime.clientEventsBroadcast.start();
 
   const notifications = await createNotifications(runtime);
-  const { domainEvents, clientEvents } = createPublishers(runtime);
+  const { domainEvents } = createPublishers(runtime);
 
   const emailSubscribers = new EmailSubscribers({
     subscribers: runtime.subscribers,
@@ -55,7 +54,6 @@ export async function main(): Promise<void> {
     new PublishDuePosts({
       posts: runtime.posts,
       domainEvents,
-      clientEvents,
       logger: runtime.logger,
     }).registration(),
   );

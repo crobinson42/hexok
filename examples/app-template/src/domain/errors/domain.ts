@@ -20,6 +20,8 @@ export const domainErrorDefs = {
   ChannelsRequired: { message: 'Choose email, sms, or both' },
   ChannelsInvalid: { message: 'channels must be email, sms, or both' },
   SmsRequiresPhone: { message: 'SMS requires a phone' },
+  Unauthenticated: { message: 'The token is not valid' },
+  SignInRequired: { message: 'This call needs a signed-in caller' },
 } satisfies ErrorMap;
 
 export class DomainError extends Errors('domain', domainErrorDefs) {}

@@ -11,7 +11,7 @@ npm workspaces with Turbo. Node 24 (`.nvmrc`), ESM only.
 - `packages/<capability>-<vendor>`: the adapter for that port, such as `queue-redis` or `email-resend`.
 - `packages/typebox`: TypeBox to Standard Schema.
 - `packages/docs`: the Astro Starlight site at crobinson42.github.io/hexok. Private.
-- `examples/app-template`: a blog API with HTTP, worker, and websocket processes on Redis. Private.
+- `examples/app-template`: a blog API with HTTP and worker processes on Redis. Private.
 - `examples/extend`: small overrides of primitives. Private.
 
 **Remember**: Code quality is not negotiable. Clear, maintainable code enables rapid development and confident refactoring.

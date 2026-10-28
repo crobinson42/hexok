@@ -51,10 +51,17 @@ export type StopCleanup<Clients> = (
   context: StopContext<Clients>,
 ) => Promise<void> | void;
 
+interface Connection {
+  /** `{ ...fields, adapter, connection }`, for every log about this client. */
+  readonly fields: Record<string, unknown>;
+  /** Removes the `end` listener. The `error` listener stays. */
+  readonly forget: () => void;
+}
+
 interface Session<Clients> {
   readonly clients: Clients;
-  /** Each open client, started or attached, and how to remove its `end` listener. */
-  readonly connections: Map<Redis, () => void>;
+  /** Each open client, started or attached. */
+  readonly connections: Map<Redis, Connection>;
   /** Cancels the readiness wait. */
   readonly opening: AbortController;
   /** Rejects guarded commands that are still pending. `stop()` aborts it after cleanup. */
@@ -296,9 +303,13 @@ export class RedisLifecycle<
     session.guard.abort(
       LifecycleError.Stopped(messages.closing(this.#adapter)),
     );
-    const clients = [...session.connections.keys()];
-    for (const client of clients) forget(session, client);
-    await Promise.all(clients.map((client) => this.#close(client, remaining)));
+    const closing = [...session.connections];
+    for (const [client] of closing) forget(session, client);
+    await Promise.all(
+      closing.map(([client, { fields }]) =>
+        this.#close(client, fields, remaining),
+      ),
+    );
     if (this.#session === session) this.#session = undefined;
     this.#state = 'stopped';
   }
@@ -324,7 +335,11 @@ export class RedisLifecycle<
    * A client that is not ready would hold `QUIT` in its offline queue until Redis returns, so it is disconnected.
    * A ready client whose Redis stopped answering never settles `QUIT`, so `QUIT` is bounded.
    */
-  async #close(client: Redis, remaining: () => number): Promise<void> {
+  async #close(
+    client: Redis,
+    fields: Record<string, unknown>,
+    remaining: () => number,
+  ): Promise<void> {
     if (client.status === 'ready' && remaining() > 0) {
       let closed = false;
       const quit = client.quit().then(
@@ -336,7 +351,7 @@ export class RedisLifecycle<
             error instanceof Error
               ? error
               : new Error(`${this.#adapter}: QUIT failed`),
-            { adapter: this.#adapter },
+            fields,
           );
         },
       );
@@ -352,26 +367,25 @@ export class RedisLifecycle<
     connection: string,
     fields: Record<string, unknown> | undefined,
   ): void {
+    const logFields = { ...fields, adapter: this.#adapter, connection };
     const onError = (error: Error) => {
-      this.#logger.error(error, {
-        ...fields,
-        adapter: this.#adapter,
-        connection,
-      });
+      this.#logger.error(error, logFields);
     };
     // This listener stays after stop(). ioredis can emit while a socket closes, and with no listener it prints "Unhandled error event".
     client.on('error', onError);
     // `state` stays `ready` when a client ends, such as when `retryStrategy` gives up, so the log is the only signal.
     const onEnd = () => {
       if (this.#session !== session || this.#state !== 'ready') return;
-      this.#logger.error(messages.endedAfterReady(this.#adapter, connection), {
-        ...fields,
-        adapter: this.#adapter,
-        connection,
-      });
+      this.#logger.error(
+        messages.endedAfterReady(this.#adapter, connection),
+        logFields,
+      );
     };
     client.on('end', onEnd);
-    session.connections.set(client, () => client.off('end', onEnd));
+    session.connections.set(client, {
+      fields: logFields,
+      forget: () => client.off('end', onEnd),
+    });
   }
 
   #guarded<T>(
@@ -457,7 +471,7 @@ function assertDuration(adapter: string, name: string, ms: number): void {
 
 /** Removes the client's `end` listener and drops it from the session. Its `error` listener stays. */
 function forget(session: Session<unknown>, client: Redis): void {
-  session.connections.get(client)?.();
+  session.connections.get(client)?.forget();
   session.connections.delete(client);
 }
 

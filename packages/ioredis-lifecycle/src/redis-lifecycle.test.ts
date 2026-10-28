@@ -734,13 +734,27 @@ describe('stop', () => {
     expect(vi.getTimerCount()).toBe(0);
   });
 
-  it('stop logs a failed QUIT and disconnects', async () => {
+  it('stop logs a failed QUIT with its connection and disconnects', async () => {
     const { lifecycle, logger, fake } = await started();
+    const blocking = new FakeRedis('ready');
+    lifecycle.attach({
+      operation: 'subscribe',
+      connection: 'blocking',
+      open: () => blocking.redis,
+      fields: { topic: 'jobs' },
+    });
     fake.quitMode = 'fail';
+    blocking.quitMode = 'fail';
     await lifecycle.stop();
     expect(fake.disconnects).toBe(1);
     expect(logger.error).toHaveBeenCalledWith(new Error('quit'), {
       adapter: 'test',
+      connection: 'main',
+    });
+    expect(logger.error).toHaveBeenCalledWith(new Error('quit'), {
+      topic: 'jobs',
+      adapter: 'test',
+      connection: 'blocking',
     });
   });
 

@@ -64,8 +64,8 @@ Every entry carries `adapter: 'broadcast'`. `connection` is `publisher` or `subs
 
 | Event | Level | Fields |
 | --- | --- | --- |
-| A connection error, such as a failed connect attempt during `start()` or an outage | `error` | `adapter`, `connection` |
-| `QUIT` fails during `stop()` | `error` | `adapter` |
+| A connection error, such as a failed connect attempt during `start()` or an outage, or a connection that ended after `start()` | `error` | `adapter`, `connection` |
+| `QUIT` fails during `stop()` | `error` | `adapter`, `connection` |
 | A message fails to decode. The message is dropped. | `error` | `adapter`, `channel` |
 | A handler throws or rejects | `error` | `adapter`, `channel` |
 
@@ -86,12 +86,12 @@ Errors returned to the caller are not logged. This adapter runs no background co
 | Option | Default | Why |
 | --- | --- | --- |
 | `redis` | required | A URL or ioredis options for both connections. `maxRetriesPerRequest` is `null`, so a command waits through an outage. Options you pass win. |
+| `stopTimeoutMs` | `1000` | The total time `stop()` may take. Pub/sub holds no state to drain, so stop only needs time for `QUIT`. |
+| `startTimeoutMs` | unset | Unset, `start()` waits for Redis. Set it under an orchestrator, so `start()` rejects with `StartTimeout` and the process restarts. |
 | `channelPrefix` | `'hexok:broadcast:'` | Redis pub/sub ignores the DB index, so the prefix keeps apps that share a Redis apart. |
 | `encode` | `JSON.stringify` | Turns a payload into the message string. |
 | `decode` | `JSON.parse` | Turns a message string into a payload. A decode failure is logged and the message is dropped. |
 | `logger` | no-op | A structural `LogSink`. `@hexok/logger` and `console` fit it. |
-| `stopTimeoutMs` | `1000` | The total time `stop()` may take. Pub/sub holds no state to drain, so stop only needs time for `QUIT`. |
-| `startTimeoutMs` | unset | Rejects `start()` with `StartTimeout` when a connection is not ready in time. |
 
 On Kubernetes, a pod has `terminationGracePeriodSeconds` (30 by default) between `SIGTERM` and `SIGKILL`. An app stops its adapters one after another, so the server close plus every adapter's `stopTimeoutMs` must fit inside it. This adapter's default is 1000 ms.
 

@@ -66,7 +66,7 @@ export class RedisBroadcast extends Adapter(Broadcast) {
     });
   }
 
-  /** `ready` from `start()` until `stop()`, even while Redis is down. Use it to gate traffic, not as a Redis health check. */
+  /** `ready` from `start()` until `stop()`, even while Redis is down. Gate traffic on it, not Redis health. */
   get state(): LifecycleState {
     return this.#lifecycle.state;
   }

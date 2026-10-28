@@ -271,22 +271,26 @@ const lifecycle = new RedisLifecycle({
   logger: { debug() {}, info() {}, warn() {}, error: (error, fields) => logged.push(fields) },
 });
 const error = await lifecycle
-  .start(() => ({ main: openRedis({ host: '127.0.0.1', port: Number(process.env.PORT) }) }))
+  .start(() => ({
+    main: openRedis({ host: '127.0.0.1', port: Number(process.env.PORT), disconnectTimeout: 200 }),
+  }))
   .catch((error) => error);
 await lifecycle.stop();
-console.log(JSON.stringify({ code: error.code, logged }));
+console.log(JSON.stringify({ code: error.code, logged, stoppedAt: Date.now() }));
 `,
       { env: { PORT: String(proxy.port) } },
     );
     expect(result.stderr).toBe('');
     expect(result.code).toBe(0);
-    const { code, logged } = JSON.parse(result.stdout) as {
+    const { code, logged, stoppedAt } = JSON.parse(result.stdout) as {
       code: string;
       logged: unknown[];
+      stoppedAt: number;
     };
     expect(code).toBe('StartTimeout');
     expect(logged.length).toBeGreaterThan(0);
     expect(logged[0]).toEqual({ adapter: 'child', connection: 'main' });
-    expect(result.ms).toBeLessThan(3000);
+    // A reconnecting client's disconnect waits disconnectTimeout on its closed socket. Nothing else holds the process.
+    expect(result.exitedAt - stoppedAt).toBeLessThan(200 + 500);
   });
 });

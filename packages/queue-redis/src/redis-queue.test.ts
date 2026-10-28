@@ -140,10 +140,17 @@ class FakeRedis extends EventEmitter {
   /** Runs the consumer release script with this fake's own XPENDING and DELCONSUMER, as Redis would. */
   readonly scripts: unknown[] = [];
 
+  /** Keys, `key\0group`, and `key\0group\0consumer` that another client removed. A script on them replies -1. */
+  readonly gone = new Set<string>();
+
   async eval(script: unknown, ...args: unknown[]): Promise<unknown> {
     this.calls.push(['eval', ...args]);
     this.scripts.push(script);
     if (script === ackDeletedScript) return [];
+    const path = args.slice(1, 4).map(String);
+    for (let depth = 1; depth <= 3; depth += 1) {
+      if (this.gone.has(path.slice(0, depth).join('\0'))) return -1;
+    }
     if (script === destroyIdleGroupScript) {
       const [, key, group] = args;
       if (this.#seen(['CONSUMERS', key, group]).length > 0) return 0;
@@ -2081,13 +2088,20 @@ describe('RedisQueue reliability', () => {
     await queue.stop();
   });
 
-  it('the release script reply means deleted, kept, or a failure', async () => {
-    const replies: unknown[] = [1, 0, 'OK'];
+  it('the release script reply means removed, kept, gone, or a failure', async () => {
+    const replies: unknown[] = [1, 0, -1, 'OK'];
     const commands = {
       eval: async () => replies.shift(),
     } as unknown as import('ioredis').Redis;
-    await expect(releaseConsumer(commands, 'k', 'g', 'c')).resolves.toBe(true);
-    await expect(releaseConsumer(commands, 'k', 'g', 'c')).resolves.toBe(false);
+    await expect(releaseConsumer(commands, 'k', 'g', 'c')).resolves.toBe(
+      'removed',
+    );
+    await expect(releaseConsumer(commands, 'k', 'g', 'c')).resolves.toBe(
+      'kept',
+    );
+    await expect(releaseConsumer(commands, 'k', 'g', 'c')).resolves.toBe(
+      'gone',
+    );
     await expect(releaseConsumer(commands, 'k', 'g', 'c')).rejects.toThrow(
       'queue: the consumer release script replied unexpectedly',
     );
@@ -2207,6 +2221,57 @@ describe('RedisQueue reliability', () => {
 
     expect(commands.calls.some((call) => call[0] === 'del')).toBe(false);
     expect(report.streamsDeleted).toEqual([]);
+    await queue.stop();
+  });
+
+  it('maintain does not report or log what another run removed first', async () => {
+    const now = Date.now();
+    const old = `${now - 60_000}-0`;
+    const logs = recordingLogger();
+    const queue = new RedisQueue({
+      redis: 'redis://127.0.0.1:6379',
+      logger: logs.sink,
+    });
+    await queue.start();
+    const commands = FakeRedis.instances[0];
+    if (!commands) throw new Error('missing commands client');
+    const key = 'hexok:queue:jobs';
+    scriptStream(commands, key, {
+      length: 1,
+      lastGeneratedId: old,
+      groups: 1,
+      firstId: old,
+    });
+    scriptGroup(commands, key, {
+      name: 'billing',
+      consumers: 1,
+      pending: 0,
+      lastDeliveredId: old,
+    });
+    scriptConsumer(commands, key, 'billing', {
+      name: 'hexok:1:abc',
+      pending: 0,
+      idle: 50_000,
+    });
+    commands.gone.add(key);
+
+    const report = await queue.maintain({
+      dryRun: false,
+      topics: ['jobs'],
+      idleConsumerMs: 1000,
+      dropIdleGroups: { idleMs: 1000 },
+      dropIdleStreams: { idleMs: 1000 },
+    });
+
+    expect(commands.scripts).toEqual([
+      releaseConsumerScript,
+      destroyIdleGroupScript,
+      deleteIdleStreamScript,
+    ]);
+    expect(report.consumersRemoved).toEqual([]);
+    expect(report.groupsDestroyed).toEqual([]);
+    expect(report.streamsDeleted).toEqual([]);
+    expect(logs.calls).toEqual([]);
     await queue.stop();
   });
 

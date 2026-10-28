@@ -679,8 +679,12 @@ console.log(JSON.stringify({ growth, total: count * payload.length }));
       key,
       '>',
     );
-    expect(await destroyIdleGroup(admin, key, 'busy')).toBe(false);
-    expect(await destroyIdleGroup(admin, key, 'idle')).toBe(true);
+    expect(await destroyIdleGroup(admin, key, 'busy')).toBe('kept');
+    expect(await destroyIdleGroup(admin, key, 'idle')).toBe('removed');
+    expect(await destroyIdleGroup(admin, key, 'idle')).toBe('gone');
+    expect(await destroyIdleGroup(admin, `${key}:missing`, 'idle')).toBe(
+      'gone',
+    );
     const groups = (await admin.xinfo('GROUPS', key)) as unknown[][];
     expect(groups.map((group) => group[1])).toEqual(['busy']);
     await admin.del(key);
@@ -698,9 +702,10 @@ console.log(JSON.stringify({ growth, total: count * payload.length }));
     await admin.xgroup('CREATE', grouped, 'workers', '0');
     await admin.xadd(fresh, '*', 'payload', '1');
     await admin.xadd(idle, `${old}-0`, 'payload', '1');
-    expect(await deleteIdleStream(admin, grouped, cutoff)).toBe(false);
-    expect(await deleteIdleStream(admin, fresh, cutoff)).toBe(false);
-    expect(await deleteIdleStream(admin, idle, cutoff)).toBe(true);
+    expect(await deleteIdleStream(admin, grouped, cutoff)).toBe('kept');
+    expect(await deleteIdleStream(admin, fresh, cutoff)).toBe('kept');
+    expect(await deleteIdleStream(admin, idle, cutoff)).toBe('removed');
+    expect(await deleteIdleStream(admin, idle, cutoff)).toBe('gone');
     expect(await admin.exists(grouped, fresh, idle)).toBe(2);
     await admin.del(grouped, fresh);
   });
@@ -730,8 +735,15 @@ console.log(JSON.stringify({ growth, total: count * payload.length }));
       key,
       '>',
     );
-    expect(await releaseConsumer(admin, key, 'workers', 'busy')).toBe(false);
-    expect(await releaseConsumer(admin, key, 'workers', 'idle')).toBe(true);
+    expect(await releaseConsumer(admin, key, 'workers', 'busy')).toBe('kept');
+    expect(await releaseConsumer(admin, key, 'workers', 'idle')).toBe(
+      'removed',
+    );
+    expect(await releaseConsumer(admin, key, 'workers', 'idle')).toBe('gone');
+    expect(await releaseConsumer(admin, key, 'missing', 'idle')).toBe('gone');
+    expect(
+      await releaseConsumer(admin, `${key}:missing`, 'workers', 'idle'),
+    ).toBe('gone');
     expect(await consumersOf(admin, key, 'workers')).toEqual([
       { name: 'busy', pending: 1 },
     ]);

@@ -4,6 +4,7 @@ import {
   deleteIdleStream,
   destroyIdleGroup,
   releaseConsumer,
+  type ScriptOutcome,
 } from './scripts.js';
 
 export interface RedisQueueMaintainOptions {
@@ -269,8 +270,8 @@ async function processKey(
       const deleted = await input.run((commands) =>
         deleteIdleStream(commands, key, cutoff),
       );
-      // It gained a group or an entry after XINFO, so it stays.
-      if (!deleted) return;
+      // It gained a group or an entry after XINFO, or another run deleted it first.
+      if (deleted !== 'removed') return;
     } catch (error) {
       throwIfStopped(error);
       input.logger.error(
@@ -283,6 +284,7 @@ async function processKey(
   report.streamsDeleted.push({ topic, length: stream.length });
 }
 
+/** Resolves `true` when the group no longer exists after this run. */
 async function processGroup(
   input: MaintainInput,
   report: ReportBuilder,
@@ -318,7 +320,7 @@ async function processGroup(
         continue;
       }
       if (!report.dryRun) {
-        let released: boolean;
+        let released: ScriptOutcome;
         try {
           released = await input.run((commands) =>
             releaseConsumer(commands, key, group.name, consumer.name),
@@ -334,7 +336,12 @@ async function processGroup(
           continue;
         }
         // It took a pending entry after XINFO, so it stays and still counts as a consumer of the group.
-        if (!released) continue;
+        if (released === 'kept') continue;
+        // Another run removed it first. It no longer counts, and this run does not report it.
+        if (released === 'gone') {
+          remaining -= 1;
+          continue;
+        }
       }
       report.consumersRemoved.push({
         topic,
@@ -367,7 +374,9 @@ async function processGroup(
         destroyIdleGroup(commands, key, group.name),
       );
       // It gained a consumer or a pending entry after XINFO, so it stays and still counts as a group of the stream.
-      if (!destroyed) return false;
+      if (destroyed === 'kept') return false;
+      // Another run removed it first. It no longer counts, and this run does not report it.
+      if (destroyed === 'gone') return true;
     } catch (error) {
       throwIfStopped(error);
       input.logger.error(

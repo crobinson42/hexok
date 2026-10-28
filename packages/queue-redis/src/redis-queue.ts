@@ -447,12 +447,11 @@ export class RedisQueue extends Adapter(Queue) {
   async #releaseConsumer(sub: Subscription, run: CommandRun): Promise<void> {
     if (sub.inflight.size > 0) return;
     try {
-      await run(({ commands }) =>
+      await run(async ({ commands }) => {
         // A client that is not ready holds the script in its offline queue until stop() gives up.
-        commands.status === 'ready'
-          ? releaseConsumer(commands, sub.key, sub.group, sub.consumer)
-          : Promise.resolve(false),
-      );
+        if (commands.status !== 'ready') return;
+        await releaseConsumer(commands, sub.key, sub.group, sub.consumer);
+      });
     } catch (error) {
       this.#logFailure(
         error,

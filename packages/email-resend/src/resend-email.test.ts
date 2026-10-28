@@ -1,5 +1,7 @@
 import { EmailError, type EmailMessage } from '@hexok/email';
+import { Resend } from 'resend';
 import { describe, expect, it } from 'vitest';
+import type { LogSink } from './log-sink.js';
 import type { ParkInput } from './park.js';
 import { ResendEmailSender, type ResendLike } from './resend-email.js';
 import { retryOptions } from './retry.js';
@@ -13,6 +15,60 @@ const base: EmailMessage = {
   idempotencyKey: 'key-1',
   tags: { env: 'test' },
 };
+
+const address = 'user@example.com';
+const code = '482913';
+const providerText = `Cannot send to ${address}: Your code is ${code}`;
+
+const secret: EmailMessage = {
+  to: [address],
+  cc: ['cc@example.com'],
+  from: { email: 'from@example.com' },
+  subject: `Your code is ${code}`,
+  text: `Your code is ${code}`,
+  idempotencyKey: 'key-otp',
+  sensitive: true,
+};
+
+function spyLogger(): LogSink & { calls: unknown[][] } {
+  const calls: unknown[][] = [];
+  return {
+    calls,
+    debug: (...args) => calls.push(['debug', ...args]),
+    info: (...args) => calls.push(['info', ...args]),
+    warn: (...args) => calls.push(['warn', ...args]),
+    error: (...args) => calls.push(['error', ...args]),
+  };
+}
+
+/** `JSON.stringify(new Error())` is `{}`, so errors are expanded. */
+function serialize(value: unknown): string {
+  return JSON.stringify(value, (_key, field: unknown) =>
+    field instanceof Error
+      ? {
+          ...field,
+          name: field.name,
+          message: field.message,
+          stack: field.stack,
+        }
+      : field,
+  );
+}
+
+function failing(statusCode: number, name: string): ResendLike {
+  return {
+    emails: {
+      async send() {
+        return {
+          data: null,
+          error: { message: providerText, name, statusCode },
+        };
+      },
+    },
+  };
+}
+
+const noWait = { retries: 1, minTimeout: 0, maxTimeout: 0, randomize: false };
 
 describe('ResendEmailSender', () => {
   it('retries 429 and does not retry 422', async () => {
@@ -86,9 +142,35 @@ describe('ResendEmailSender', () => {
       from: 'From <from@example.com>',
       to: ['delivered@resend.dev'],
       cc: ['delivered@resend.dev'],
+      text: 'body',
       tags: [{ name: 'env', value: 'test' }],
     });
+    expect(payload).not.toHaveProperty('html');
     expect(options).toEqual({ idempotencyKey: 'key-1' });
+  });
+
+  it('sends attachments', async () => {
+    let payload: unknown;
+    const client: ResendLike = {
+      emails: {
+        async send(body) {
+          payload = body;
+          return { data: { id: 'email_3' }, error: null };
+        },
+      },
+    };
+    const data = Buffer.from('report');
+    await new ResendEmailSender({ client }).send({
+      ...base,
+      attachments: [
+        { data, filename: 'report.txt', contentType: 'text/plain' },
+      ],
+    });
+    expect(payload).toMatchObject({
+      attachments: [
+        { content: data, filename: 'report.txt', contentType: 'text/plain' },
+      ],
+    });
   });
 
   it('parks an exhausted outage once and does not park a rejection', async () => {
@@ -199,5 +281,96 @@ describe('ResendEmailSender', () => {
     await expect(sender.send(base)).rejects.toMatchObject({
       code: 'Unavailable',
     });
+  });
+
+  it('accepts the resend SDK client without a cast', () => {
+    const sender = new ResendEmailSender({ client: new Resend('re_test') });
+    expect(sender).toBeInstanceOf(ResendEmailSender);
+  });
+
+  it('keeps provider text and a sensitive message out of logs, errors, and quarantine', async () => {
+    const cases: Array<[number, string, string]> = [
+      [500, 'internal_server_error', 'Unavailable'],
+      [429, 'rate_limit_exceeded', 'RateLimited'],
+    ];
+    for (const [statusCode, name, expected] of cases) {
+      const logger = spyLogger();
+      const parked: ParkInput[] = [];
+      const sender = new ResendEmailSender({
+        client: failing(statusCode, name),
+        logger,
+        quarantine: {
+          async park(input) {
+            parked.push(input);
+            return { id: 'q1' };
+          },
+        },
+        retry: noWait,
+      });
+      const thrown = await sender.send(secret).catch((error) => error);
+      expect(thrown).toMatchObject({ code: expected });
+      expect(parked).toHaveLength(1);
+      expect(parked[0]).toMatchObject({
+        subject: 'key-otp',
+        attempts: 2,
+        error: { code: expected, catalog: 'email' },
+        context: { adapter: 'resend' },
+      });
+      expect(parked[0]?.payload).toEqual({
+        sensitive: true,
+        recipientCount: 2,
+        attachmentCount: 0,
+      });
+      expect(logger.calls).toContainEqual([
+        'warn',
+        'email: resend attempt failed',
+        { idempotencyKey: 'key-otp', status: statusCode, attempt: 1 },
+      ]);
+      for (const leaked of [address, code]) {
+        expect(serialize(logger.calls)).not.toContain(leaked);
+        expect(serialize(thrown)).not.toContain(leaked);
+        expect(serialize(parked)).not.toContain(leaked);
+      }
+    }
+  });
+
+  it('rejects a 4xx with the default message', async () => {
+    for (const message of [base, secret]) {
+      const logger = spyLogger();
+      const thrown = await new ResendEmailSender({
+        client: failing(422, 'validation_error'),
+        logger,
+        retry: noWait,
+      })
+        .send(message)
+        .catch((error) => error);
+      expect(thrown).toMatchObject({
+        code: 'Rejected',
+        message: 'Email was rejected',
+      });
+      for (const leaked of [address, code]) {
+        expect(serialize(logger.calls)).not.toContain(leaked);
+        expect(serialize(thrown)).not.toContain(leaked);
+      }
+    }
+  });
+
+  it('exposes provider text only for a message that is not sensitive', async () => {
+    const sender = new ResendEmailSender({
+      client: failing(422, 'validation_error'),
+      exposeProviderErrors: true,
+      retry: noWait,
+    });
+    await expect(sender.send(base)).rejects.toMatchObject({
+      code: 'Rejected',
+      message: providerText,
+    });
+    const thrown = await sender.send(secret).catch((error) => error);
+    expect(thrown).toMatchObject({
+      code: 'Rejected',
+      message: 'Email was rejected',
+    });
+    expect(serialize(thrown)).not.toContain(address);
+    expect(serialize(thrown)).not.toContain(code);
   });
 });

@@ -15,21 +15,27 @@ import {
 } from './park.js';
 import { type RetrySettings, retryOptions } from './retry.js';
 
-export interface ResendEmailPayload {
+interface ResendEmailFields {
   from: string;
   to: string[];
   cc?: string[];
   bcc?: string[];
   replyTo?: string;
   subject: string;
-  text?: string;
-  html?: string;
   attachments?: Array<{
-    content: string;
+    content: string | Buffer;
     filename: string;
+    contentType?: string;
   }>;
   tags?: Array<{ name: string; value: string }>;
 }
+
+type ResendEmailBody =
+  | { html: string; text?: string }
+  | { text: string; html?: string };
+
+/** The SDK requires `html` or `text`. The union keeps the real `Resend` client assignable. */
+export type ResendEmailPayload = ResendEmailFields & ResendEmailBody;
 
 export interface ResendLike {
   emails: {
@@ -53,11 +59,13 @@ export interface ResendEmailSenderConfig {
   readonly logger?: LogSink;
   readonly retry?: Partial<RetrySettings>;
   readonly quarantine?: ParkSink;
+  /** Puts Resend's error text in `Rejected`. Off by default because it can hold the recipient. A `sensitive` message never exposes it. */
+  readonly exposeProviderErrors?: boolean;
 }
 
 function terminal(
   kind: 'rejected' | 'unavailable',
-  message: string,
+  message?: string,
 ): AbortError {
   const error = new Error(message);
   Object.assign(error, { emailKind: kind });
@@ -75,6 +83,13 @@ function emailKind(error: unknown): 'rejected' | 'unavailable' | undefined {
 function formatFrom(message: EmailMessage): string {
   const name = message.from.name;
   return name ? `${name} <${message.from.email}>` : message.from.email;
+}
+
+function emailBody(message: EmailMessage): ResendEmailBody {
+  const { text, html } = message;
+  if (html?.trim()) return text ? { html, text } : { html };
+  if (text?.trim()) return html ? { text, html } : { text };
+  throw EmailError.InvalidMessage();
 }
 
 function addresses(
@@ -102,9 +117,9 @@ function shouldRetry(error: {
 function mapSendError(error: unknown) {
   const kind = emailKind(error);
   if (kind === 'rejected') {
-    return EmailError.Rejected(
-      error instanceof Error ? error.message : 'Email was rejected',
-    );
+    return error instanceof Error && error.message !== ''
+      ? EmailError.Rejected(error.message)
+      : EmailError.Rejected();
   }
   if (kind === 'unavailable') return EmailError.Unavailable();
   const status = statusOf(error);
@@ -129,6 +144,7 @@ export class ResendEmailSender extends Adapter(EmailSender) {
   readonly #logger: LogSink;
   readonly #retry: Partial<RetrySettings> | undefined;
   readonly #quarantine: ParkSink | undefined;
+  readonly #exposeProviderErrors: boolean;
 
   constructor(config: ResendEmailSenderConfig) {
     super();
@@ -137,11 +153,13 @@ export class ResendEmailSender extends Adapter(EmailSender) {
     this.#logger = config.logger ?? noopSink;
     this.#retry = config.retry;
     this.#quarantine = config.quarantine;
+    this.#exposeProviderErrors = config.exposeProviderErrors ?? false;
   }
 
   async send(message: EmailMessage): Promise<{ id: string }> {
     assertEmailMessage(message);
     const payload: ResendEmailPayload = {
+      ...emailBody(message),
       from: formatFrom(message),
       to: addresses(message.to, this.#sandbox) ?? [],
       subject: message.subject,
@@ -151,14 +169,20 @@ export class ResendEmailSender extends Adapter(EmailSender) {
     if (cc) payload.cc = cc;
     if (bcc) payload.bcc = bcc;
     if (message.replyTo) payload.replyTo = message.replyTo;
-    if (message.text) payload.text = message.text;
-    if (message.html) payload.html = message.html;
+    if (message.attachments) {
+      payload.attachments = message.attachments.map((attachment) => ({
+        content: attachment.data,
+        filename: attachment.filename,
+        contentType: attachment.contentType,
+      }));
+    }
     if (message.tags) {
       payload.tags = Object.entries(message.tags).map(([name, value]) => ({
         name,
         value,
       }));
     }
+    const expose = this.#exposeProviderErrors && !message.sensitive;
     const options = message.idempotencyKey
       ? { idempotencyKey: message.idempotencyKey }
       : undefined;
@@ -173,7 +197,7 @@ export class ResendEmailSender extends Adapter(EmailSender) {
           }
           if (result.error) {
             if (shouldRetry(result.error)) {
-              const retryable = new Error(result.error.message);
+              const retryable = new Error('email: resend attempt failed');
               retryable.name = result.error.name;
               if (result.error.statusCode !== null) {
                 Object.assign(retryable, {
@@ -182,7 +206,10 @@ export class ResendEmailSender extends Adapter(EmailSender) {
               }
               throw retryable;
             }
-            throw terminal('rejected', result.error.message);
+            throw terminal(
+              'rejected',
+              expose ? result.error.message : undefined,
+            );
           }
           if (!result.data?.id) throw terminal('unavailable', 'missing id');
           return result.data.id;

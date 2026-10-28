@@ -23,6 +23,8 @@ export interface EmailMessage {
   readonly attachments?: readonly EmailAttachment[];
   readonly tags?: Readonly<Record<string, string>>;
   readonly idempotencyKey?: string;
+  /** Keeps recipients, subject, and body out of quarantine and logs. Use it for one-time codes and reset links. */
+  readonly sensitive?: boolean;
 }
 
 export interface EmailReceipt {

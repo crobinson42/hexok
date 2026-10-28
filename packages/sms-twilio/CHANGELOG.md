@@ -1,5 +1,17 @@
 # @hexok/sms-twilio
 
+## 0.2.0
+
+### Minor Changes
+
+- [#9](https://github.com/crobinson42/hexok/pull/9) [`970d7dd`](https://github.com/crobinson42/hexok/commit/970d7dd03e374631a7d9c7de99a1a148b068fc67) Thanks [@crobinson42](https://github.com/crobinson42)! - A failed send logs only `code`, `status`, and `attempt`, a failed park logs only the error `name`, and `Rejected` uses its catalog message. `exposeProviderErrors` restores the raw errors, except on a `sensitive` message, which parks `{ sensitive, bodyLength }` instead of `to` and `body`.
+
+### Patch Changes
+
+- Updated dependencies [[`45b26c8`](https://github.com/crobinson42/hexok/commit/45b26c83eb06e4b1320f294e6f8fc430d432c992), [`a2ef655`](https://github.com/crobinson42/hexok/commit/a2ef655e3219fc91ae783f8f662107359e1bc253), [`ef5febe`](https://github.com/crobinson42/hexok/commit/ef5febef9cdb084c346ac4f34953f72cd030592d)]:
+  - hexok@2.2.1
+  - @hexok/sms@0.2.0
+
 ## 0.1.0
 
 ### Minor Changes

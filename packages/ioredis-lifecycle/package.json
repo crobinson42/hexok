@@ -1,6 +1,6 @@
 {
   "name": "@hexok/ioredis-lifecycle",
-  "version": "0.0.0",
+  "version": "0.1.0",
   "description": "Shared ioredis connection lifecycle for hexok Redis adapters.",
   "type": "module",
   "license": "MIT",
@@ -41,7 +41,7 @@
     "clean": "rm -rf dist *.tsbuildinfo"
   },
   "dependencies": {
-    "hexok": "^2.2.0"
+    "hexok": "^2.2.1"
   },
   "peerDependencies": {
     "ioredis": "^5"

@@ -1,6 +1,6 @@
 {
   "name": "@hexok/schedule-coordinator-redis",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Redis lock adapter for the hexok ScheduleCoordinator port.",
   "type": "module",
   "license": "MIT",
@@ -41,10 +41,10 @@
     "clean": "rm -rf dist *.tsbuildinfo"
   },
   "dependencies": {
-    "@hexok/ioredis-lifecycle": "^0.0.0",
+    "@hexok/ioredis-lifecycle": "^0.1.0",
     "@hexok/schedule-coordinator": "^0.1.0",
     "cron": "^4.3.4",
-    "hexok": "^2.2.0",
+    "hexok": "^2.2.1",
     "ioredis": "^5"
   },
   "devDependencies": {

@@ -1,6 +1,6 @@
 {
   "name": "@hexok/queue",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Queue port for hexok.",
   "type": "module",
   "license": "MIT",
@@ -40,6 +40,6 @@
     "clean": "rm -rf dist *.tsbuildinfo"
   },
   "dependencies": {
-    "hexok": "^2.2.0"
+    "hexok": "^2.2.1"
   }
 }

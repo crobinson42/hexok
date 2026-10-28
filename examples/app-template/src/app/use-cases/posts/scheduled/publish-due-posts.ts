@@ -1,6 +1,5 @@
 import type { Logger } from '@hexok/logger';
 import type { UseCase } from 'hexok';
-import type { ClientEventPublisher } from '../../../ports/events/client-event-publisher.js';
 import type { DomainEventPublisher } from '../../../ports/events/domain-event-publisher.js';
 import type { PostRepository } from '../../../ports/repos/post-repository.js';
 import type { InternalUseCase } from '../../context.js';
@@ -23,7 +22,6 @@ export class PublishDuePosts extends ScheduledUseCase('post.publish-due', {
     private readonly deps: {
       posts: PostRepository;
       domainEvents: DomainEventPublisher;
-      clientEvents: ClientEventPublisher;
       logger: Logger;
     },
   ) {

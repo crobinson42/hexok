@@ -1,4 +1,3 @@
-import { RedisBroadcast } from '@hexok/broadcast-redis';
 import type { EmailAddress, EmailSender } from '@hexok/email';
 import { MailgunEmailSender, type MailgunLike } from '@hexok/email-mailgun';
 import { ResendEmailSender, type ResendLike } from '@hexok/email-resend';
@@ -11,8 +10,11 @@ import { RedisQueue } from '@hexok/queue-redis';
 import { RedisScheduleCoordinator } from '@hexok/schedule-coordinator-redis';
 import type { SmsSender } from '@hexok/sms';
 import { type TwilioLike, TwilioSmsSender } from '@hexok/sms-twilio';
-import { connectRedis } from '../infra/clients/redis-client.js';
-import { BroadcastClientEventPublisher } from '../infra/events/broadcasters/client-events-channel.js';
+import { StaticTokenAuthenticator } from '../infra/auth/static-token-authenticator.js';
+import {
+  connectRedis,
+  type RedisClient,
+} from '../infra/clients/redis-client.js';
 import { QueueDomainEventPublisher } from '../infra/events/queues/domain-events.js';
 import { RedisPosts } from '../infra/repos/redis-posts.js';
 import { RedisSubscribers } from '../infra/repos/redis-subscribers.js';
@@ -159,9 +161,10 @@ export type Runtime = {
   posts: RedisPosts;
   subscribers: RedisSubscribers;
   domainEventsQueue: RedisQueue;
-  clientEventsBroadcast: RedisBroadcast;
   scheduleCoordinator: RedisScheduleCoordinator;
-  /** Stop the queue, broadcast, and coordinator, then close Redis. */
+  /** Checks bearer tokens. Only HTTP reads tokens. */
+  authenticator: StaticTokenAuthenticator;
+  /** Stop the queue and coordinator, then close Redis. */
   stop(): Promise<void>;
 };
 
@@ -177,11 +180,6 @@ export async function createRuntime(): Promise<Runtime> {
     logger: sink,
     quarantine,
   });
-  const clientEventsBroadcast = new RedisBroadcast({
-    redis: url,
-    channelPrefix: 'client-events:',
-    logger: sink,
-  });
   const scheduleCoordinator = new RedisScheduleCoordinator({
     redis: url,
     keyPrefix: 'domain:schedule:',
@@ -193,30 +191,41 @@ export async function createRuntime(): Promise<Runtime> {
     posts: new RedisPosts({ redis }),
     subscribers: new RedisSubscribers({ redis }),
     domainEventsQueue,
-    clientEventsBroadcast,
     scheduleCoordinator,
+    authenticator: createAuthenticator(redis),
     async stop() {
       await scheduleCoordinator.stop();
       await domainEventsQueue.stop();
-      await clientEventsBroadcast.stop();
       await redis.close();
     },
   };
 }
 
-/** The ports use cases publish domain and client events through. */
+/** The port use cases publish domain events through. */
 export function createPublishers(runtime: Runtime): {
   domainEvents: QueueDomainEventPublisher;
-  clientEvents: BroadcastClientEventPublisher;
 } {
   return {
     domainEvents: new QueueDomainEventPublisher({
       queue: runtime.domainEventsQueue,
     }),
-    clientEvents: new BroadcastClientEventPublisher({
-      broadcast: runtime.clientEventsBroadcast,
-    }),
   };
+}
+
+/**
+ * `AUTH_TOKENS` is `userId=token` pairs, comma separated. Unset means no
+ * token checks out, so every caller is anonymous. Revoked tokens are listed
+ * in Redis.
+ */
+function createAuthenticator(redis: RedisClient): StaticTokenAuthenticator {
+  const tokens = new Map<string, string>();
+  for (const pair of (process.env.AUTH_TOKENS ?? '').split(',')) {
+    const at = pair.indexOf('=');
+    const userId = pair.slice(0, at).trim();
+    const token = pair.slice(at + 1).trim();
+    if (at > 0 && userId !== '' && token !== '') tokens.set(token, userId);
+  }
+  return new StaticTokenAuthenticator({ tokens, redis });
 }
 
 /**

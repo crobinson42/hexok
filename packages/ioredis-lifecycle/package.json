@@ -1,0 +1,53 @@
+{
+  "name": "@hexok/ioredis-lifecycle",
+  "version": "0.0.0",
+  "description": "Shared ioredis connection lifecycle for hexok Redis adapters.",
+  "type": "module",
+  "license": "MIT",
+  "sideEffects": false,
+  "keywords": [
+    "hexok",
+    "redis",
+    "ioredis"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/crobinson42/hexok.git",
+    "directory": "packages/ioredis-lifecycle"
+  },
+  "homepage": "https://crobinson42.github.io/hexok/",
+  "bugs": {
+    "url": "https://github.com/crobinson42/hexok/issues"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "default": "./dist/index.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc -b",
+    "test": "vitest run",
+    "type-check": "tsc --noEmit -p tsconfig.check.json",
+    "lint": "biome check .",
+    "clean": "rm -rf dist *.tsbuildinfo"
+  },
+  "dependencies": {
+    "hexok": "^2.2.0"
+  },
+  "peerDependencies": {
+    "ioredis": "^5"
+  },
+  "devDependencies": {
+    "@hexok/test-redis": "0.0.0",
+    "ioredis": "^5"
+  }
+}

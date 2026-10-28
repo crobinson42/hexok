@@ -7,5 +7,11 @@
     "declarationMap": false,
     "sourceMap": false
   },
+  "references": [
+    { "path": "../hexok" },
+    { "path": "../queue" },
+    { "path": "../ioredis-lifecycle" },
+    { "path": "../test-redis" }
+  ],
   "exclude": []
 }

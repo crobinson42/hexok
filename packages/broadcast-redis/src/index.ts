@@ -1,4 +1,8 @@
-export type { LogSink } from './log-sink.js';
+export {
+  LifecycleError,
+  type LifecycleState,
+  type LogSink,
+} from '@hexok/ioredis-lifecycle';
 export {
   RedisBroadcast,
   type RedisBroadcastConfig,

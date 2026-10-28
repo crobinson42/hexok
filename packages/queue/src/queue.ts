@@ -25,8 +25,17 @@ export interface QueueSubscribeOptions<T> {
   readonly handler: QueueHandler<T>;
 }
 
+/** `sensitive` keeps the payload out of quarantine and logs. Use it for one-time codes and reset links. */
+export interface QueuePublishOptions {
+  readonly sensitive?: boolean;
+}
+
 export abstract class Queue extends Port('Queue') {
-  abstract publish(topic: string, payload: unknown): Promise<string>;
+  abstract publish(
+    topic: string,
+    payload: unknown,
+    options?: QueuePublishOptions,
+  ): Promise<string>;
   abstract subscribe<T>(
     topic: string,
     options: QueueSubscribeOptions<T>,

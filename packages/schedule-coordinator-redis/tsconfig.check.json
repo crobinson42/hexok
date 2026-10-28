@@ -7,5 +7,12 @@
     "declarationMap": false,
     "sourceMap": false
   },
+  // `references` is not inherited. Only the tests use `test-redis`, so only this config references it.
+  "references": [
+    { "path": "../hexok" },
+    { "path": "../schedule-coordinator" },
+    { "path": "../ioredis-lifecycle" },
+    { "path": "../test-redis" }
+  ],
   "exclude": []
 }

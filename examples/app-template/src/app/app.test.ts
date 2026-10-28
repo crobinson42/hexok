@@ -5,28 +5,20 @@ import type { SmsMessage, SmsReceipt } from '@hexok/sms';
 import { SmsError, SmsSender } from '@hexok/sms';
 import { asResult, createClient } from '@ts-pf/client';
 import { FetchLink } from '@ts-pf/client-http';
-import { SseCodec } from '@ts-pf/sse';
 import { Adapter, CodedError, type EventInstance } from 'hexok';
-import { describe, expect, it, vi } from 'vitest';
+import { describe, expect, it } from 'vitest';
 import type { PostEntity } from '../domain/entities/post.js';
 import { SubscriberEntity } from '../domain/entities/subscriber.js';
 import { DomainError } from '../domain/errors/domain.js';
-import type { ClientEvents } from '../domain/events/client-events.js';
 import type { DomainEvents } from '../domain/events/domain-events.js';
 import { PostPublishedEvent } from '../domain/events/post-published.js';
-import { PostPublishedClientEvent } from '../domain/events/post-published-client.js';
 import { PostUnpublishedEvent } from '../domain/events/post-unpublished.js';
 import { SubscriberJoinedEvent } from '../domain/events/subscriber-joined.js';
-import {
-  BroadcastClientEventPublisher,
-  clientEventsChannel,
-} from '../infra/events/broadcasters/client-events-channel.js';
-import { MemoryBroadcast } from '../infra/events/broadcasters/memory-broadcast.js';
 import { createApi } from '../servers/api.js';
 import { createHttpHandler } from '../servers/http/handler.js';
-import { createApiApp, createEventsApp } from '../servers/rpc/app.js';
-import type { apiContract, eventsContract } from '../servers/rpc/contract.js';
-import { ClientEventPublisher } from './ports/events/client-event-publisher.js';
+import { createApiApp } from '../servers/rpc/app.js';
+import type { apiContract } from '../servers/rpc/contract.js';
+import { Authenticator, type Caller } from './ports/auth/authenticator.js';
 import { DomainEventPublisher } from './ports/events/domain-event-publisher.js';
 import { PostRepository } from './ports/repos/post-repository.js';
 import { SubscriberRepository } from './ports/repos/subscriber-repository.js';
@@ -39,12 +31,13 @@ import { EmailUnpublishedHandler } from './use-cases/posts/event-handlers/email-
 import { EmailSubscribers } from './use-cases/posts/internal/email-subscribers.js';
 import { PublishDuePosts } from './use-cases/posts/scheduled/publish-due-posts.js';
 import { SubscriberReminder } from './use-cases/posts/scheduled/subscriber-reminder.js';
+import { EndSession } from './use-cases/sessions/api/command/end-session.js';
 import { SubscribeToPosts } from './use-cases/subscribers/api/command/subscribe.js';
 import { WelcomeSubscriberHandler } from './use-cases/subscribers/event-handlers/welcome-subscriber.js';
 
 const from = { email: 'blog@localhost', name: 'Blog' };
 
-const ctx = { authToken: 'token-1' };
+const ctx = { caller: { userId: 'ada', sessionId: 'ada-session' } };
 
 class InMemoryPosts extends Adapter(PostRepository) {
   readonly #rows = new Map<string, PostEntity>();
@@ -96,24 +89,33 @@ class RecordingDomainEvents extends Adapter(DomainEventPublisher) {
   }
 }
 
-class RecordingClientEvents extends Adapter(ClientEventPublisher) {
-  readonly events: EventInstance<typeof ClientEvents>[] = [];
+/** Tokens map to callers. A revoked session stops checking out. */
+class InMemoryAuthenticator extends Adapter(Authenticator) {
+  readonly #revoked = new Set<string>();
 
-  override async publish(
-    event: EventInstance<typeof ClientEvents>,
-  ): Promise<void> {
-    this.events.push(event);
+  constructor(private readonly callers: ReadonlyMap<string, Caller>) {
+    super();
+  }
+
+  override async authenticate(token: string): Promise<Caller | null> {
+    const caller = this.callers.get(token);
+    if (caller === undefined || this.#revoked.has(caller.sessionId)) {
+      return null;
+    }
+    return caller;
+  }
+
+  override async revoke(caller: Caller): Promise<void> {
+    this.#revoked.add(caller.sessionId);
   }
 }
 
-function recordingPublishers(): {
-  domainEvents: RecordingDomainEvents;
-  clientEvents: RecordingClientEvents;
-} {
-  return {
-    domainEvents: new RecordingDomainEvents(),
-    clientEvents: new RecordingClientEvents(),
-  };
+function recordingPublishers(): { domainEvents: RecordingDomainEvents } {
+  return { domainEvents: new RecordingDomainEvents() };
+}
+
+function savePost(posts: PostRepository): SavePost {
+  return new SavePost({ posts });
 }
 
 class RecordingEmail extends Adapter(EmailSender) {
@@ -164,6 +166,7 @@ async function expectDomainCode(
   code:
     | 'InternalCallerRequired'
     | 'PostNotFound'
+    | 'SignInRequired'
     | 'SmsRequiresPhone'
     | 'ChannelsRequired'
     | 'ChannelsInvalid',
@@ -178,41 +181,46 @@ async function expectDomainCode(
   expect.fail(`expected ${code}`);
 }
 
+/** `ada-token` authenticates as `ada`. */
+function adaAuthenticator(): InMemoryAuthenticator {
+  return new InMemoryAuthenticator(new Map([['ada-token', ctx.caller]]));
+}
+
 /**
- * The HTTP handler over in-memory ports. The typed clients call it without a
- * socket. `post` sends a raw body to check the wire.
+ * The HTTP handler over in-memory ports. The typed client calls it without a
+ * socket. `apiAs(token)` sends `Authorization: Bearer <token>`. `post` sends
+ * a raw body to check the wire.
  */
-function http(broadcast = new MemoryBroadcast()) {
+function http() {
   const publishers = recordingPublishers();
-  const handle = createHttpHandler({
-    api: createApiApp(
-      createApi({
-        posts: new InMemoryPosts(),
-        subscribers: new InMemorySubscribers(),
-        ...publishers,
-      }),
-    ),
-    events: createEventsApp(broadcast),
+  const authenticator = adaAuthenticator();
+  const api = createApi({
+    posts: new InMemoryPosts(),
+    subscribers: new InMemorySubscribers(),
+    ...publishers,
+    authenticator,
   });
+  const handle = createHttpHandler(createApiApp(api), { authenticator });
   const fetch: typeof globalThis.fetch = (input, init) =>
     handle(new Request(input, init));
+  const headers = (token: string | undefined): HeadersInit =>
+    token === undefined ? {} : { authorization: `Bearer ${token}` };
+  const rpc = (token?: string) =>
+    createClient<typeof apiContract>(
+      new FetchLink({ url: 'http://test/rpc', fetch, headers: headers(token) }),
+    );
   return {
     publishers,
-    api: createClient<typeof apiContract>(
-      new FetchLink({ url: 'http://test/rpc', fetch }),
-    ),
-    events: createClient<typeof eventsContract>(
-      new FetchLink({
-        url: 'http://test/events',
-        fetch,
-        codec: new SseCodec(),
-      }),
-    ),
-    post: (path: string, body: string) =>
+    api: rpc(),
+    apiAs: rpc,
+    post: (path: string, body: string, init: { token?: string } = {}) =>
       handle(
         new Request(`http://test${path}`, {
           method: 'POST',
-          headers: { 'content-type': 'application/json' },
+          headers: {
+            'content-type': 'application/json',
+            ...headers(init.token),
+          },
           body,
         }),
       ),
@@ -221,7 +229,7 @@ function http(broadcast = new MemoryBroadcast()) {
 
 describe('ApiUseCase', () => {
   it('rejects input the schema does not accept before execute runs', async () => {
-    const save = new SavePost({ posts: new InMemoryPosts() });
+    const save = savePost(new InMemoryPosts());
     const error = await save
       .execute(ctx, { title: 1, body: 'Text' } as never)
       .then(
@@ -239,7 +247,7 @@ describe('ApiUseCase', () => {
 describe('SavePost', () => {
   it('assigns an id and stores a draft when id is omitted', async () => {
     const posts = new InMemoryPosts();
-    const saved = await new SavePost({ posts }).execute(ctx, {
+    const saved = await savePost(posts).execute(ctx, {
       id: undefined,
       title: 'Hello',
       body: 'Text',
@@ -256,7 +264,7 @@ describe('SavePost', () => {
 
   it('updates the title and keeps status for an existing id', async () => {
     const posts = new InMemoryPosts();
-    const save = new SavePost({ posts });
+    const save = savePost(posts);
     const saved = await save.execute(ctx, {
       id: undefined,
       title: 'Hello',
@@ -281,7 +289,7 @@ describe('PublishPost', () => {
   it('publishes a draft and records emailSubscribers true', async () => {
     const posts = new InMemoryPosts();
     const publishers = recordingPublishers();
-    const saved = await new SavePost({ posts }).execute(ctx, {
+    const saved = await savePost(posts).execute(ctx, {
       id: undefined,
       title: 'Hello',
       body: 'Text',
@@ -289,7 +297,6 @@ describe('PublishPost', () => {
     const published = await new PublishPost({
       posts,
       domainEvents: publishers.domainEvents,
-      clientEvents: publishers.clientEvents,
     }).execute(ctx, {
       id: saved.props.id,
       emailSubscribers: true,
@@ -300,22 +307,13 @@ describe('PublishPost', () => {
     const event = publishedEvent(publishers.domainEvents.events[0]);
     expect(event.payload.postId).toBe(saved.props.id);
     expect(event.payload.emailSubscribers).toBe(true);
-    expect(publishers.clientEvents.events).toHaveLength(1);
-    const client = publishers.clientEvents.events[0];
-    expect(client).toBeInstanceOf(PostPublishedClientEvent);
-    if (!(client instanceof PostPublishedClientEvent)) {
-      throw new Error('expected PostPublishedClientEvent');
-    }
-    expect(client.payload.postId).toBe(saved.props.id);
-    expect(client.payload.title).toBe('Hello');
-    expect(client.payload).not.toHaveProperty('emailSubscribers');
     expect((await posts.get(saved.props.id))?.props.status).toBe('published');
   });
 
   it('records emailSubscribers false', async () => {
     const posts = new InMemoryPosts();
     const publishers = recordingPublishers();
-    const saved = await new SavePost({ posts }).execute(ctx, {
+    const saved = await savePost(posts).execute(ctx, {
       id: undefined,
       title: 'Hello',
       body: 'Text',
@@ -323,7 +321,6 @@ describe('PublishPost', () => {
     await new PublishPost({
       posts,
       domainEvents: publishers.domainEvents,
-      clientEvents: publishers.clientEvents,
     }).execute(ctx, {
       id: saved.props.id,
       emailSubscribers: false,
@@ -334,7 +331,6 @@ describe('PublishPost', () => {
       publishedEvent(publishers.domainEvents.events[0]).payload
         .emailSubscribers,
     ).toBe(false);
-    expect(publishers.clientEvents.events).toHaveLength(1);
   });
 
   it('throws PostNotFound for a missing id', async () => {
@@ -344,20 +340,18 @@ describe('PublishPost', () => {
       new PublishPost({
         posts,
         domainEvents: publishers.domainEvents,
-        clientEvents: publishers.clientEvents,
       }).execute(ctx, {
         id: 'missing',
         emailSubscribers: true,
       }),
     );
     expect(publishers.domainEvents.events).toHaveLength(0);
-    expect(publishers.clientEvents.events).toHaveLength(0);
   });
 
   it('stores a future publishAt and emits nothing', async () => {
     const posts = new InMemoryPosts();
     const publishers = recordingPublishers();
-    const saved = await new SavePost({ posts }).execute(ctx, {
+    const saved = await savePost(posts).execute(ctx, {
       id: undefined,
       title: 'Hello',
       body: 'Text',
@@ -366,7 +360,6 @@ describe('PublishPost', () => {
     const scheduled = await new PublishPost({
       posts,
       domainEvents: publishers.domainEvents,
-      clientEvents: publishers.clientEvents,
     }).execute(ctx, {
       id: saved.props.id,
       emailSubscribers: true,
@@ -377,13 +370,12 @@ describe('PublishPost', () => {
     expect(scheduled.props.publishAt).toBe(publishAt);
     expect(scheduled.props.emailSubscribers).toBe(true);
     expect(publishers.domainEvents.events).toHaveLength(0);
-    expect(publishers.clientEvents.events).toHaveLength(0);
   });
 
   it('publishes immediately when publishAt is not in the future', async () => {
     const posts = new InMemoryPosts();
     const publishers = recordingPublishers();
-    const saved = await new SavePost({ posts }).execute(ctx, {
+    const saved = await savePost(posts).execute(ctx, {
       id: undefined,
       title: 'Hello',
       body: 'Text',
@@ -391,7 +383,6 @@ describe('PublishPost', () => {
     const published = await new PublishPost({
       posts,
       domainEvents: publishers.domainEvents,
-      clientEvents: publishers.clientEvents,
     }).execute(ctx, {
       id: saved.props.id,
       emailSubscribers: false,
@@ -408,7 +399,7 @@ describe('UnpublishPost', () => {
   it('turns a published post into a draft and records no event', async () => {
     const posts = new InMemoryPosts();
     const publishers = recordingPublishers();
-    const saved = await new SavePost({ posts }).execute(ctx, {
+    const saved = await savePost(posts).execute(ctx, {
       id: undefined,
       title: 'Hello',
       body: 'Text',
@@ -416,7 +407,6 @@ describe('UnpublishPost', () => {
     await new PublishPost({
       posts,
       domainEvents: publishers.domainEvents,
-      clientEvents: publishers.clientEvents,
     }).execute(ctx, {
       id: saved.props.id,
       emailSubscribers: true,
@@ -441,13 +431,12 @@ describe('UnpublishPost', () => {
     }
     expect(unpublished.payload.postId).toBe(saved.props.id);
     expect(unpublished.payload.title).toBe('Hello');
-    expect(publishers.clientEvents.events).toHaveLength(1);
   });
 
   it('cancels a scheduled post without an unpublished event', async () => {
     const posts = new InMemoryPosts();
     const publishers = recordingPublishers();
-    const saved = await new SavePost({ posts }).execute(ctx, {
+    const saved = await savePost(posts).execute(ctx, {
       id: undefined,
       title: 'Hello',
       body: 'Text',
@@ -455,7 +444,6 @@ describe('UnpublishPost', () => {
     await new PublishPost({
       posts,
       domainEvents: publishers.domainEvents,
-      clientEvents: publishers.clientEvents,
     }).execute(ctx, {
       id: saved.props.id,
       emailSubscribers: true,
@@ -477,7 +465,7 @@ describe('PublishDuePosts', () => {
   it('publishes a post whose publishAt has passed', async () => {
     const posts = new InMemoryPosts();
     const publishers = recordingPublishers();
-    const saved = await new SavePost({ posts }).execute(ctx, {
+    const saved = await savePost(posts).execute(ctx, {
       id: undefined,
       title: 'Due',
       body: 'Text',
@@ -486,7 +474,6 @@ describe('PublishDuePosts', () => {
     await new PublishPost({
       posts,
       domainEvents: publishers.domainEvents,
-      clientEvents: publishers.clientEvents,
     }).execute(ctx, {
       id: saved.props.id,
       emailSubscribers: true,
@@ -502,7 +489,6 @@ describe('PublishDuePosts', () => {
     const count = await new PublishDuePosts({
       posts,
       domainEvents: publishers.domainEvents,
-      clientEvents: publishers.clientEvents,
       logger: new NoopLogger(),
     }).execute(internalCall());
 
@@ -513,13 +499,12 @@ describe('PublishDuePosts', () => {
       publishedEvent(publishers.domainEvents.events[0]).payload
         .emailSubscribers,
     ).toBe(true);
-    expect(publishers.clientEvents.events).toHaveLength(1);
   });
 
   it('leaves a future post scheduled', async () => {
     const posts = new InMemoryPosts();
     const publishers = recordingPublishers();
-    const saved = await new SavePost({ posts }).execute(ctx, {
+    const saved = await savePost(posts).execute(ctx, {
       id: undefined,
       title: 'Later',
       body: 'Text',
@@ -527,7 +512,6 @@ describe('PublishDuePosts', () => {
     await new PublishPost({
       posts,
       domainEvents: publishers.domainEvents,
-      clientEvents: publishers.clientEvents,
     }).execute(ctx, {
       id: saved.props.id,
       emailSubscribers: false,
@@ -537,13 +521,28 @@ describe('PublishDuePosts', () => {
     const count = await new PublishDuePosts({
       posts,
       domainEvents: publishers.domainEvents,
-      clientEvents: publishers.clientEvents,
       logger: new NoopLogger(),
     }).execute(internalCall());
 
     expect(count).toBe(0);
     expect((await posts.get(saved.props.id))?.props.status).toBe('scheduled');
     expect(publishers.domainEvents.events).toHaveLength(0);
+  });
+});
+
+describe('EndSession', () => {
+  it('revokes the token', async () => {
+    const authenticator = adaAuthenticator();
+
+    await new EndSession({ authenticator }).execute(ctx, {});
+
+    expect(await authenticator.authenticate('ada-token')).toBeNull();
+  });
+
+  it('needs a signed-in caller', async () => {
+    const end = new EndSession({ authenticator: adaAuthenticator() });
+
+    await expectDomainCode('SignInRequired', () => end.execute({}, {}));
   });
 });
 
@@ -948,11 +947,6 @@ describe('HTTP', () => {
       publishedEvent(publishers.domainEvents.events[0]).payload
         .emailSubscribers,
     ).toBe(true);
-    const client = publishers.clientEvents.events[0];
-    if (!(client instanceof PostPublishedClientEvent)) {
-      throw new Error('expected PostPublishedClientEvent');
-    }
-    expect(client.payload).toEqual({ postId: draft.id, title: 'Hello' });
   });
 
   it('subscribers.subscribe returns the email', async () => {
@@ -1025,25 +1019,42 @@ describe('HTTP', () => {
     expect(response.status).toBe(404);
   });
 
-  it('streams client events as server-sent events', async () => {
-    const broadcast = new MemoryBroadcast();
-    const { events } = http(broadcast);
+  it('sessions.end revokes the token', async () => {
+    const { apiAs } = http();
 
-    // The call resolves with the first event, so publish before awaiting it.
-    const stream = events.subscribe({});
-    await vi.waitFor(() =>
-      expect(broadcast.count(clientEventsChannel)).toBe(1),
+    expect(await apiAs('ada-token').sessions.end({})).toBeNull();
+
+    const again = await asResult(
+      apiAs('ada-token').posts.save({ title: 'Hello', body: 'Text' }),
     );
-    await new BroadcastClientEventPublisher({ broadcast }).publish(
-      new PostPublishedClientEvent({ postId: 'p1', title: 'Hi' }),
+    if (again.ok) throw new Error('expected an error');
+    expect(again.error.status).toBe(401);
+    expect(again.error.code).toBe('Unauthenticated');
+  });
+
+  it('answers sessions.end without a token with 401', async () => {
+    const { api } = http();
+
+    const result = await asResult(api.sessions.end({}));
+
+    if (result.ok) throw new Error('expected an error');
+    expect(result.error.status).toBe(401);
+    expect(result.error.code).toBe('SignInRequired');
+  });
+
+  it('answers a token the authenticator rejects with 401', async () => {
+    const { post } = http();
+
+    const response = await post(
+      '/rpc/posts/save',
+      JSON.stringify({ input: { title: 'Hello', body: 'Text' } }),
+      { token: 'wrong' },
     );
 
-    for await (const event of await stream) {
-      expect(event).toEqual({
-        key: 'postPublished',
-        payload: { postId: 'p1', title: 'Hi' },
-      });
-      break;
-    }
+    expect(response.status).toBe(401);
+    expect(await response.json()).toEqual({
+      ok: false,
+      error: { code: 'Unauthenticated', message: 'The token is not valid' },
+    });
   });
 });

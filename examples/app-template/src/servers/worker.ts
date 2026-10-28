@@ -10,6 +10,7 @@ import {
   createPublishers,
   createRuntime,
 } from './composition.js';
+import { onShutdown } from './utils/shutdown.js';
 import {
   assertDistinctHandlerGroups,
   subscribeHandler,
@@ -17,13 +18,14 @@ import {
 
 export async function main(): Promise<void> {
   const runtime = await createRuntime();
-  /** Adapters connect in `start`. `register` and `subscribe` need that connection. */
-  await runtime.scheduleCoordinator.start();
+  // Registered before start, so a signal during startup still stops what has started.
+  onShutdown(runtime.logger, () => runtime.stop());
+  /** Adapters connect in `start`. `register` and `subscribe` need that connection. Scheduled jobs publish to the queue, so the queue starts first and stops last. */
   await runtime.domainEventsQueue.start();
-  await runtime.clientEventsBroadcast.start();
+  await runtime.scheduleCoordinator.start();
 
   const notifications = await createNotifications(runtime);
-  const { domainEvents, clientEvents } = createPublishers(runtime);
+  const { domainEvents } = createPublishers(runtime);
 
   const emailSubscribers = new EmailSubscribers({
     subscribers: runtime.subscribers,
@@ -55,7 +57,6 @@ export async function main(): Promise<void> {
     new PublishDuePosts({
       posts: runtime.posts,
       domainEvents,
-      clientEvents,
       logger: runtime.logger,
     }).registration(),
   );
@@ -76,5 +77,8 @@ if (
   process.argv[1] !== undefined &&
   import.meta.url === pathToFileURL(process.argv[1]).href
 ) {
-  void main();
+  main().catch((error: unknown) => {
+    console.error(error);
+    process.exit(1);
+  });
 }

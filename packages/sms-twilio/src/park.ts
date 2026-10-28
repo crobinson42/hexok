@@ -50,24 +50,34 @@ export function smsParkInput(message: SmsMessage, error: unknown): ParkInput {
   return {
     source: 'sms',
     operation: 'send',
-    payload: { to: message.to, body: message.body },
+    payload: message.sensitive
+      ? { sensitive: true, bodyLength: message.body.length }
+      : { to: message.to, body: message.body },
     error: parkedError(error),
     occurredAt: new Date(),
     context: { adapter: 'twilio' },
   };
 }
 
+/** A sink error can quote its input. `expose` logs it raw. */
 export async function courtesyPark(
   sink: ParkSink | undefined,
   input: ParkInput,
   logger: LogSink,
+  expose: boolean,
 ): Promise<void> {
   if (!sink) return;
   try {
     await sink.park(input);
   } catch (error) {
-    logger.error(
-      error instanceof Error ? error : new Error('quarantine: park failed'),
-    );
+    if (expose) {
+      logger.error(
+        error instanceof Error ? error : new Error('quarantine: park failed'),
+      );
+      return;
+    }
+    logger.error('quarantine: park failed', {
+      name: error instanceof Error ? error.name : 'Error',
+    });
   }
 }

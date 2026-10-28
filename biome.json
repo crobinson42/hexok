@@ -14,6 +14,9 @@
       "complexity": {
         "noThisInStatic": "off",
         "noStaticOnlyClass": "off"
+      },
+      "nursery": {
+        "noFloatingPromises": "error"
       }
     }
   },

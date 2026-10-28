@@ -59,12 +59,19 @@ export function attemptOf(error: unknown): number | undefined {
   return undefined;
 }
 
-export function emailParkInput(
-  message: EmailMessage,
-  error: unknown,
-  adapter: string,
-  attempts?: number,
-): ParkInput {
+/** Counts only. The subject can hold a one-time code. */
+function sensitivePayload(message: EmailMessage): Record<string, unknown> {
+  return {
+    sensitive: true,
+    recipientCount:
+      message.to.length +
+      (message.cc?.length ?? 0) +
+      (message.bcc?.length ?? 0),
+    attachmentCount: message.attachments?.length ?? 0,
+  };
+}
+
+function messagePayload(message: EmailMessage): Record<string, unknown> {
   const from = message.from.name
     ? { email: message.from.email, name: message.from.name }
     : { email: message.from.email };
@@ -81,10 +88,21 @@ export function emailParkInput(
   if (message.html) payload.html = message.html;
   if (message.tags) payload.tags = { ...message.tags };
   if (message.idempotencyKey) payload.idempotencyKey = message.idempotencyKey;
+  return payload;
+}
+
+export function emailParkInput(
+  message: EmailMessage,
+  error: unknown,
+  adapter: string,
+  attempts?: number,
+): ParkInput {
   return {
     source: 'email',
     operation: 'send',
-    payload,
+    payload: message.sensitive
+      ? sensitivePayload(message)
+      : messagePayload(message),
     error: parkedError(error),
     occurredAt: new Date(),
     context: { adapter },
@@ -95,17 +113,25 @@ export function emailParkInput(
   };
 }
 
+/** A sink's error can quote its input, so only its name is logged unless `expose` is set. */
 export async function courtesyPark(
   sink: ParkSink | undefined,
   input: ParkInput,
   logger: LogSink,
+  expose: boolean,
 ): Promise<void> {
   if (!sink) return;
   try {
     await sink.park(input);
   } catch (error) {
-    logger.error(
-      error instanceof Error ? error : new Error('quarantine: park failed'),
-    );
+    if (expose) {
+      logger.error(
+        error instanceof Error ? error : new Error('quarantine: park failed'),
+      );
+      return;
+    }
+    logger.error('quarantine: park failed', {
+      name: error instanceof Error ? error.name : 'Error',
+    });
   }
 }

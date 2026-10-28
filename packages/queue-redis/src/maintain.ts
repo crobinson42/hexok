@@ -1,5 +1,11 @@
+import { LifecycleError, type LogSink } from '@hexok/ioredis-lifecycle';
 import type { Redis } from 'ioredis';
-import type { LogSink } from './log-sink.js';
+import {
+  deleteIdleStream,
+  destroyIdleGroup,
+  releaseConsumer,
+  type ScriptOutcome,
+} from './scripts.js';
 
 export interface RedisQueueMaintainOptions {
   readonly dryRun?: boolean;
@@ -51,8 +57,13 @@ export interface RedisQueueMaintainReport {
   }[];
 }
 
+/** Runs one command through the queue's lifecycle, so `stop()` can end it. */
+export type MaintainRun = <T>(
+  command: (commands: Redis) => Promise<T>,
+) => Promise<T>;
+
 interface MaintainInput {
-  readonly commands: Redis;
+  readonly run: MaintainRun;
   readonly keyPrefix: string;
   readonly retentionMs: number;
   readonly options: RedisQueueMaintainOptions;
@@ -91,6 +102,14 @@ interface ConsumerInfo {
 
 const OWN_CONSUMER_PREFIX = 'hexok:';
 
+/** Log fields for a failed command. */
+const COMMANDS = { adapter: 'queue', connection: 'commands' } as const;
+
+/** A lifecycle error means `stop()` interrupted `maintain()`. It ends the run instead of skipping one key. */
+function throwIfStopped(error: unknown): void {
+  if (LifecycleError.is(error)) throw error;
+}
+
 export async function maintainStreams(
   input: MaintainInput,
 ): Promise<RedisQueueMaintainReport> {
@@ -108,14 +127,14 @@ export async function maintainStreams(
   const now = Date.now();
   const keys = input.options.topics
     ? input.options.topics.map((topic) => `${input.keyPrefix}${topic}`)
-    : await scanKeys(input.commands, input.keyPrefix);
+    : await scanKeys(input.run, input.keyPrefix);
   for (const key of keys) {
     await processKey(input, report, key, now);
   }
   return report;
 }
 
-async function scanKeys(commands: Redis, prefix: string): Promise<string[]> {
+async function scanKeys(run: MaintainRun, prefix: string): Promise<string[]> {
   const keys: string[] = [];
   const seen = new Set<string>();
   let cursor = '0';
@@ -124,12 +143,8 @@ async function scanKeys(commands: Redis, prefix: string): Promise<string[]> {
       throw new Error('queue: SCAN cursor repeated');
     }
     seen.add(cursor);
-    const page = await commands.scan(
-      cursor,
-      'MATCH',
-      `${escapeGlob(prefix)}*`,
-      'COUNT',
-      100,
+    const page = await run((commands) =>
+      commands.scan(cursor, 'MATCH', `${escapeGlob(prefix)}*`, 'COUNT', 100),
     );
     const next = page[0];
     const found = page[1];
@@ -162,13 +177,14 @@ async function processKey(
   }
   let rawStream: unknown;
   try {
-    rawStream = await input.commands.xinfo('STREAM', key);
+    rawStream = await input.run((commands) => commands.xinfo('STREAM', key));
   } catch (error) {
+    throwIfStopped(error);
     report.skipped.push({ key, reason: skipReason(error) });
     if (skipReason(error) === 'xinfo-failed') {
       input.logger.error(
         error instanceof Error ? error : new Error('queue: XINFO failed'),
-        { topic },
+        { ...COMMANDS, topic },
       );
     }
     return;
@@ -186,24 +202,26 @@ async function processKey(
   } else {
     try {
       const minId = `${now - input.retentionMs}-0`;
-      await input.commands.xtrim(key, 'MINID', '~', minId);
+      await input.run((commands) => commands.xtrim(key, 'MINID', '~', minId));
       if (stale) report.trimmed.push(topic);
     } catch (error) {
+      throwIfStopped(error);
       input.logger.error(
         error instanceof Error ? error : new Error('queue: XTRIM failed'),
-        { topic },
+        { ...COMMANDS, topic },
       );
     }
   }
 
   let rawGroups: unknown;
   try {
-    rawGroups = await input.commands.xinfo('GROUPS', key);
+    rawGroups = await input.run((commands) => commands.xinfo('GROUPS', key));
   } catch (error) {
+    throwIfStopped(error);
     report.skipped.push({ key, reason: skipReason(error) });
     input.logger.error(
       error instanceof Error ? error : new Error('queue: XINFO GROUPS failed'),
-      { topic },
+      { ...COMMANDS, topic },
     );
     return;
   }
@@ -226,13 +244,14 @@ async function processKey(
       );
       if (destroyed) remainingGroups -= 1;
     } catch (error) {
+      throwIfStopped(error);
       blocked = true;
       report.skipped.push({ key, reason: 'xinfo-failed' });
       input.logger.error(
         error instanceof Error
           ? error
           : new Error('queue: XINFO CONSUMERS failed'),
-        { topic, group: group.name },
+        { ...COMMANDS, topic, group: group.name },
       );
     }
   }
@@ -247,11 +266,16 @@ async function processKey(
   }
   if (!report.dryRun) {
     try {
-      await input.commands.del(key);
+      const deleted = await input.run((commands) =>
+        deleteIdleStream(commands, key, idleMs),
+      );
+      // It gained a group or an entry after XINFO, or another run deleted it first.
+      if (deleted !== 'removed') return;
     } catch (error) {
+      throwIfStopped(error);
       input.logger.error(
         error instanceof Error ? error : new Error('queue: DEL failed'),
-        { topic },
+        { ...COMMANDS, topic },
       );
       return;
     }
@@ -259,6 +283,7 @@ async function processKey(
   report.streamsDeleted.push({ topic, length: stream.length });
 }
 
+/** Resolves `true` when the group no longer exists after this run. */
 async function processGroup(
   input: MaintainInput,
   report: ReportBuilder,
@@ -270,7 +295,9 @@ async function processGroup(
   let remaining = group.consumers;
   const idleConsumerMs = input.options.idleConsumerMs;
   if (idleConsumerMs !== undefined && group.consumers > 0) {
-    const raw = await input.commands.xinfo('CONSUMERS', key, group.name);
+    const raw = await input.run((commands) =>
+      commands.xinfo('CONSUMERS', key, group.name),
+    );
     const consumers = consumerList(raw);
     if (consumers === undefined) {
       throw new Error('queue: XINFO CONSUMERS failed');
@@ -292,20 +319,26 @@ async function processGroup(
         continue;
       }
       if (!report.dryRun) {
+        let released: ScriptOutcome;
         try {
-          await input.commands.xgroup(
-            'DELCONSUMER',
-            key,
-            group.name,
-            consumer.name,
+          released = await input.run((commands) =>
+            releaseConsumer(commands, key, group.name, consumer.name),
           );
         } catch (error) {
+          throwIfStopped(error);
           input.logger.error(
             error instanceof Error
               ? error
-              : new Error('queue: DELCONSUMER failed'),
-            { topic, group: group.name },
+              : new Error('queue: consumer release failed'),
+            { ...COMMANDS, topic, group: group.name },
           );
+          continue;
+        }
+        // It took a pending entry after XINFO, so it stays and still counts as a consumer of the group.
+        if (released === 'kept') continue;
+        // Another run removed it first. It no longer counts, and this run does not report it.
+        if (released === 'gone') {
+          remaining -= 1;
           continue;
         }
       }
@@ -336,13 +369,20 @@ async function processGroup(
   }
   if (!report.dryRun) {
     try {
-      await input.commands.xgroup('DESTROY', key, group.name);
+      const destroyed = await input.run((commands) =>
+        destroyIdleGroup(commands, key, group.name),
+      );
+      // It gained a consumer or a pending entry after XINFO, so it stays and still counts as a group of the stream.
+      if (destroyed === 'kept') return false;
+      // Another run removed it first. It no longer counts, and this run does not report it.
+      if (destroyed === 'gone') return true;
     } catch (error) {
+      throwIfStopped(error);
       input.logger.error(
         error instanceof Error
           ? error
           : new Error('queue: XGROUP DESTROY failed'),
-        { topic, group: group.name },
+        { ...COMMANDS, topic, group: group.name },
       );
       return false;
     }

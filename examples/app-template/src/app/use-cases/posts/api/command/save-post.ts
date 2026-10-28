@@ -13,10 +13,15 @@ export const savePostInput = z.object({
 
 export type SavePostInput = z.infer<typeof savePostInput>;
 
+/** Create or update a post. A new post is a draft. */
 export class SavePost extends ApiUseCase('post.save', {
   input: savePostInput,
 }) {
-  constructor(private readonly deps: { posts: PostRepository }) {
+  constructor(
+    private readonly deps: {
+      posts: PostRepository;
+    },
+  ) {
     super();
   }
 

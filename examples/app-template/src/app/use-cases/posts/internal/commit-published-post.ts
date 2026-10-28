@@ -2,14 +2,12 @@ import type { UseCase } from 'hexok';
 import type { PostEntity } from '../../../../domain/entities/post.js';
 import { DomainError } from '../../../../domain/errors/domain.js';
 import { PostPublishedEvent } from '../../../../domain/events/post-published.js';
-import { PostPublishedClientEvent } from '../../../../domain/events/post-published-client.js';
-import type { ClientEventPublisher } from '../../../ports/events/client-event-publisher.js';
 import type { DomainEventPublisher } from '../../../ports/events/domain-event-publisher.js';
 import type { PostRepository } from '../../../ports/repos/post-repository.js';
 import { InternalUseCase } from '../../context.js';
 
 /**
- * Mark a draft or scheduled post published and emit both catalogs.
+ * Mark a draft or scheduled post published and emit `postPublished`.
  * Callers pass `internalCall()`. A future `publishAt` is not this use case.
  */
 export class CommitPublishedPost extends InternalUseCase(
@@ -19,7 +17,6 @@ export class CommitPublishedPost extends InternalUseCase(
     private readonly deps: {
       posts: PostRepository;
       domainEvents: DomainEventPublisher;
-      clientEvents: ClientEventPublisher;
     },
   ) {
     super();
@@ -40,12 +37,6 @@ export class CommitPublishedPost extends InternalUseCase(
         postId: post.props.id,
         title: post.props.title,
         emailSubscribers: input.emailSubscribers,
-      }),
-    );
-    await this.deps.clientEvents.publish(
-      new PostPublishedClientEvent({
-        postId: post.props.id,
-        title: post.props.title,
       }),
     );
     return post;

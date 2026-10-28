@@ -23,6 +23,8 @@ export interface MailgunEmailSenderConfig {
   readonly sandbox?: boolean;
   readonly logger?: LogSink;
   readonly quarantine?: ParkSink;
+  /** Puts Mailgun's error text in `Rejected` and logs raw provider and park errors. Off by default because they can hold the recipient. A `sensitive` message never exposes them. */
+  readonly exposeProviderErrors?: boolean;
 }
 
 function formatFrom(message: EmailMessage): string {
@@ -38,12 +40,21 @@ function statusOf(error: unknown): number | undefined {
   return undefined;
 }
 
+function messageOf(error: unknown): string | undefined {
+  if (typeof error === 'object' && error !== null && 'message' in error) {
+    const message = error.message;
+    if (typeof message === 'string') return message;
+  }
+  return undefined;
+}
+
 export class MailgunEmailSender extends Adapter(EmailSender) {
   readonly #client: MailgunLike;
   readonly #domain: string;
   readonly #sandbox: boolean;
   readonly #logger: LogSink;
   readonly #quarantine: ParkSink | undefined;
+  readonly #exposeProviderErrors: boolean;
 
   constructor(config: MailgunEmailSenderConfig) {
     super();
@@ -52,6 +63,7 @@ export class MailgunEmailSender extends Adapter(EmailSender) {
     this.#sandbox = config.sandbox ?? false;
     this.#logger = config.logger ?? noopSink;
     this.#quarantine = config.quarantine;
+    this.#exposeProviderErrors = config.exposeProviderErrors ?? false;
   }
 
   async #park(message: EmailMessage, error: unknown): Promise<void> {
@@ -61,6 +73,7 @@ export class MailgunEmailSender extends Adapter(EmailSender) {
       this.#quarantine,
       emailParkInput(message, error, 'mailgun'),
       this.#logger,
+      this.#exposeProviderErrors && !message.sensitive,
     );
   }
 
@@ -108,15 +121,21 @@ export class MailgunEmailSender extends Adapter(EmailSender) {
         throw error;
       }
       const status = statusOf(error);
-      const messageText =
-        error instanceof Error ? error.message : 'Email was rejected';
-      const text =
-        typeof error === 'object' &&
-        error !== null &&
-        'message' in error &&
-        typeof error.message === 'string'
-          ? error.message
-          : messageText;
+      const expose = this.#exposeProviderErrors && !message.sensitive;
+      const text = expose ? messageOf(error) : undefined;
+      if (expose) {
+        this.#logger.error(
+          error instanceof Error
+            ? error
+            : new Error(text ?? 'email: mailgun send failed'),
+          { status, attempt: 1 },
+        );
+      } else {
+        this.#logger.error('email: mailgun send failed', {
+          status,
+          attempt: 1,
+        });
+      }
       if (status === undefined || status >= 500) {
         const mapped = EmailError.Unavailable();
         await this.#park(message, mapped);
@@ -127,7 +146,7 @@ export class MailgunEmailSender extends Adapter(EmailSender) {
         await this.#park(message, mapped);
         throw mapped;
       }
-      throw EmailError.Rejected(text);
+      throw text ? EmailError.Rejected(text) : EmailError.Rejected();
     }
   }
 }

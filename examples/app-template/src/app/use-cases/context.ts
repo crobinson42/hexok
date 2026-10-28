@@ -5,10 +5,14 @@ import {
   validationError,
 } from 'hexok';
 import { DomainError } from '../../domain/errors/domain.js';
+import type { Caller } from '../ports/auth/authenticator.js';
 
-/** Context for use cases under `api/`. HTTP builds this from the request. */
+/**
+ * Context for use cases under `api/`. HTTP builds this from the request and
+ * the `Authenticator`. No `caller` is an anonymous request.
+ */
 export type ApiCtx = {
-  authToken?: string;
+  caller?: Caller;
 };
 
 /** Each API use case declares the schema of its `execute` input. */
@@ -37,7 +41,7 @@ function validInputGuard({
   }
 }
 
-/** Token is optional. This template does not check it. */
+/** `caller` is optional. A use case that needs one checks it in `execute`. */
 export const ApiUseCase = UseCase.context<ApiCtx, ApiSpec>().guard(
   validInputGuard,
 );

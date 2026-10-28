@@ -23,6 +23,11 @@ export interface TwilioSmsSenderConfig {
   readonly from: string;
   readonly logger?: LogSink;
   readonly quarantine?: ParkSink;
+  /**
+   * Log the raw provider error and put its text in `Rejected`. Off by default.
+   * Twilio messages can quote the destination. A sensitive message ignores it.
+   */
+  readonly exposeProviderErrors?: boolean;
 }
 
 const retryAfterMs = 30000;
@@ -39,6 +44,7 @@ export class TwilioSmsSender extends Adapter(SmsSender) {
   readonly #from: string;
   readonly #logger: LogSink;
   readonly #quarantine: ParkSink | undefined;
+  readonly #exposeProviderErrors: boolean;
 
   constructor(config: TwilioSmsSenderConfig) {
     super();
@@ -46,6 +52,7 @@ export class TwilioSmsSender extends Adapter(SmsSender) {
     this.#from = config.from;
     this.#logger = config.logger ?? noopSink;
     this.#quarantine = config.quarantine;
+    this.#exposeProviderErrors = config.exposeProviderErrors ?? false;
   }
 
   async send(message: SmsMessage): Promise<{ id: string; acceptedAt: Date }> {
@@ -60,13 +67,19 @@ export class TwilioSmsSender extends Adapter(SmsSender) {
     } catch (error) {
       const code = field(error, 'code');
       const status = field(error, 'status');
+      const fields = { code, status, attempt: 1 };
       const text = field(error, 'message');
       const messageText =
         typeof text === 'string' ? text : 'Message was rejected';
-      this.#logger.error(
-        error instanceof Error ? error : new Error(messageText),
-        { code, status },
-      );
+      const expose = this.#exposeProviderErrors && !message.sensitive;
+      if (expose) {
+        this.#logger.error(
+          error instanceof Error ? error : new Error(messageText),
+          fields,
+        );
+      } else {
+        this.#logger.error('sms: twilio send failed', fields);
+      }
       if (code === 21610) throw SmsError.Unsubscribed();
       if (code === 21608 || code === 21211 || code === 21614) {
         throw SmsError.InvalidRecipient();
@@ -77,6 +90,7 @@ export class TwilioSmsSender extends Adapter(SmsSender) {
           this.#quarantine,
           smsParkInput(message, mapped),
           this.#logger,
+          expose,
         );
         throw mapped;
       }
@@ -86,10 +100,11 @@ export class TwilioSmsSender extends Adapter(SmsSender) {
           this.#quarantine,
           smsParkInput(message, mapped),
           this.#logger,
+          expose,
         );
         throw mapped;
       }
-      throw SmsError.Rejected(messageText);
+      throw expose ? SmsError.Rejected(messageText) : SmsError.Rejected();
     }
   }
 }

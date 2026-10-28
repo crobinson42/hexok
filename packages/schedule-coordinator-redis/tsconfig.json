@@ -1,7 +1,11 @@
 {
   "extends": "../../tsconfig.base.json",
   "compilerOptions": { "rootDir": "src", "outDir": "dist" },
-  "references": [{ "path": "../hexok" }, { "path": "../schedule-coordinator" }],
+  "references": [
+    { "path": "../hexok" },
+    { "path": "../schedule-coordinator" },
+    { "path": "../ioredis-lifecycle" }
+  ],
   "include": ["src"],
   "exclude": ["src/**/*.test.ts"]
 }

@@ -3,6 +3,8 @@ import { Errors, Port, type StandardSchemaV1 } from 'hexok';
 export interface SmsMessage {
   readonly to: string;
   readonly body: string;
+  /** Keeps `to` and `body` out of quarantine and logs. Use it for one-time codes. */
+  readonly sensitive?: boolean;
 }
 
 export interface SmsReceipt {

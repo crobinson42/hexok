@@ -19,6 +19,8 @@ describeRedisLifecycle('RedisQueue', ({ redis, stopTimeoutMs }) => {
     start: () => queue.start(),
     stop: () => queue.stop(),
     operate: () => queue.publish('jobs', { n: 1 }),
+    // The suite calls stop() as soon as this returns, so the work must already be under way.
+    inFlight: () => queue.publish('jobs', { n: 2 }),
   };
 });
 

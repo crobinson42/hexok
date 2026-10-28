@@ -55,9 +55,8 @@ interface Subscription {
   blocking: Redis;
   heartbeat: ReturnType<typeof setInterval> | undefined;
   recovery: ReturnType<typeof setInterval> | undefined;
-  /** Resolves when the subscription aborts. A read or backoff races it. */
-  aborting: Promise<void>;
-  wake: () => void;
+  /** Ends the read loop's current wait. Set only during that wait, so it cannot pin a settled read. */
+  wake: (() => void) | undefined;
   done: Promise<void>;
   finish: () => void;
 }
@@ -260,10 +259,6 @@ export class RedisQueue extends Adapter(Queue) {
     const done = new Promise<void>((resolve) => {
       finish = resolve;
     });
-    let wake = () => {};
-    const aborting = new Promise<void>((resolve) => {
-      wake = resolve;
-    });
     const sub: Subscription = {
       topic,
       group: options.consumerGroup,
@@ -277,8 +272,7 @@ export class RedisQueue extends Adapter(Queue) {
       blocking,
       heartbeat: undefined,
       recovery: undefined,
-      aborting,
-      wake,
+      wake: undefined,
       done,
       finish,
     };
@@ -411,7 +405,8 @@ export class RedisQueue extends Adapter(Queue) {
 
   #abortSub(sub: Subscription): void {
     sub.aborted = true;
-    sub.wake();
+    sub.wake?.();
+    sub.wake = undefined;
     if (sub.heartbeat) clearInterval(sub.heartbeat);
     if (sub.recovery) clearInterval(sub.recovery);
     sub.heartbeat = undefined;
@@ -425,21 +420,23 @@ export class RedisQueue extends Adapter(Queue) {
         let rows: StreamRead[] | null;
         try {
           // A reconnecting client never settles the read, even after `disconnect`.
-          rows = (await Promise.race([
-            sub.blocking.xreadgroup(
-              'GROUP',
-              sub.group,
-              sub.consumer,
-              'COUNT',
-              this.#batch,
-              'BLOCK',
-              this.#blockMs,
-              'STREAMS',
-              sub.key,
-              '>',
-            ),
-            sub.aborting.then(() => null),
-          ])) as StreamRead[] | null;
+          rows =
+            (await this.#untilAborted(
+              sub,
+              () =>
+                sub.blocking.xreadgroup(
+                  'GROUP',
+                  sub.group,
+                  sub.consumer,
+                  'COUNT',
+                  this.#batch,
+                  'BLOCK',
+                  this.#blockMs,
+                  'STREAMS',
+                  sub.key,
+                  '>',
+                ) as Promise<StreamRead[] | null>,
+            )) ?? null;
           failures = 0;
         } catch (error) {
           if (sub.aborted) break;
@@ -710,7 +707,29 @@ export class RedisQueue extends Adapter(Queue) {
 
   /** Sleeps before the next read. Aborting the subscription wakes it early. */
   async #backoff(sub: Subscription, failures: number): Promise<void> {
-    await settleWithin(sub.aborting, Math.min(1000 * failures, 5000));
+    const ms = Math.min(1000 * failures, 5000);
+    await this.#untilAborted(sub, (aborted) => settleWithin(aborted, ms));
+  }
+
+  /**
+   * Runs one wait of the read loop. It resolves `undefined` when the subscription aborts first.
+   * The abort hook is made per wait and dropped after it, so a settled wait is not retained until abort.
+   */
+  async #untilAborted<T>(
+    sub: Subscription,
+    wait: (aborted: Promise<void>) => Promise<T>,
+  ): Promise<T | undefined> {
+    let wake = () => {};
+    const aborted = new Promise<void>((resolve) => {
+      wake = resolve;
+    });
+    if (sub.aborted) wake();
+    else sub.wake = wake;
+    try {
+      return await Promise.race([wait(aborted), aborted.then(() => undefined)]);
+    } finally {
+      if (sub.wake === wake) sub.wake = undefined;
+    }
   }
 
   #key(topic: string): string {

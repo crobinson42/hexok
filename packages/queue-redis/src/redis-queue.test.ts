@@ -16,6 +16,7 @@ class FakeRedis extends EventEmitter {
   failXadd = false;
   failCreate: Error | undefined;
   failXautoclaim: Error | undefined;
+  autoclaimEntries: unknown[] = [];
   holdCreate = false;
   heldCreate: Pending | undefined;
   /** Commands never settle, as on a socket that stopped answering. */
@@ -93,9 +94,19 @@ class FakeRedis extends EventEmitter {
   /** XPENDING replies by consumer name. A consumer not listed owns nothing. */
   pendingByConsumer = new Map<string, unknown[]>();
 
+  holdXpending = false;
+  heldXpending: Pending | undefined;
+
   xpending(...args: unknown[]): Promise<unknown[]> {
     this.calls.push(['xpending', ...args]);
-    return Promise.resolve(this.pendingByConsumer.get(String(args[5])) ?? []);
+    const reply = this.pendingByConsumer.get(String(args[5])) ?? [];
+    if (this.holdXpending) {
+      this.holdXpending = false;
+      return new Promise((resolve, reject) => {
+        this.heldXpending = { resolve: () => resolve(reply), reject };
+      });
+    }
+    return Promise.resolve(reply);
   }
 
   xack(...args: unknown[]): Promise<number> {
@@ -111,7 +122,7 @@ class FakeRedis extends EventEmitter {
   xautoclaim(...args: unknown[]): Promise<unknown[]> {
     this.calls.push(['xautoclaim', ...args]);
     if (this.failXautoclaim) return Promise.reject(this.failXautoclaim);
-    return Promise.resolve(['0-0', []]);
+    return Promise.resolve(['0-0', this.autoclaimEntries.splice(0)]);
   }
 
   scanPages: Array<[string, string[]]> = [['0', []]];

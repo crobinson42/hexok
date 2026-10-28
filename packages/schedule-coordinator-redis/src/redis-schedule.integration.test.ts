@@ -77,25 +77,28 @@ describeRedisLifecycle(
       logger,
     });
     let count = 0;
+    async function tick(): Promise<void> {
+      count += 1;
+      const job = `job-${count}`;
+      coordinator.register({ name: job, cron: '0 * * * *', onTick() {} });
+      await scheduler.jobs.at(-1)?.fire();
+      const failed = logger.errors.find((item) => item.fields?.job === job);
+      if (failed) throw failed.error;
+      const warned = logger.warnings.find(
+        (item) => item.fields?.job === job && item.fields.code !== undefined,
+      );
+      if (warned) {
+        throw Object.assign(new Error(warned.message), {
+          code: warned.fields?.code,
+        });
+      }
+    }
     return {
       start: () => coordinator.start(),
       stop: () => coordinator.stop(),
-      async operate() {
-        count += 1;
-        const job = `job-${count}`;
-        coordinator.register({ name: job, cron: '0 * * * *', onTick() {} });
-        await scheduler.jobs.at(-1)?.fire();
-        const failed = logger.errors.find((item) => item.fields?.job === job);
-        if (failed) throw failed.error;
-        const warned = logger.warnings.find(
-          (item) => item.fields?.job === job && item.fields.code !== undefined,
-        );
-        if (warned) {
-          throw Object.assign(new Error(warned.message), {
-            code: warned.fields?.code,
-          });
-        }
-      },
+      operate: tick,
+      // The suite calls stop() right after this, while the lock SET is in flight. A healthy stop lets it settle and releases the lock.
+      inFlight: tick,
     };
   },
 );

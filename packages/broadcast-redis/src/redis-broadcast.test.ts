@@ -1,14 +1,16 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 const published: unknown[][] = [];
-const subs = new Map<string, Set<(channel: string, message: string) => void>>();
 
 type Listener = (...args: unknown[]) => void;
 
 class FakeRedis {
   static instances: FakeRedis[] = [];
   static readyOnOpen = true;
+  static holdSubscribes = false;
   readonly listeners = new Map<string, Set<Listener>>();
+  readonly commands: string[][] = [];
+  readonly held: { resolve: () => void; reject: (error: Error) => void }[] = [];
   status: string;
   connects = 0;
   disconnects = 0;
@@ -82,13 +84,15 @@ class FakeRedis {
   }
 
   async subscribe(channel: string): Promise<void> {
-    const set = subs.get(channel) ?? new Set();
-    set.add(() => undefined);
-    subs.set(channel, set);
+    this.commands.push(['subscribe', channel]);
+    if (!FakeRedis.holdSubscribes) return;
+    await new Promise<void>((resolve, reject) => {
+      this.held.push({ resolve, reject });
+    });
   }
 
   async unsubscribe(...channels: string[]): Promise<void> {
-    for (const channel of channels) subs.delete(channel);
+    this.commands.push(['unsubscribe', ...channels]);
   }
 
   async quit(): Promise<string> {
@@ -293,6 +297,85 @@ describe('RedisBroadcast', () => {
       const [publisher, subscriber] = lastPair();
       expect(publisher.connects).toBe(1);
       expect(subscriber.connects).toBe(1);
+      await bus.stop();
+    });
+  });
+
+  describe('subscribe', () => {
+    const wire = 'hexok:broadcast:news';
+
+    afterEach(() => {
+      FakeRedis.holdSubscribes = false;
+    });
+
+    it('makes a later subscriber wait for the in-flight SUBSCRIBE', async () => {
+      FakeRedis.holdSubscribes = true;
+      const bus = new RedisBroadcast({ redis: 'redis://127.0.0.1:6379' });
+      await bus.start();
+      const [, subscriber] = lastPair();
+      const first = track(bus.subscribe(news, () => {}));
+      const second = track(bus.subscribe(news, () => {}));
+      await tick();
+      expect(second.settled).toBe(false);
+      expect(subscriber.commands).toEqual([['subscribe', wire]]);
+      subscriber.held[0]?.resolve();
+      await tick();
+      expect(first).toEqual({ settled: true, error: undefined });
+      expect(second).toEqual({ settled: true, error: undefined });
+      await bus.stop();
+    });
+
+    it('drops the handlers when SUBSCRIBE fails', async () => {
+      FakeRedis.holdSubscribes = true;
+      const bus = new RedisBroadcast({ redis: 'redis://127.0.0.1:6379' });
+      await bus.start();
+      const [, subscriber] = lastPair();
+      const seen: unknown[] = [];
+      const first = bus.subscribe(news, (message) => {
+        seen.push(message.payload);
+      });
+      const second = bus.subscribe(news, (message) => {
+        seen.push(message.payload);
+      });
+      subscriber.held[0]?.reject(new Error('subscribe failed'));
+      await expect(first).rejects.toThrow('subscribe failed');
+      await expect(second).rejects.toThrow('subscribe failed');
+      await bus.publish(news, { dropped: true });
+      expect(seen).toEqual([]);
+
+      const third = bus.subscribe(news, () => {});
+      subscriber.held[1]?.resolve();
+      await third;
+      await bus.stop();
+      expect(subscriber.commands).toEqual([
+        ['subscribe', wire],
+        ['subscribe', wire],
+        ['unsubscribe', wire],
+      ]);
+    });
+
+    it('keeps command order when unsubscribe races an in-flight SUBSCRIBE', async () => {
+      FakeRedis.holdSubscribes = true;
+      const bus = new RedisBroadcast({ redis: 'redis://127.0.0.1:6379' });
+      await bus.start();
+      const [, subscriber] = lastPair();
+      const handler = () => {};
+      const first = bus.subscribe(news, handler);
+      await bus.unsubscribe(news, handler);
+      const seen: unknown[] = [];
+      const second = bus.subscribe(news, (message) => {
+        seen.push(message.payload);
+      });
+      expect(subscriber.commands).toEqual([
+        ['subscribe', wire],
+        ['unsubscribe', wire],
+        ['subscribe', wire],
+      ]);
+      subscriber.held[0]?.resolve();
+      subscriber.held[1]?.resolve();
+      await Promise.all([first, second]);
+      await bus.publish(news, { n: 2 });
+      expect(seen).toEqual([{ n: 2 }]);
       await bus.stop();
     });
   });

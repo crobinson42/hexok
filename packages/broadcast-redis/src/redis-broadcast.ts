@@ -16,6 +16,11 @@ export interface RedisBroadcastConfig {
   readonly logger?: LogSink;
 }
 
+interface Listening {
+  readonly handlers: Set<BroadcastHandler<unknown>>;
+  readonly subscribed: Promise<void>;
+}
+
 export class RedisBroadcast extends Adapter(Broadcast) {
   readonly #redis: string | RedisOptions;
   readonly #channelPrefix: string;
@@ -26,7 +31,7 @@ export class RedisBroadcast extends Adapter(Broadcast) {
   #subscriber: Redis | undefined;
   #started: Promise<void> | undefined;
   #starting: AbortController | undefined;
-  readonly #handlers = new Map<string, Set<BroadcastHandler<unknown>>>();
+  readonly #channels = new Map<string, Listening>();
 
   constructor(config: RedisBroadcastConfig) {
     super();
@@ -56,22 +61,22 @@ export class RedisBroadcast extends Adapter(Broadcast) {
     handler: BroadcastHandler<T, Name>,
   ): Promise<void> {
     const subscriber = this.#requireSubscriber();
-    const set = this.#handlers.get(channel.name) ?? new Set();
-    const first = set.size === 0;
-    set.add(handler as BroadcastHandler<unknown>);
-    this.#handlers.set(channel.name, set);
-    if (first) await subscriber.subscribe(this.#wire(channel.name));
+    const listening =
+      this.#channels.get(channel.name) ??
+      this.#listen(subscriber, channel.name);
+    listening.handlers.add(handler as BroadcastHandler<unknown>);
+    await listening.subscribed;
   }
 
   async unsubscribe<Name extends string, T>(
     channel: Channel<Name, T>,
     handler: BroadcastHandler<T, Name>,
   ): Promise<void> {
-    const set = this.#handlers.get(channel.name);
-    if (!set) return;
-    set.delete(handler as BroadcastHandler<unknown>);
-    if (set.size > 0) return;
-    this.#handlers.delete(channel.name);
+    const listening = this.#channels.get(channel.name);
+    if (!listening) return;
+    listening.handlers.delete(handler as BroadcastHandler<unknown>);
+    if (listening.handlers.size > 0) return;
+    this.#channels.delete(channel.name);
     await this.#subscriber?.unsubscribe(this.#wire(channel.name));
   }
 
@@ -79,12 +84,12 @@ export class RedisBroadcast extends Adapter(Broadcast) {
     const publisher = this.#publisher;
     const subscriber = this.#subscriber;
     const starting = this.#starting;
-    const channels = [...this.#handlers.keys()];
+    const channels = [...this.#channels.keys()];
     this.#publisher = undefined;
     this.#subscriber = undefined;
     this.#started = undefined;
     this.#starting = undefined;
-    this.#handlers.clear();
+    this.#channels.clear();
     if (starting) {
       starting.abort(new Error('broadcast: stop() was called before ready'));
       publisher?.disconnect();
@@ -148,6 +153,22 @@ export class RedisBroadcast extends Adapter(Broadcast) {
     return redis;
   }
 
+  #listen(subscriber: Redis, name: string): Listening {
+    const handlers = new Set<BroadcastHandler<unknown>>();
+    const subscribed = subscriber.subscribe(this.#wire(name)).then(
+      () => undefined,
+      (error: unknown) => {
+        if (this.#channels.get(name)?.handlers === handlers) {
+          this.#channels.delete(name);
+        }
+        throw error;
+      },
+    );
+    const listening = { handlers, subscribed };
+    this.#channels.set(name, listening);
+    return listening;
+  }
+
   async #deliver(wire: string, raw: string): Promise<void> {
     const channel = wire.startsWith(this.#channelPrefix)
       ? wire.slice(this.#channelPrefix.length)
@@ -162,7 +183,7 @@ export class RedisBroadcast extends Adapter(Broadcast) {
       );
       return;
     }
-    const handlers = [...(this.#handlers.get(channel) ?? [])];
+    const handlers = [...(this.#channels.get(channel)?.handlers ?? [])];
     for (const handler of handlers) {
       try {
         await Promise.resolve(handler({ channel, payload }));

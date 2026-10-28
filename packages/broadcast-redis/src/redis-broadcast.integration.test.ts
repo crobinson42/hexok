@@ -71,6 +71,29 @@ describe.skipIf(!process.env.REDIS_URL)('RedisBroadcast integration', () => {
     }
   });
 
+  it('delivers to a subscriber that joins an in-flight SUBSCRIBE', async () => {
+    const url = process.env.REDIS_URL ?? '';
+    const prefix = `hexok:broadcast:it:${randomUUID()}:`;
+    const bus = new RedisBroadcast({ redis: url, channelPrefix: prefix });
+    buses.push(bus);
+    await bus.start();
+    for (let run = 0; run < 50; run += 1) {
+      const news = channel<number>(`news-${run}`);
+      const seen: unknown[] = [];
+      const first = bus.subscribe(news, () => {});
+      await bus.subscribe(news, (message) => {
+        seen.push(message.payload);
+      });
+      await bus.publish(news, run);
+      await first;
+      const deadline = Date.now() + 1000;
+      while (seen.length === 0 && Date.now() < deadline) {
+        await new Promise((resolve) => setTimeout(resolve, 5));
+      }
+      expect(seen).toEqual([run]);
+    }
+  });
+
   async function startSubscribePublish(
     redis: string | RedisOptions,
   ): Promise<void> {

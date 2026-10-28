@@ -1,7 +1,13 @@
 import { EventEmitter } from 'node:events';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { ParkInput } from './park.js';
-import { releaseConsumer, releaseConsumerScript } from './release-consumer.js';
+import {
+  ackDeletedScript,
+  deleteIdleStreamScript,
+  destroyIdleGroupScript,
+  releaseConsumer,
+  releaseConsumerScript,
+} from './scripts.js';
 
 interface Pending {
   resolve: (value: unknown) => void;
@@ -53,6 +59,7 @@ class FakeRedis extends EventEmitter {
 
   xadd(...args: unknown[]): Promise<string> {
     this.calls.push(['xadd', ...args]);
+    if (this.#stuck()) return new Promise(() => {});
     if (this.failXadd) {
       // ioredis puts the command and its args on a ReplyError.
       const error = Object.assign(new Error('xadd failed'), {
@@ -73,6 +80,26 @@ class FakeRedis extends EventEmitter {
   xgroup(...args: unknown[]): Promise<string> {
     this.calls.push(['xgroup', ...args]);
     if (this.#stuck()) return new Promise(() => {});
+    if (args[0] === 'DESTROY') {
+      const replyKey = ['GROUPS', args[1]].join('\0');
+      const groups = this.xinfoReplies.get(replyKey);
+      if (Array.isArray(groups)) {
+        this.xinfoReplies.set(
+          replyKey,
+          groups.filter((row: unknown[]) => row[1] !== args[2]),
+        );
+      }
+    }
+    if (args[0] === 'DELCONSUMER') {
+      const replyKey = ['CONSUMERS', args[1], args[2]].join('\0');
+      const consumers = this.xinfoReplies.get(replyKey);
+      if (Array.isArray(consumers)) {
+        this.xinfoReplies.set(
+          replyKey,
+          consumers.filter((row: unknown[]) => row[1] !== args[3]),
+        );
+      }
+    }
     if (args[0] === 'CREATE' && this.failCreate) {
       return Promise.reject(this.failCreate);
     }
@@ -111,8 +138,28 @@ class FakeRedis extends EventEmitter {
   }
 
   /** Runs the consumer release script with this fake's own XPENDING and DELCONSUMER, as Redis would. */
+  readonly scripts: unknown[] = [];
+
   async eval(script: unknown, ...args: unknown[]): Promise<unknown> {
     this.calls.push(['eval', ...args]);
+    this.scripts.push(script);
+    if (script === ackDeletedScript) return [];
+    if (script === destroyIdleGroupScript) {
+      const [, key, group] = args;
+      if (this.#seen(['CONSUMERS', key, group]).length > 0) return 0;
+      await this.xgroup('DESTROY', key, group);
+      return 1;
+    }
+    if (script === deleteIdleStreamScript) {
+      const [, key, cutoff] = args;
+      if (this.#seen(['GROUPS', key]).length > 0) return 0;
+      const stream = this.#seen(['STREAM', key]);
+      const last = String(stream[stream.indexOf('last-generated-id') + 1]);
+      const ms = Number(last.split('-')[0]);
+      if (!(ms > 0) || ms > Number(cutoff)) return 0;
+      await this.del(key);
+      return 1;
+    }
     if (script !== releaseConsumerScript) throw new Error('unknown script');
     const [, key, group, consumer] = args;
     const owned = await this.xpending(key, group, '-', '+', 1, consumer);
@@ -131,14 +178,31 @@ class FakeRedis extends EventEmitter {
     return Promise.resolve([]);
   }
 
+  /** Replies to each `XAUTOCLAIM` as is, such as a Redis 6.2 reply with `nil` for a deleted entry. */
+  autoclaimReplies: unknown[][] = [];
+
+  holdAutoclaim = false;
+
   xautoclaim(...args: unknown[]): Promise<unknown[]> {
     this.calls.push(['xautoclaim', ...args]);
+    if (this.holdAutoclaim) return new Promise(() => {});
     if (this.failXautoclaim) return Promise.reject(this.failXautoclaim);
+    const reply = this.autoclaimReplies.shift();
+    if (reply) return Promise.resolve(reply);
     return Promise.resolve(['0-0', this.autoclaimEntries.splice(0)]);
   }
 
   scanPages: Array<[string, string[]]> = [['0', []]];
   xinfoReplies = new Map<string, unknown>();
+  /** What a script sees when Redis changed after the `XINFO` that `maintain` read. Keyed like `xinfoReplies`. */
+  scriptXinfo = new Map<string, unknown>();
+
+  #seen(args: unknown[]): unknown[] {
+    const key = args.map(String).join('\0');
+    const reply = this.scriptXinfo.get(key) ?? this.xinfoReplies.get(key);
+    return Array.isArray(reply) ? reply : [];
+  }
+
   failXinfo = new Map<string, Error>();
   #scanCursor = 0;
 
@@ -626,12 +690,13 @@ describe('RedisQueue commands', () => {
     await queue.stop();
   });
 
-  it('does not XACK after unsubscribe or stop', async () => {
+  it('does not XACK once unsubscribe or stop stops waiting', async () => {
     vi.useFakeTimers();
     const queue = new RedisQueue({
       redis: 'redis://127.0.0.1:6379',
       visibilityMs: 30_000,
       blockMs: 1000,
+      stopTimeoutMs: 100,
     });
     await queue.start();
     let release: (value: 'ack') => void = () => {};
@@ -650,8 +715,9 @@ describe('RedisQueue commands', () => {
     const unsubscribing = queue.unsubscribe('jobs', {
       consumerGroup: 'billing',
     });
-    release('ack');
+    await vi.advanceTimersByTimeAsync(100);
     await unsubscribing;
+    release('ack');
     await vi.waitFor(() => {
       const commands = FakeRedis.instances[0];
       expect(commands?.calls.some((call) => call[0] === 'xack')).toBe(false);
@@ -661,6 +727,7 @@ describe('RedisQueue commands', () => {
     const queue2 = new RedisQueue({
       redis: 'redis://127.0.0.1:6379',
       visibilityMs: 50,
+      stopTimeoutMs: 100,
     });
     await queue2.start();
     let release2: (value: 'ack') => void = () => {};
@@ -678,8 +745,10 @@ describe('RedisQueue commands', () => {
     ]);
     await vi.advanceTimersByTimeAsync(0);
     const stopping = queue2.stop();
-    release2('ack');
+    await vi.advanceTimersByTimeAsync(100);
     await stopping;
+    release2('ack');
+    await vi.advanceTimersByTimeAsync(0);
     const commands2 = FakeRedis.instances[started - 2];
     expect(commands2?.calls.some((call) => call[0] === 'xack')).toBe(false);
     expect(callsOf(commands2, 'DELCONSUMER')).toHaveLength(0);
@@ -1242,6 +1311,7 @@ describe('RedisQueue lifecycle', () => {
     const queue = new RedisQueue({
       redis: 'redis://127.0.0.1:6379',
       visibilityMs: 1000,
+      stopTimeoutMs: 1000,
     });
     await queue.start();
     await queue.subscribe('jobs', {
@@ -1461,6 +1531,324 @@ describe('RedisQueue reliability', () => {
     FakeRedis.initialStatus = 'ready';
   });
 
+  it('recovery skips an entry Redis 6.2 returns as nil, acks the deleted ids, and keeps running', async () => {
+    vi.useFakeTimers();
+    const logs = recordingLogger();
+    const queue = new RedisQueue({
+      redis: 'redis://127.0.0.1:6379',
+      visibilityMs: 1000,
+      logger: logs.sink,
+    });
+    await queue.start();
+    const commands = FakeRedis.instances[0];
+    if (!commands) throw new Error('missing commands client');
+    commands.autoclaimReplies = [
+      ['0-0', [null, ['3-1', ['payload', '{"n":1}']]]],
+      ['0-0', [null, ['3-2', ['payload', '{"n":2}']]]],
+    ];
+    const handled: string[] = [];
+    await queue.subscribe('jobs', {
+      consumerGroup: 'billing',
+      handler: async (message) => {
+        handled.push(message.id);
+      },
+    });
+    await vi.advanceTimersByTimeAsync(500);
+    await vi.advanceTimersByTimeAsync(500);
+    expect(handled).toEqual(['3-1', '3-2']);
+    expect(
+      commands.scripts.filter((script) => script === ackDeletedScript),
+    ).toHaveLength(2);
+    expect(logs.calls).toEqual([]);
+    await queue.stop();
+  });
+
+  it('the heartbeat claims every entry of a read batch while the first is handled', async () => {
+    vi.useFakeTimers();
+    const queue = new RedisQueue({
+      redis: 'redis://127.0.0.1:6379',
+      visibilityMs: 300,
+    });
+    await queue.start();
+    let release: (value: 'ack') => void = () => {};
+    await queue.subscribe('jobs', {
+      consumerGroup: 'billing',
+      handler: () =>
+        new Promise((resolve) => {
+          release = resolve;
+        }),
+    });
+    FakeRedis.instances[1]?.pending?.resolve([
+      [
+        'hexok:queue:jobs',
+        [
+          ['4-1', ['payload', '{}']],
+          ['4-2', ['payload', '{}']],
+          ['4-3', ['payload', '{}']],
+        ],
+      ],
+    ]);
+    await vi.advanceTimersByTimeAsync(100);
+    const commands = FakeRedis.instances[0];
+    const claims = commands?.calls.filter((call) => call[0] === 'xclaim');
+    expect(claims?.[0]?.slice(5)).toEqual(['4-1', '4-2', '4-3', 'JUSTID']);
+    release('ack');
+    await queue.stop();
+  });
+
+  it('stop acks a handler that finishes while it waits, then removes the consumer', async () => {
+    vi.useFakeTimers();
+    const queue = new RedisQueue({ redis: 'redis://127.0.0.1:6379' });
+    await queue.start();
+    let release: (value: 'ack') => void = () => {};
+    await queue.subscribe('jobs', {
+      consumerGroup: 'billing',
+      handler: () =>
+        new Promise((resolve) => {
+          release = resolve;
+        }),
+    });
+    FakeRedis.instances[1]?.pending?.resolve([
+      ['hexok:queue:jobs', [['4-1', ['payload', '{}']]]],
+    ]);
+    await vi.advanceTimersByTimeAsync(0);
+    const stopped = settledFlag(queue.stop());
+    await vi.advanceTimersByTimeAsync(50);
+    expect(stopped()).toBe(false);
+    release('ack');
+    await vi.advanceTimersByTimeAsync(0);
+    expect(stopped()).toBe(true);
+    const commands = FakeRedis.instances[0];
+    expect(commands?.calls.filter((call) => call[0] === 'xack')).toEqual([
+      ['xack', 'hexok:queue:jobs', 'billing', '4-1'],
+    ]);
+    expect(callsOf(commands, 'DELCONSUMER')).toHaveLength(1);
+  });
+
+  it('unsubscribe acks a handler that finishes while it waits', async () => {
+    vi.useFakeTimers();
+    const queue = new RedisQueue({ redis: 'redis://127.0.0.1:6379' });
+    await queue.start();
+    let release: (value: 'ack') => void = () => {};
+    await queue.subscribe('jobs', {
+      consumerGroup: 'billing',
+      handler: () =>
+        new Promise((resolve) => {
+          release = resolve;
+        }),
+    });
+    FakeRedis.instances[1]?.pending?.resolve([
+      ['hexok:queue:jobs', [['4-1', ['payload', '{}']]]],
+    ]);
+    await vi.advanceTimersByTimeAsync(0);
+    const unsubscribing = queue.unsubscribe('jobs', {
+      consumerGroup: 'billing',
+    });
+    release('ack');
+    await unsubscribing;
+    const commands = FakeRedis.instances[0];
+    expect(commands?.calls.filter((call) => call[0] === 'xack')).toEqual([
+      ['xack', 'hexok:queue:jobs', 'billing', '4-1'],
+    ]);
+    expect(callsOf(commands, 'DELCONSUMER')).toHaveLength(1);
+    await queue.stop();
+  });
+
+  it('a handler that unsubscribes its own subscription is not waited for', async () => {
+    vi.useFakeTimers();
+    const queue = new RedisQueue({
+      redis: 'redis://127.0.0.1:6379',
+      stopTimeoutMs: 3000,
+    });
+    await queue.start();
+    let finished = false;
+    await queue.subscribe('jobs', {
+      consumerGroup: 'billing',
+      handler: async () => {
+        await queue.unsubscribe('jobs', { consumerGroup: 'billing' });
+        finished = true;
+      },
+    });
+    FakeRedis.instances[1]?.pending?.resolve([
+      ['hexok:queue:jobs', [['4-1', ['payload', '{}']]]],
+    ]);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(finished).toBe(true);
+    const commands = FakeRedis.instances[0];
+    expect(commands?.calls.some((call) => call[0] === 'xack')).toBe(false);
+    await queue.stop();
+  });
+
+  it('a handler that calls stop is not waited for', async () => {
+    vi.useFakeTimers();
+    const queue = new RedisQueue({
+      redis: 'redis://127.0.0.1:6379',
+      stopTimeoutMs: 3000,
+    });
+    await queue.start();
+    let finished = false;
+    await queue.subscribe('jobs', {
+      consumerGroup: 'billing',
+      handler: async () => {
+        await queue.stop();
+        finished = true;
+      },
+    });
+    FakeRedis.instances[1]?.pending?.resolve([
+      ['hexok:queue:jobs', [['4-1', ['payload', '{}']]]],
+    ]);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(finished).toBe(true);
+    expect(queue.state).toBe('stopped');
+  });
+
+  it('parks a publish cut short by stop with outcome unknown', async () => {
+    vi.useFakeTimers();
+    const parked: ParkInput[] = [];
+    const quarantine = {
+      async park(input: ParkInput) {
+        parked.push(input);
+        return { id: 'q1' };
+      },
+    };
+    const queue = new RedisQueue({
+      redis: 'redis://127.0.0.1:6379',
+      stopTimeoutMs: 500,
+      quarantine,
+    });
+    await queue.start();
+    const commands = FakeRedis.instances[0];
+    if (!commands) throw new Error('missing commands client');
+    commands.failXadd = true;
+    await queue.publish('jobs', { n: 0 }).catch(() => undefined);
+    commands.failXadd = false;
+    commands.stalled = true;
+    const publishing = queue.publish('jobs', { n: 1 });
+    publishing.catch(() => undefined);
+    const stopping = queue.stop();
+    await vi.advanceTimersByTimeAsync(500);
+    await stopping;
+    await expect(publishing).rejects.toMatchObject({
+      code: 'StoppedBeforeReply',
+    });
+    expect(parked.map((item) => item.context)).toEqual([
+      { adapter: 'redis' },
+      { adapter: 'redis', outcome: 'unknown' },
+    ]);
+    expect(parked[1]).toMatchObject({
+      operation: 'publish',
+      payload: { n: 1 },
+      error: { code: 'StoppedBeforeReply' },
+    });
+  });
+
+  it('stopTimeoutMs defaults to 10000 whatever visibilityMs is', async () => {
+    vi.useFakeTimers();
+    const queue = new RedisQueue({
+      redis: 'redis://127.0.0.1:6379',
+      visibilityMs: 60_000,
+    });
+    await queue.start();
+    await queue.subscribe('jobs', {
+      consumerGroup: 'billing',
+      handler: async () => 'ack',
+    });
+    const commands = FakeRedis.instances[0];
+    if (!commands) throw new Error('missing commands client');
+    commands.stalled = true;
+    const stopped = settledFlag(queue.stop());
+    await vi.advanceTimersByTimeAsync(9999);
+    expect(stopped()).toBe(false);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(stopped()).toBe(true);
+  });
+
+  it('logs a background command that stop cut short at warn', async () => {
+    vi.useFakeTimers();
+    const logs = recordingLogger();
+    const queue = new RedisQueue({
+      redis: 'redis://127.0.0.1:6379',
+      stopTimeoutMs: 500,
+      logger: logs.sink,
+    });
+    await queue.start();
+    await queue.subscribe('jobs', {
+      consumerGroup: 'billing',
+      handler: async () => 'ack',
+    });
+    const commands = FakeRedis.instances[0];
+    if (!commands) throw new Error('missing commands client');
+    commands.stalled = true;
+    const stopping = queue.stop();
+    await vi.advanceTimersByTimeAsync(500);
+    await stopping;
+    expect(logs.calls).toEqual([
+      [
+        'warn',
+        'queue: stop() stopped waiting before Redis replied to the consumer release. Redis may or may not have run it.',
+        {
+          adapter: 'queue',
+          connection: 'commands',
+          topic: 'jobs',
+          group: 'billing',
+          code: 'StoppedBeforeReply',
+        },
+      ],
+    ]);
+  });
+
+  it('a recovery tick is skipped while the previous one runs', async () => {
+    vi.useFakeTimers();
+    const queue = new RedisQueue({
+      redis: 'redis://127.0.0.1:6379',
+      visibilityMs: 1000,
+      stopTimeoutMs: 100,
+    });
+    await queue.start();
+    const commands = FakeRedis.instances[0];
+    if (!commands) throw new Error('missing commands client');
+    commands.holdAutoclaim = true;
+    await queue.subscribe('jobs', {
+      consumerGroup: 'billing',
+      handler: async () => 'ack',
+    });
+    await vi.advanceTimersByTimeAsync(2000);
+    expect(
+      commands.calls.filter((call) => call[0] === 'xautoclaim'),
+    ).toHaveLength(1);
+    const stopping = queue.stop();
+    await vi.advanceTimersByTimeAsync(100);
+    await stopping;
+  });
+
+  it('recovery accepts the deleted ids Redis 7 returns as a third element', async () => {
+    vi.useFakeTimers();
+    const logs = recordingLogger();
+    const queue = new RedisQueue({
+      redis: 'redis://127.0.0.1:6379',
+      visibilityMs: 1000,
+      logger: logs.sink,
+    });
+    await queue.start();
+    const commands = FakeRedis.instances[0];
+    if (!commands) throw new Error('missing commands client');
+    commands.autoclaimReplies = [
+      ['0-0', [['3-1', ['payload', '{"n":1}']]], ['2-9']],
+    ];
+    const handled: string[] = [];
+    await queue.subscribe('jobs', {
+      consumerGroup: 'billing',
+      handler: async (message) => {
+        handled.push(message.id);
+      },
+    });
+    await vi.advanceTimersByTimeAsync(500);
+    expect(handled).toEqual(['3-1']);
+    expect(commands.scripts).not.toContain(ackDeletedScript);
+    expect(logs.calls).toEqual([]);
+    await queue.stop();
+  });
+
   it('state follows start and stop, and a failed start returns to idle', async () => {
     FakeRedis.initialStatus = 'connecting';
     const queue = new RedisQueue({ redis: 'redis://127.0.0.1:6379' });
@@ -1673,6 +2061,72 @@ describe('RedisQueue reliability', () => {
     expect(report.groupsDestroyed).toEqual([]);
     expect(report.streamsDeleted).toEqual([]);
     expect(callsOf(commands, 'DESTROY')).toHaveLength(0);
+    await queue.stop();
+  });
+
+  it('maintain keeps and does not report a group that gained a consumer after XINFO', async () => {
+    const now = Date.now();
+    const old = `${now - 60_000}-0`;
+    const queue = new RedisQueue({ redis: 'redis://127.0.0.1:6379' });
+    await queue.start();
+    const commands = FakeRedis.instances[0];
+    if (!commands) throw new Error('missing commands client');
+    const key = 'hexok:queue:jobs';
+    scriptStream(commands, key, {
+      length: 1,
+      lastGeneratedId: old,
+      groups: 1,
+      firstId: old,
+    });
+    scriptGroup(commands, key, {
+      name: 'billing',
+      consumers: 0,
+      pending: 0,
+      lastDeliveredId: old,
+    });
+    commands.scriptXinfo.set(['CONSUMERS', key, 'billing'].join('\0'), [
+      ['name', 'hexok:2:new', 'pending', 0, 'idle', 0],
+    ]);
+
+    const report = await queue.maintain({
+      dryRun: false,
+      topics: ['jobs'],
+      dropIdleGroups: { idleMs: 1000 },
+      dropIdleStreams: { idleMs: 1000 },
+    });
+
+    expect(callsOf(commands, 'DESTROY')).toHaveLength(0);
+    expect(commands.calls.some((call) => call[0] === 'del')).toBe(false);
+    expect(report.groupsDestroyed).toEqual([]);
+    expect(report.streamsDeleted).toEqual([]);
+    await queue.stop();
+  });
+
+  it('maintain keeps and does not report a stream that gained a group after XINFO', async () => {
+    const now = Date.now();
+    const old = `${now - 60_000}-0`;
+    const queue = new RedisQueue({ redis: 'redis://127.0.0.1:6379' });
+    await queue.start();
+    const commands = FakeRedis.instances[0];
+    if (!commands) throw new Error('missing commands client');
+    const key = 'hexok:queue:jobs';
+    scriptStream(commands, key, {
+      length: 0,
+      lastGeneratedId: old,
+      groups: 0,
+    });
+    commands.scriptXinfo.set(['GROUPS', key].join('\0'), [
+      ['name', 'mail', 'consumers', 0, 'pending', 0],
+    ]);
+
+    const report = await queue.maintain({
+      dryRun: false,
+      topics: ['jobs'],
+      dropIdleStreams: { idleMs: 1000 },
+    });
+
+    expect(commands.calls.some((call) => call[0] === 'del')).toBe(false);
+    expect(report.streamsDeleted).toEqual([]);
     await queue.stop();
   });
 

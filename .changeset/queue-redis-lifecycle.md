@@ -2,13 +2,23 @@
 "@hexok/queue-redis": minor
 ---
 
-`RedisQueue` runs on `@hexok/ioredis-lifecycle`, the lifecycle every hexok Redis adapter shares. A command queued during an outage now rejects with `StoppedBeforeReply` on `stop()` instead of never settling. `unsubscribe()` finishes within `stopTimeoutMs` when Redis stops answering. `unsubscribe()`, `stop()`, and `maintain()` remove a consumer with one atomic script, so a consumer that just took an entry is kept.
+`RedisQueue` runs on `@hexok/ioredis-lifecycle`. It has the same lifecycle, error codes, and log fields as the other Redis adapters.
+
+- `stop()` finishes within `stopTimeoutMs`, which defaults to 10000. A handler still running is cut off, and another consumer reclaims its entry after `visibilityMs`.
+- `startTimeoutMs` makes `start()` reject with `StartTimeout` when Redis is not ready in time. It is unset by default, so `start()` waits.
+- A command queued during an outage rejects with `StoppedBeforeReply` on `stop()`. Before, it never settled.
+- A handler that finishes while `stop()` or `unsubscribe()` waits is acked, so a deploy no longer redelivers every message in flight.
+- Every entry of a read batch is in the heartbeat until it settles. Before, entries waiting behind a slow handler were reclaimed and handled twice, by the same subscription too.
+- On Redis 6.2, recovery no longer stops for good at a pending entry deleted from the stream. That entry is acked.
+- A consumer that owns pending entries is kept on `unsubscribe()` and `stop()`. Before, it was deleted, and its entries were lost. `maintain()` checks a consumer, group, or stream again in one Lua script before it removes it.
+- A `publish()` cut short by `stop()` is parked with `outcome: 'unknown'` in its context, since Redis may have stored it.
+- `LifecycleError` and the `LifecycleState` type are exported from this package. `LogSink` is the lifecycle's type.
+- `state` returns the lifecycle state, such as `ready`, to gate traffic during startup and shutdown.
 
 Upgrade notes:
 
-- Lifecycle errors are a `LifecycleError` with a `code`: `NotStarted`, `Starting`, `Stopped`, `StoppedBeforeReply`, `StartTimeout`, or `EndedBeforeReady`. Import `LifecycleError` and the `LifecycleState` type from `@hexok/queue-redis`, and branch on `code`. The messages changed. A call while `start()` is pending says `start() has not finished` instead of `start() was not called`.
-- `stopTimeoutMs` bounds `stop()` and `unsubscribe()`. It defaults to `visibilityMs`, which `stop()` used before.
-- `startTimeoutMs` makes `start()` reject when Redis is not ready in time. It is unset by default, so `start()` waits as before.
-- `queue.state` returns the lifecycle state for a readiness or health check.
-- `unsubscribe()` now waits up to `stopTimeoutMs` for the subscription's in-flight handlers, as `stop()` does.
-- Log fields are `{ adapter: 'queue', connection, topic, group }`. `LogSink` is the lifecycle's type.
+- Errors are a `LifecycleError` with a `code`. Branch on `code`, not on the message. The old message `queue: start() was not called` is gone.
+- `publish()`, `subscribe()`, and `maintain()` while `start()` is pending reject with `Starting`. Before, `start()` resolved at once. Await `start()` first.
+- `stop()` waited up to `visibilityMs` for handlers, then sent an unbounded `QUIT`. It now takes at most `stopTimeoutMs` in all, 10 seconds by default.
+- `unsubscribe()` now waits up to `stopTimeoutMs` for its subscription's handlers. Before, it returned without waiting. A handler that calls `unsubscribe()` on its own subscription, or `stop()`, is not waited for.
+- Log fields are `{ adapter: 'queue', connection, topic, group }`, with `id` for an entry and `code` for a lifecycle error. A handler or decode failure has no `connection`. Before, they were `{ topic }`, `{ topic, group }`, or `{ topic, id }`. A background command that `stop()` cut short is logged at `warn`.

@@ -3,7 +3,11 @@ import { describeRedisLifecycle, RedisProxy, runNode } from '@hexok/test-redis';
 import { Redis } from 'ioredis';
 import { afterEach, describe, expect, it } from 'vitest';
 import { RedisQueue } from './redis-queue.js';
-import { releaseConsumer } from './release-consumer.js';
+import {
+  deleteIdleStream,
+  destroyIdleGroup,
+  releaseConsumer,
+} from './scripts.js';
 
 describeRedisLifecycle('RedisQueue', ({ redis, stopTimeoutMs }) => {
   const queue = new RedisQueue({
@@ -15,6 +19,8 @@ describeRedisLifecycle('RedisQueue', ({ redis, stopTimeoutMs }) => {
     start: () => queue.start(),
     stop: () => queue.stop(),
     operate: () => queue.publish('jobs', { n: 1 }),
+    // The suite calls stop() as soon as this returns, so the work must already be under way.
+    inFlight: () => queue.publish('jobs', { n: 2 }),
   };
 });
 
@@ -93,7 +99,7 @@ describe.skipIf(!process.env.REDIS_URL)('RedisQueue integration', () => {
     return { queue, proxy };
   }
 
-  it('acks void and drop, leaves retry pending, and skips XACK after unsubscribe and stop', async () => {
+  it('acks void and drop, leaves retry pending, and skips XACK once unsubscribe and stop stop waiting', async () => {
     const url = process.env.REDIS_URL ?? '';
     const probe = new Redis(url);
     open.push(probe);
@@ -104,6 +110,7 @@ describe.skipIf(!process.env.REDIS_URL)('RedisQueue integration', () => {
       visibilityMs: 5000,
       blockMs: 200,
       retentionMs: 86_400_000,
+      stopTimeoutMs: 200,
     });
     queues.push(queue);
     await queue.start();
@@ -168,6 +175,7 @@ describe.skipIf(!process.env.REDIS_URL)('RedisQueue integration', () => {
       keyPrefix: prefix,
       visibilityMs: 300,
       blockMs: 200,
+      stopTimeoutMs: 200,
     });
     queues.push(queue2);
     await queue2.start();
@@ -181,9 +189,9 @@ describe.skipIf(!process.env.REDIS_URL)('RedisQueue integration', () => {
     });
     await queue2.publish('jobs', 'stopping');
     await waitFor(async () => (await pending()) >= 2);
-    const stopping = queue2.stop();
+    await queue2.stop();
     releaseStop('ack');
-    await stopping;
+    await new Promise((resolve) => setTimeout(resolve, 100));
     expect(await pending()).toBeGreaterThanOrEqual(2);
 
     const before = await probe.xlen(`${prefix}encoded`);
@@ -448,6 +456,69 @@ console.log(JSON.stringify({ growth, total: count * payload.length }));
     expect(groups).toHaveLength(1);
     expect(await probe.exists(key)).toBe(1);
   });
+  it('handles each entry of a read batch once while the batch outlasts visibilityMs', async () => {
+    const keyPrefix = newPrefix();
+    const admin = probe();
+    for (let n = 0; n < 10; n += 1) {
+      await admin.xadd(`${keyPrefix}jobs`, '*', 'payload', String(n));
+    }
+    const queue = new RedisQueue({
+      redis: process.env.REDIS_URL ?? '',
+      keyPrefix,
+      visibilityMs: 1000,
+      blockMs: 200,
+      batch: 10,
+    });
+    queues.push(queue);
+    await queue.start();
+    const calls: string[] = [];
+    let running = 0;
+    let most = 0;
+    await queue.subscribe('jobs', {
+      consumerGroup: 'workers',
+      startFrom: 'earliest',
+      handler: async (message) => {
+        calls.push(message.id);
+        running += 1;
+        most = Math.max(most, running);
+        await new Promise((resolve) => setTimeout(resolve, 400));
+        running -= 1;
+      },
+    });
+    await waitFor(() => new Set(calls).size === 10);
+    await new Promise((resolve) => setTimeout(resolve, 600));
+    expect({ calls: calls.length, most }).toEqual({ calls: 10, most: 1 });
+  });
+
+  it('stop acks a handler that finishes within stopTimeoutMs', async () => {
+    const keyPrefix = newPrefix();
+    const admin = probe();
+    const queue = new RedisQueue({
+      redis: process.env.REDIS_URL ?? '',
+      keyPrefix,
+      blockMs: 200,
+      stopTimeoutMs: 2000,
+    });
+    queues.push(queue);
+    await queue.start();
+    let started = false;
+    await queue.subscribe('jobs', {
+      consumerGroup: 'workers',
+      handler: async () => {
+        started = true;
+        await new Promise((resolve) => setTimeout(resolve, 300));
+      },
+    });
+    await queue.publish('jobs', 'deploy');
+    await waitFor(() => started);
+    await queue.stop();
+    const summary = (await admin.xpending(`${keyPrefix}jobs`, 'workers')) as [
+      number,
+    ];
+    expect(summary[0]).toBe(0);
+    expect(await consumersOf(admin, `${keyPrefix}jobs`, 'workers')).toEqual([]);
+  });
+
   it('a publish queued while Redis refuses connections rejects with StoppedBeforeReply on stop', async () => {
     const { queue, proxy } = await proxied(newPrefix(), 500);
     await proxy.refuse();
@@ -592,6 +663,48 @@ console.log(JSON.stringify({ growth, total: count * payload.length }));
     expect(await consumersOf(admin, key, 'workers')).toEqual([]);
   });
 
+  it('the group script destroys a group only while it has no consumers and nothing pending', async () => {
+    const admin = probe();
+    const key = `${newPrefix()}jobs`;
+    await admin.xgroup('CREATE', key, 'busy', '0', 'MKSTREAM');
+    await admin.xgroup('CREATE', key, 'idle', '0');
+    await admin.xadd(key, '*', 'payload', '1');
+    await admin.xreadgroup(
+      'GROUP',
+      'busy',
+      'hexok:1',
+      'COUNT',
+      1,
+      'STREAMS',
+      key,
+      '>',
+    );
+    expect(await destroyIdleGroup(admin, key, 'busy')).toBe(false);
+    expect(await destroyIdleGroup(admin, key, 'idle')).toBe(true);
+    const groups = (await admin.xinfo('GROUPS', key)) as unknown[][];
+    expect(groups.map((group) => group[1])).toEqual(['busy']);
+    await admin.del(key);
+  });
+
+  it('the stream script deletes a stream only while it has no groups and its last id is old', async () => {
+    const admin = probe();
+    const prefix = newPrefix();
+    const old = Date.now() - 60_000;
+    const cutoff = Date.now() - 1000;
+    const grouped = `${prefix}grouped`;
+    const fresh = `${prefix}fresh`;
+    const idle = `${prefix}idle`;
+    await admin.xadd(grouped, `${old}-0`, 'payload', '1');
+    await admin.xgroup('CREATE', grouped, 'workers', '0');
+    await admin.xadd(fresh, '*', 'payload', '1');
+    await admin.xadd(idle, `${old}-0`, 'payload', '1');
+    expect(await deleteIdleStream(admin, grouped, cutoff)).toBe(false);
+    expect(await deleteIdleStream(admin, fresh, cutoff)).toBe(false);
+    expect(await deleteIdleStream(admin, idle, cutoff)).toBe(true);
+    expect(await admin.exists(grouped, fresh, idle)).toBe(2);
+    await admin.del(grouped, fresh);
+  });
+
   it('the release script keeps a consumer that owns a pending entry and deletes one that owns nothing', async () => {
     const admin = probe();
     const key = `${newPrefix()}jobs`;
@@ -624,4 +737,65 @@ console.log(JSON.stringify({ growth, total: count * payload.length }));
     ]);
     await admin.del(key);
   });
+});
+
+/**
+ * Redis 6.2 returns a deleted pending entry from `XAUTOCLAIM` as `nil` and keeps it pending. Redis 7 returns its id apart.
+ * Run against 6.2 with `docker run --rm -p 6380:6379 redis:6.2-alpine` and `REDIS62_URL=redis://127.0.0.1:6380`.
+ */
+const recoveryTargets = [
+  ['REDIS_URL', process.env.REDIS_URL],
+  ['REDIS62_URL', process.env.REDIS62_URL],
+] as const;
+
+describe.each(recoveryTargets)('RedisQueue recovery on %s', (_name, url) => {
+  it.skipIf(!url)(
+    'recovers past a pending entry deleted from the stream and acks it',
+    async () => {
+      const admin = new Redis(url ?? '');
+      const keyPrefix = newPrefix();
+      const key = `${keyPrefix}jobs`;
+      const queue = new RedisQueue({
+        redis: url ?? '',
+        keyPrefix,
+        visibilityMs: 300,
+        blockMs: 100,
+      });
+      try {
+        await admin.xgroup('CREATE', key, 'workers', '0', 'MKSTREAM');
+        const deleted = await admin.xadd(key, '*', 'payload', '"gone"');
+        const kept = await admin.xadd(key, '*', 'payload', '"kept"');
+        // A consumer that died while it held both entries.
+        await admin.xreadgroup(
+          'GROUP',
+          'workers',
+          'hexok:dead:1',
+          'COUNT',
+          10,
+          'STREAMS',
+          key,
+          '>',
+        );
+        await admin.xdel(key, deleted ?? '');
+        await new Promise((resolve) => setTimeout(resolve, 300));
+        const handled: string[] = [];
+        await queue.start();
+        await queue.subscribe('jobs', {
+          consumerGroup: 'workers',
+          handler: async (message) => {
+            handled.push(message.id);
+          },
+        });
+        await waitFor(async () => {
+          const summary = (await admin.xpending(key, 'workers')) as [number];
+          return handled.includes(kept ?? '') && summary[0] === 0;
+        });
+        expect(handled).toEqual([kept]);
+      } finally {
+        await queue.stop();
+        await admin.del(key);
+        await admin.quit();
+      }
+    },
+  );
 });

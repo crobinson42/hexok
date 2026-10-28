@@ -1,3 +1,4 @@
+import { AsyncLocalStorage } from 'node:async_hooks';
 import { randomUUID } from 'node:crypto';
 import {
   LifecycleError,
@@ -27,7 +28,7 @@ import {
   type RedisQueueStuckReason,
 } from './maintain.js';
 import { courtesyPark, type ParkSink, parkedError } from './park.js';
-import { releaseConsumer } from './release-consumer.js';
+import { ackDeleted, releaseConsumer } from './scripts.js';
 
 export type {
   RedisQueueMaintainOptions,
@@ -45,8 +46,9 @@ export interface RedisQueueConfig {
   readonly maxLen?: number;
   readonly retentionMs?: number;
   /**
-   * How long `stop()` and `unsubscribe()` wait for handlers, consumer release, and `QUIT`. Default `visibilityMs`.
-   * After `visibilityMs`, another consumer reclaims an unacked entry, so waiting longer gains nothing.
+   * How long `stop()` and `unsubscribe()` wait for handlers, consumer release, and `QUIT`. Default 10000.
+   * A handler still running when it runs out is cut off, and its entry stays pending until another consumer reclaims it after `visibilityMs`.
+   * So a stop shorter than `visibilityMs` is safe, and 10 seconds fits the default Kubernetes grace period beside other adapters.
    */
   readonly stopTimeoutMs?: number;
   /** Rejects `start()` with `StartTimeout` when Redis is not ready in time. Unset, `start()` waits for Redis. */
@@ -72,6 +74,11 @@ interface Subscription {
   readonly handler: QueueHandler<unknown>;
   /** Aborts on `unsubscribe` or `stop()`. It ends the current read or backoff. */
   readonly abort: AbortController;
+  /**
+   * How a settled handler runs `XACK`. `unsubscribe` and `stop()` swap in their own run while they wait for handlers,
+   * and clear it when they stop waiting, so a handler that returns later does not `XACK`.
+   */
+  ack: CommandRun | undefined;
   readonly inflight: Set<string>;
   readonly blocking: Redis;
   heartbeat: ReturnType<typeof setInterval> | undefined;
@@ -118,6 +125,14 @@ function scrubbed(error: unknown, message: string): Error {
   const code: unknown = (error as { code?: unknown }).code;
   if (typeof code === 'string') return Object.assign(clean, { code });
   return clean;
+}
+
+function isStreamEntry(entry: unknown): entry is StreamEntry {
+  return (
+    Array.isArray(entry) &&
+    typeof entry[0] === 'string' &&
+    Array.isArray(entry[1])
+  );
 }
 
 function fieldOf(fields: string[], name: string): string | undefined {
@@ -178,13 +193,18 @@ export class RedisQueue extends Adapter(Queue) {
   #trimTimer: ReturnType<typeof setInterval> | undefined;
   readonly #topics = new Set<string>();
   readonly #subs = new Map<string, Subscription>();
+  /**
+   * The subscription whose handler is running. A handler that calls `unsubscribe` on its own subscription, or `stop()`,
+   * would otherwise wait for itself until `stopTimeoutMs`.
+   */
+  readonly #handling = new AsyncLocalStorage<Subscription>();
 
   constructor(config: RedisQueueConfig) {
     super();
     this.#redis = config.redis;
     this.#keyPrefix = config.keyPrefix ?? 'hexok:queue:';
     this.#visibilityMs = config.visibilityMs ?? 30_000;
-    this.#stopTimeoutMs = config.stopTimeoutMs ?? this.#visibilityMs;
+    this.#stopTimeoutMs = config.stopTimeoutMs ?? 10_000;
     this.#batch = config.batch ?? 10;
     this.#blockMs = config.blockMs ?? 1000;
     this.#maxLen = config.maxLen ?? 10_000;
@@ -201,7 +221,7 @@ export class RedisQueue extends Adapter(Queue) {
     });
   }
 
-  /** The lifecycle state. It suits a readiness or health check. */
+  /** `ready` from `start()` until `stop()`, even while Redis is down. Gate traffic on it, not Redis health. */
   get state(): LifecycleState {
     return this.#lifecycle.state;
   }
@@ -262,7 +282,7 @@ export class RedisQueue extends Adapter(Queue) {
     try {
       await this.#trim(topic);
     } catch (error) {
-      this.#logFailure(error, 'queue: XTRIM failed', {
+      this.#logFailure(error, 'XTRIM', {
         adapter: ADAPTER,
         connection: 'commands',
         topic,
@@ -307,6 +327,7 @@ export class RedisQueue extends Adapter(Queue) {
       onError: options.onError ?? 'retry',
       handler: options.handler as QueueHandler<unknown>,
       abort: new AbortController(),
+      ack: (command) => this.#lifecycle.run('subscribe', command),
       inflight: new Set(),
       blocking,
       heartbeat: undefined,
@@ -323,6 +344,8 @@ export class RedisQueue extends Adapter(Queue) {
       void this.#heartbeat(sub);
     }, heartbeatMs);
     sub.recovery = setInterval(() => {
+      // A slow run would otherwise overlap the next and claim the same entries twice.
+      if (sub.recovering.size > 0) return;
       const run = this.#recover(sub).finally(() => {
         sub.recovering.delete(run);
       });
@@ -342,7 +365,6 @@ export class RedisQueue extends Adapter(Queue) {
     const mapKey = `${topic}\0${options.consumerGroup}`;
     const sub = this.#subs.get(mapKey);
     if (!sub) return;
-    const idle = sub.inflight.size === 0;
     this.#closeSub(sub);
     // Redis can stop answering mid-call, and ioredis would hold the release until it returns.
     const deadline = new AbortController();
@@ -353,16 +375,17 @@ export class RedisQueue extends Adapter(Queue) {
         ),
       );
     }, this.#stopTimeoutMs);
+    const run: CommandRun = (command) =>
+      this.#lifecycle.run('unsubscribe', command, { signal: deadline.signal });
+    sub.ack = run;
     try {
-      await settledOrAborted(handlersOf(sub), deadline.signal);
-      if (idle && !deadline.signal.aborted) {
-        await this.#releaseConsumer(sub, (command) =>
-          this.#lifecycle.run('unsubscribe', command, {
-            signal: deadline.signal,
-          }),
-        );
+      if (this.#handling.getStore() !== sub) {
+        await settledOrAborted(handlersOf(sub), deadline.signal);
       }
+      sub.ack = undefined;
+      if (!deadline.signal.aborted) await this.#releaseConsumer(sub, run);
     } finally {
+      sub.ack = undefined;
       clearTimeout(timer);
     }
     // stop() and a new subscribe() can run while this waits. Only this subscription's entry is removed.
@@ -389,16 +412,19 @@ export class RedisQueue extends Adapter(Queue) {
       this.#trimTimer = undefined;
       const subs = [...this.#subs.values()];
       this.#subs.clear();
-      const idle = subs.filter((sub) => sub.inflight.size === 0);
-      for (const sub of subs) this.#closeSub(sub);
+      const stopRun: CommandRun = (command) => run('stop', command);
+      for (const sub of subs) {
+        this.#closeSub(sub);
+        // A handler that finishes during a deploy is acked, so its entry is not delivered again.
+        sub.ack = stopRun;
+      }
       // Handlers finish before consumers are released. `signal` aborts when stop() stops waiting.
-      await settledOrAborted(Promise.all(subs.map(handlersOf)), signal);
+      const caller = this.#handling.getStore();
+      const others = subs.filter((sub) => sub !== caller);
+      await settledOrAborted(Promise.all(others.map(handlersOf)), signal);
+      for (const sub of subs) sub.ack = undefined;
       if (signal.aborted) return;
-      await Promise.all(
-        idle.map((sub) =>
-          this.#releaseConsumer(sub, (command) => run('stop', command)),
-        ),
-      );
+      await Promise.all(subs.map((sub) => this.#releaseConsumer(sub, stopRun)));
     });
   }
 
@@ -418,7 +444,7 @@ export class RedisQueue extends Adapter(Queue) {
     } catch (error) {
       this.#logFailure(
         error,
-        'queue: consumer release failed',
+        'consumer release',
         this.#fields(sub, 'commands'),
       );
     }
@@ -471,21 +497,12 @@ export class RedisQueue extends Adapter(Queue) {
             continue;
           }
           failures += 1;
-          this.#logFailure(
-            error,
-            'queue: XREADGROUP failed',
-            this.#fields(sub, 'blocking'),
-          );
+          this.#logFailure(error, 'XREADGROUP', this.#fields(sub, 'blocking'));
           await sleep(backoffMs(failures), signal);
           continue;
         }
         if (!rows) continue;
-        for (const [, entries] of rows) {
-          for (const [id, fields] of entries) {
-            if (signal.aborted) break;
-            await this.#dispatch(sub, id, fields);
-          }
-        }
+        for (const [, entries] of rows) await this.#handleBatch(sub, entries);
       }
     } finally {
       sub.finish();
@@ -510,7 +527,11 @@ export class RedisQueue extends Adapter(Queue) {
           options.sensitive ? scrubbed(error, options.generic) : error,
         ),
         occurredAt: new Date(),
-        context: { adapter: 'redis' },
+        // Redis may have stored it, so a replay from quarantine can duplicate it.
+        context:
+          LifecycleError.is(error) && error.code === 'StoppedBeforeReply'
+            ? { adapter: 'redis', outcome: 'unknown' }
+            : { adapter: 'redis' },
       },
       this.#logger,
     );
@@ -536,6 +557,18 @@ export class RedisQueue extends Adapter(Queue) {
     );
   }
 
+  /**
+   * Every entry of a batch joins the heartbeat when the batch arrives, not when its turn comes.
+   * Otherwise an entry waiting behind slow handlers goes idle, and `XAUTOCLAIM`, even this subscription's own, delivers it again.
+   */
+  async #handleBatch(sub: Subscription, entries: StreamEntry[]): Promise<void> {
+    for (const [id] of entries) sub.inflight.add(id);
+    for (const [id, fields] of entries) {
+      if (sub.abort.signal.aborted) sub.inflight.delete(id);
+      else await this.#dispatch(sub, id, fields);
+    }
+  }
+
   async #dispatch(
     sub: Subscription,
     id: string,
@@ -547,7 +580,7 @@ export class RedisQueue extends Adapter(Queue) {
         payload: { reason: 'missing-payload' },
         error: { name: 'Error', message: 'queue: missing payload' },
       });
-      await this.#settle(sub, id, 'drop', false);
+      await this.#settle(sub, id, 'drop');
       return;
     }
     let payload: unknown;
@@ -567,14 +600,15 @@ export class RedisQueue extends Adapter(Queue) {
           : { reason: 'decode-failed', raw },
         error: parkedError(sensitive ? generic : error),
       });
-      await this.#settle(sub, id, 'drop', false);
+      await this.#settle(sub, id, 'drop');
       return;
     }
-    sub.inflight.add(id);
     let thrown = false;
     let returned: QueueDisposition | void;
     try {
-      returned = await sub.handler({ id, topic: sub.topic, payload });
+      returned = await this.#handling.run(sub, () =>
+        sub.handler({ id, topic: sub.topic, payload }),
+      );
     } catch (error) {
       thrown = true;
       returned = undefined;
@@ -584,33 +618,29 @@ export class RedisQueue extends Adapter(Queue) {
       );
     }
     const disposition = dispositionOf(returned, thrown, sub.onError);
-    await this.#settle(sub, id, disposition, true);
+    await this.#settle(sub, id, disposition);
   }
 
-  /** After `unsubscribe` or `stop()`, a handler that returns does not `XACK`. Its entry stays pending for another consumer. */
+  /** Once `unsubscribe` or `stop()` stops waiting, a handler that returns does not `XACK`. Its entry stays pending for another consumer. */
   async #settle(
     sub: Subscription,
     id: string,
     disposition: QueueDisposition,
-    tracked: boolean,
   ): Promise<void> {
-    if (sub.abort.signal.aborted || disposition === 'retry') {
-      if (tracked) sub.inflight.delete(id);
+    const ack = sub.ack;
+    if (ack === undefined || disposition === 'retry') {
+      sub.inflight.delete(id);
       return;
     }
     try {
-      await this.#lifecycle.run('subscribe', ({ commands }) =>
-        commands.xack(sub.key, sub.group, id),
-      );
+      await ack(({ commands }) => commands.xack(sub.key, sub.group, id));
     } catch (error) {
-      if (!sub.abort.signal.aborted) {
-        this.#logFailure(error, 'queue: XACK failed', {
-          ...this.#fields(sub, 'commands'),
-          id,
-        });
-      }
+      this.#logFailure(error, 'XACK', {
+        ...this.#fields(sub, 'commands'),
+        id,
+      });
     }
-    if (tracked) sub.inflight.delete(id);
+    sub.inflight.delete(id);
   }
 
   async #heartbeat(sub: Subscription): Promise<void> {
@@ -622,18 +652,14 @@ export class RedisQueue extends Adapter(Queue) {
         commands.xclaim(sub.key, sub.group, sub.consumer, 0, ...ids, 'JUSTID'),
       );
     } catch (error) {
-      this.#logFailure(
-        error,
-        'queue: XCLAIM failed',
-        this.#fields(sub, 'commands'),
-      );
+      this.#logFailure(error, 'XCLAIM', this.#fields(sub, 'commands'));
     }
   }
 
   async #recover(sub: Subscription): Promise<void> {
     if (sub.abort.signal.aborted) return;
     try {
-      const claimed = (await this.#lifecycle.run('subscribe', ({ commands }) =>
+      const reply = await this.#lifecycle.run('subscribe', ({ commands }) =>
         commands.xautoclaim(
           sub.key,
           sub.group,
@@ -643,28 +669,29 @@ export class RedisQueue extends Adapter(Queue) {
           'COUNT',
           this.#batch,
         ),
-      )) as [string, StreamEntry[]];
-      const entries = claimed[1] ?? [];
-      for (const [id, fields] of entries) {
-        if (sub.abort.signal.aborted) return;
-        if (sub.inflight.has(id)) continue;
-        await this.#dispatch(sub, id, fields);
+      );
+      // Redis 7 lists deleted ids as a third element and drops them itself. Redis 6.2 returns each as `nil` and keeps it pending.
+      const claimed = Array.isArray(reply[1]) ? (reply[1] as unknown[]) : [];
+      const entries = claimed.filter(isStreamEntry);
+      if (entries.length < claimed.length) {
+        await this.#lifecycle.run('subscribe', ({ commands }) =>
+          ackDeleted(commands, sub.key, sub.group, sub.consumer),
+        );
       }
+      await this.#handleBatch(
+        sub,
+        entries.filter(([id]) => !sub.inflight.has(id)),
+      );
     } catch (error) {
-      if (sub.abort.signal.aborted) return;
-      if (isNoGroup(error)) {
+      if (isNoGroup(error) && !sub.abort.signal.aborted) {
         await this.#restoreGroup(sub);
         return;
       }
-      this.#logFailure(
-        error,
-        'queue: XAUTOCLAIM failed',
-        this.#fields(sub, 'commands'),
-      );
+      this.#logFailure(error, 'XAUTOCLAIM', this.#fields(sub, 'commands'));
     }
   }
 
-  /** Recreates a group deleted under a running subscription. Logs a failure and returns false. */
+  /** Recreates a group deleted under a running subscription. Logs a failure and returns false, unless the queue is stopping. */
   async #restoreGroup(sub: Subscription): Promise<boolean> {
     try {
       await this.#lifecycle.run('subscribe', ({ commands }) =>
@@ -672,16 +699,9 @@ export class RedisQueue extends Adapter(Queue) {
       );
       return true;
     } catch (error) {
+      this.#logFailure(error, 'XGROUP CREATE', this.#fields(sub, 'commands'));
       // After stop(), the read loop sees the abort and ends.
-      if (LifecycleError.is(error)) return true;
-      if (!sub.abort.signal.aborted) {
-        this.#logFailure(
-          error,
-          'queue: XGROUP CREATE failed',
-          this.#fields(sub, 'commands'),
-        );
-      }
-      return false;
+      return LifecycleError.is(error);
     }
   }
 
@@ -697,7 +717,7 @@ export class RedisQueue extends Adapter(Queue) {
       try {
         await this.#trim(topic);
       } catch (error) {
-        this.#logFailure(error, 'queue: age trim failed', {
+        this.#logFailure(error, 'XTRIM', {
           adapter: ADAPTER,
           connection: 'commands',
           topic,
@@ -706,15 +726,26 @@ export class RedisQueue extends Adapter(Queue) {
     }
   }
 
-  /** Logs a failed command. A lifecycle error means stop() cut the command short, which is not a failure. */
+  /**
+   * Logs a failed background command. Redis may have run one that `stop()` cut short, so `StoppedBeforeReply` goes to `warn`.
+   * `NotStarted`, `Starting`, and `Stopped` mean the queue was not running, which is not a failure.
+   */
   #logFailure(
     error: unknown,
-    fallback: string,
+    command: string,
     fields: Record<string, unknown>,
   ): void {
-    if (LifecycleError.is(error)) return;
+    if (LifecycleError.is(error)) {
+      if (error.code === 'StoppedBeforeReply') {
+        this.#logger.warn(
+          `queue: stop() stopped waiting before Redis replied to the ${command}. Redis may or may not have run it.`,
+          { ...fields, code: error.code },
+        );
+      }
+      return;
+    }
     this.#logger.error(
-      error instanceof Error ? error : new Error(fallback),
+      error instanceof Error ? error : new Error(`queue: ${command} failed`),
       fields,
     );
   }

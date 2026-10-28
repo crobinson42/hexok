@@ -1,6 +1,10 @@
 import { LifecycleError, type LogSink } from '@hexok/ioredis-lifecycle';
 import type { Redis } from 'ioredis';
-import { releaseConsumer } from './scripts.js';
+import {
+  deleteIdleStream,
+  destroyIdleGroup,
+  releaseConsumer,
+} from './scripts.js';
 
 export interface RedisQueueMaintainOptions {
   readonly dryRun?: boolean;
@@ -261,7 +265,12 @@ async function processKey(
   }
   if (!report.dryRun) {
     try {
-      await input.run((commands) => commands.del(key));
+      const cutoff = now - idleMs;
+      const deleted = await input.run((commands) =>
+        deleteIdleStream(commands, key, cutoff),
+      );
+      // It gained a group or an entry after XINFO, so it stays.
+      if (!deleted) return;
     } catch (error) {
       throwIfStopped(error);
       input.logger.error(
@@ -354,9 +363,11 @@ async function processGroup(
   }
   if (!report.dryRun) {
     try {
-      await input.run((commands) =>
-        commands.xgroup('DESTROY', key, group.name),
+      const destroyed = await input.run((commands) =>
+        destroyIdleGroup(commands, key, group.name),
       );
+      // It gained a consumer or a pending entry after XINFO, so it stays and still counts as a group of the stream.
+      if (!destroyed) return false;
     } catch (error) {
       throwIfStopped(error);
       input.logger.error(

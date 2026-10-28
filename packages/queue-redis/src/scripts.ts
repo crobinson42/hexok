@@ -27,9 +27,7 @@ export async function releaseConsumer(
     group,
     consumer,
   );
-  if (reply === 1) return true;
-  if (reply === 0) return false;
-  throw new Error('queue: the consumer release script replied unexpectedly');
+  return verdict(reply, 'consumer release');
 }
 
 /**
@@ -68,4 +66,66 @@ export async function ackDeleted(
     ACK_DELETED_SCAN,
   );
   return Array.isArray(reply) ? reply.map(String) : [];
+}
+
+/** Destroys a group only while it has no consumers and nothing pending. Returns 1 when it destroyed it and 0 when it kept it. */
+// Atomic, because a consumer can join between the XINFO that maintain() read and the destroy, which would drop its cursor.
+export const destroyIdleGroupScript = `
+if #redis.call('XINFO', 'CONSUMERS', KEYS[1], ARGV[1]) > 0 then
+  return 0
+end
+if redis.call('XPENDING', KEYS[1], ARGV[1])[1] > 0 then
+  return 0
+end
+redis.call('XGROUP', 'DESTROY', KEYS[1], ARGV[1])
+return 1
+`;
+
+/**
+ * Deletes a stream only while it has no groups and its last id is no newer than `ARGV[1]` ms. A `0-0` last id is never old.
+ * Returns 1 when it deleted the stream and 0 when it kept it.
+ */
+// Atomic, because a group or an entry can arrive between the XINFO that maintain() read and the delete.
+export const deleteIdleStreamScript = `
+if #redis.call('XINFO', 'GROUPS', KEYS[1]) > 0 then
+  return 0
+end
+local info = redis.call('XINFO', 'STREAM', KEYS[1])
+local last = ''
+for i = 1, #info, 2 do
+  if info[i] == 'last-generated-id' then last = info[i + 1] end
+end
+local ms = tonumber(string.match(last, '^(%d+)-'))
+if ms == nil or ms == 0 or ms > tonumber(ARGV[1]) then
+  return 0
+end
+redis.call('DEL', KEYS[1])
+return 1
+`;
+
+/** Resolves `true` when the group was destroyed, and `false` when it gained a consumer or a pending entry and was kept. */
+export async function destroyIdleGroup(
+  commands: Redis,
+  key: string,
+  group: string,
+): Promise<boolean> {
+  const reply = await commands.eval(destroyIdleGroupScript, 1, key, group);
+  return verdict(reply, 'group destroy');
+}
+
+/** Resolves `true` when the stream was deleted, and `false` when it gained a group or a newer entry and was kept. */
+export async function deleteIdleStream(
+  commands: Redis,
+  key: string,
+  cutoffMs: number,
+): Promise<boolean> {
+  const reply = await commands.eval(deleteIdleStreamScript, 1, key, cutoffMs);
+  return verdict(reply, 'stream delete');
+}
+
+/** Each check-and-act script replies 1 when it acted and 0 when it declined. */
+function verdict(reply: unknown, script: string): boolean {
+  if (reply === 1) return true;
+  if (reply === 0) return false;
+  throw new Error(`queue: the ${script} script replied unexpectedly`);
 }

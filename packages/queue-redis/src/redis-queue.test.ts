@@ -3,6 +3,8 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { ParkInput } from './park.js';
 import {
   ackDeletedScript,
+  deleteIdleStreamScript,
+  destroyIdleGroupScript,
   releaseConsumer,
   releaseConsumerScript,
 } from './scripts.js';
@@ -78,6 +80,26 @@ class FakeRedis extends EventEmitter {
   xgroup(...args: unknown[]): Promise<string> {
     this.calls.push(['xgroup', ...args]);
     if (this.#stuck()) return new Promise(() => {});
+    if (args[0] === 'DESTROY') {
+      const replyKey = ['GROUPS', args[1]].join('\0');
+      const groups = this.xinfoReplies.get(replyKey);
+      if (Array.isArray(groups)) {
+        this.xinfoReplies.set(
+          replyKey,
+          groups.filter((row: unknown[]) => row[1] !== args[2]),
+        );
+      }
+    }
+    if (args[0] === 'DELCONSUMER') {
+      const replyKey = ['CONSUMERS', args[1], args[2]].join('\0');
+      const consumers = this.xinfoReplies.get(replyKey);
+      if (Array.isArray(consumers)) {
+        this.xinfoReplies.set(
+          replyKey,
+          consumers.filter((row: unknown[]) => row[1] !== args[3]),
+        );
+      }
+    }
     if (args[0] === 'CREATE' && this.failCreate) {
       return Promise.reject(this.failCreate);
     }
@@ -122,6 +144,22 @@ class FakeRedis extends EventEmitter {
     this.calls.push(['eval', ...args]);
     this.scripts.push(script);
     if (script === ackDeletedScript) return [];
+    if (script === destroyIdleGroupScript) {
+      const [, key, group] = args;
+      if (this.#seen(['CONSUMERS', key, group]).length > 0) return 0;
+      await this.xgroup('DESTROY', key, group);
+      return 1;
+    }
+    if (script === deleteIdleStreamScript) {
+      const [, key, cutoff] = args;
+      if (this.#seen(['GROUPS', key]).length > 0) return 0;
+      const stream = this.#seen(['STREAM', key]);
+      const last = String(stream[stream.indexOf('last-generated-id') + 1]);
+      const ms = Number(last.split('-')[0]);
+      if (!(ms > 0) || ms > Number(cutoff)) return 0;
+      await this.del(key);
+      return 1;
+    }
     if (script !== releaseConsumerScript) throw new Error('unknown script');
     const [, key, group, consumer] = args;
     const owned = await this.xpending(key, group, '-', '+', 1, consumer);
@@ -156,6 +194,15 @@ class FakeRedis extends EventEmitter {
 
   scanPages: Array<[string, string[]]> = [['0', []]];
   xinfoReplies = new Map<string, unknown>();
+  /** What a script sees when Redis changed after the `XINFO` that `maintain` read. Keyed like `xinfoReplies`. */
+  scriptXinfo = new Map<string, unknown>();
+
+  #seen(args: unknown[]): unknown[] {
+    const key = args.map(String).join('\0');
+    const reply = this.scriptXinfo.get(key) ?? this.xinfoReplies.get(key);
+    return Array.isArray(reply) ? reply : [];
+  }
+
   failXinfo = new Map<string, Error>();
   #scanCursor = 0;
 
@@ -1958,6 +2005,72 @@ describe('RedisQueue reliability', () => {
     expect(report.groupsDestroyed).toEqual([]);
     expect(report.streamsDeleted).toEqual([]);
     expect(callsOf(commands, 'DESTROY')).toHaveLength(0);
+    await queue.stop();
+  });
+
+  it('maintain keeps and does not report a group that gained a consumer after XINFO', async () => {
+    const now = Date.now();
+    const old = `${now - 60_000}-0`;
+    const queue = new RedisQueue({ redis: 'redis://127.0.0.1:6379' });
+    await queue.start();
+    const commands = FakeRedis.instances[0];
+    if (!commands) throw new Error('missing commands client');
+    const key = 'hexok:queue:jobs';
+    scriptStream(commands, key, {
+      length: 1,
+      lastGeneratedId: old,
+      groups: 1,
+      firstId: old,
+    });
+    scriptGroup(commands, key, {
+      name: 'billing',
+      consumers: 0,
+      pending: 0,
+      lastDeliveredId: old,
+    });
+    commands.scriptXinfo.set(['CONSUMERS', key, 'billing'].join('\0'), [
+      ['name', 'hexok:2:new', 'pending', 0, 'idle', 0],
+    ]);
+
+    const report = await queue.maintain({
+      dryRun: false,
+      topics: ['jobs'],
+      dropIdleGroups: { idleMs: 1000 },
+      dropIdleStreams: { idleMs: 1000 },
+    });
+
+    expect(callsOf(commands, 'DESTROY')).toHaveLength(0);
+    expect(commands.calls.some((call) => call[0] === 'del')).toBe(false);
+    expect(report.groupsDestroyed).toEqual([]);
+    expect(report.streamsDeleted).toEqual([]);
+    await queue.stop();
+  });
+
+  it('maintain keeps and does not report a stream that gained a group after XINFO', async () => {
+    const now = Date.now();
+    const old = `${now - 60_000}-0`;
+    const queue = new RedisQueue({ redis: 'redis://127.0.0.1:6379' });
+    await queue.start();
+    const commands = FakeRedis.instances[0];
+    if (!commands) throw new Error('missing commands client');
+    const key = 'hexok:queue:jobs';
+    scriptStream(commands, key, {
+      length: 0,
+      lastGeneratedId: old,
+      groups: 0,
+    });
+    commands.scriptXinfo.set(['GROUPS', key].join('\0'), [
+      ['name', 'mail', 'consumers', 0, 'pending', 0],
+    ]);
+
+    const report = await queue.maintain({
+      dryRun: false,
+      topics: ['jobs'],
+      dropIdleStreams: { idleMs: 1000 },
+    });
+
+    expect(commands.calls.some((call) => call[0] === 'del')).toBe(false);
+    expect(report.streamsDeleted).toEqual([]);
     await queue.stop();
   });
 

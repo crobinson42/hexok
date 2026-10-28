@@ -3,7 +3,11 @@ import { describeRedisLifecycle, RedisProxy, runNode } from '@hexok/test-redis';
 import { Redis } from 'ioredis';
 import { afterEach, describe, expect, it } from 'vitest';
 import { RedisQueue } from './redis-queue.js';
-import { releaseConsumer } from './scripts.js';
+import {
+  deleteIdleStream,
+  destroyIdleGroup,
+  releaseConsumer,
+} from './scripts.js';
 
 describeRedisLifecycle('RedisQueue', ({ redis, stopTimeoutMs }) => {
   const queue = new RedisQueue({
@@ -655,6 +659,48 @@ console.log(JSON.stringify({ growth, total: count * payload.length }));
       },
     ]);
     expect(await consumersOf(admin, key, 'workers')).toEqual([]);
+  });
+
+  it('the group script destroys a group only while it has no consumers and nothing pending', async () => {
+    const admin = probe();
+    const key = `${newPrefix()}jobs`;
+    await admin.xgroup('CREATE', key, 'busy', '0', 'MKSTREAM');
+    await admin.xgroup('CREATE', key, 'idle', '0');
+    await admin.xadd(key, '*', 'payload', '1');
+    await admin.xreadgroup(
+      'GROUP',
+      'busy',
+      'hexok:1',
+      'COUNT',
+      1,
+      'STREAMS',
+      key,
+      '>',
+    );
+    expect(await destroyIdleGroup(admin, key, 'busy')).toBe(false);
+    expect(await destroyIdleGroup(admin, key, 'idle')).toBe(true);
+    const groups = (await admin.xinfo('GROUPS', key)) as unknown[][];
+    expect(groups.map((group) => group[1])).toEqual(['busy']);
+    await admin.del(key);
+  });
+
+  it('the stream script deletes a stream only while it has no groups and its last id is old', async () => {
+    const admin = probe();
+    const prefix = newPrefix();
+    const old = Date.now() - 60_000;
+    const cutoff = Date.now() - 1000;
+    const grouped = `${prefix}grouped`;
+    const fresh = `${prefix}fresh`;
+    const idle = `${prefix}idle`;
+    await admin.xadd(grouped, `${old}-0`, 'payload', '1');
+    await admin.xgroup('CREATE', grouped, 'workers', '0');
+    await admin.xadd(fresh, '*', 'payload', '1');
+    await admin.xadd(idle, `${old}-0`, 'payload', '1');
+    expect(await deleteIdleStream(admin, grouped, cutoff)).toBe(false);
+    expect(await deleteIdleStream(admin, fresh, cutoff)).toBe(false);
+    expect(await deleteIdleStream(admin, idle, cutoff)).toBe(true);
+    expect(await admin.exists(grouped, fresh, idle)).toBe(2);
+    await admin.del(grouped, fresh);
   });
 
   it('the release script keeps a consumer that owns a pending entry and deletes one that owns nothing', async () => {

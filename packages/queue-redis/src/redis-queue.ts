@@ -47,8 +47,8 @@ export interface RedisQueueConfig {
   readonly retentionMs?: number;
   /**
    * How long `stop()` and `unsubscribe()` wait for handlers, consumer release, and `QUIT`. Default 10000.
-   * A handler still running when it runs out is cut off, and its entry stays pending until another consumer reclaims it after `visibilityMs`.
-   * So a stop shorter than `visibilityMs` is safe, and 10 seconds fits the default Kubernetes grace period beside other adapters.
+   * A handler still running is no longer waited for. It keeps running until the process exits, and its entry is not acked,
+   * so another consumer delivers it again after `visibilityMs`. A stop shorter than `visibilityMs` is safe, and 10 seconds fits the default Kubernetes grace period beside other adapters.
    */
   readonly stopTimeoutMs?: number;
   /** Rejects `start()` with `StartTimeout` when Redis is not ready in time. Unset, `start()` waits for Redis. */
@@ -88,6 +88,12 @@ interface Subscription {
   /** Resolves when the read loop ends, after its last handler. */
   readonly done: Promise<void>;
   readonly finish: () => void;
+}
+
+/** One handler call. `active` turns false when the handler returns. */
+interface HandlerCall {
+  readonly sub: Subscription;
+  active: boolean;
 }
 
 type StreamEntry = [string, string[]];
@@ -194,10 +200,10 @@ export class RedisQueue extends Adapter(Queue) {
   readonly #topics = new Set<string>();
   readonly #subs = new Map<string, Subscription>();
   /**
-   * The subscription whose handler is running. A handler that calls `unsubscribe` on its own subscription, or `stop()`,
-   * would otherwise wait for itself until `stopTimeoutMs`.
+   * The handler call running now. A handler that calls `unsubscribe` on its own subscription, or `stop()`, would otherwise wait for itself until `stopTimeoutMs`.
+   * The mark is per call and ends when the handler returns. Work it leaves behind, such as a timer, inherits the context, and must not count as the handler.
    */
-  readonly #handling = new AsyncLocalStorage<Subscription>();
+  readonly #handling = new AsyncLocalStorage<HandlerCall>();
 
   constructor(config: RedisQueueConfig) {
     super();
@@ -379,11 +385,18 @@ export class RedisQueue extends Adapter(Queue) {
       this.#lifecycle.run('unsubscribe', command, { signal: deadline.signal });
     sub.ack = run;
     try {
-      if (this.#handling.getStore() !== sub) {
+      if (!this.#calledFrom(sub)) {
         await settledOrAborted(handlersOf(sub), deadline.signal);
       }
       sub.ack = undefined;
-      if (!deadline.signal.aborted) await this.#releaseConsumer(sub, run);
+      if (deadline.signal.aborted) {
+        this.#logger.warn(
+          `queue: unsubscribe() stopped waiting for handlers after ${this.#stopTimeoutMs}ms. The consumer is left for maintain().`,
+          this.#fields(sub, 'commands'),
+        );
+      } else {
+        await this.#releaseConsumer(sub, run);
+      }
     } finally {
       sub.ack = undefined;
       clearTimeout(timer);
@@ -419,8 +432,7 @@ export class RedisQueue extends Adapter(Queue) {
         sub.ack = stopRun;
       }
       // Handlers finish before consumers are released. `signal` aborts when stop() stops waiting.
-      const caller = this.#handling.getStore();
-      const others = subs.filter((sub) => sub !== caller);
+      const others = subs.filter((sub) => !this.#calledFrom(sub));
       await settledOrAborted(Promise.all(others.map(handlersOf)), signal);
       for (const sub of subs) sub.ack = undefined;
       if (signal.aborted) return;
@@ -435,12 +447,11 @@ export class RedisQueue extends Adapter(Queue) {
   async #releaseConsumer(sub: Subscription, run: CommandRun): Promise<void> {
     if (sub.inflight.size > 0) return;
     try {
-      await run(({ commands }) =>
+      await run(async ({ commands }) => {
         // A client that is not ready holds the script in its offline queue until stop() gives up.
-        commands.status === 'ready'
-          ? releaseConsumer(commands, sub.key, sub.group, sub.consumer)
-          : Promise.resolve(false),
-      );
+        if (commands.status !== 'ready') return;
+        await releaseConsumer(commands, sub.key, sub.group, sub.consumer);
+      });
     } catch (error) {
       this.#logFailure(
         error,
@@ -606,9 +617,14 @@ export class RedisQueue extends Adapter(Queue) {
     let thrown = false;
     let returned: QueueDisposition | void;
     try {
-      returned = await this.#handling.run(sub, () =>
-        sub.handler({ id, topic: sub.topic, payload }),
-      );
+      const call: HandlerCall = { sub, active: true };
+      try {
+        returned = await this.#handling.run(call, () =>
+          sub.handler({ id, topic: sub.topic, payload }),
+        );
+      } finally {
+        call.active = false;
+      }
     } catch (error) {
       thrown = true;
       returned = undefined;
@@ -755,6 +771,12 @@ export class RedisQueue extends Adapter(Queue) {
     connection: 'commands' | 'blocking',
   ): Record<string, unknown> {
     return { adapter: ADAPTER, connection, topic: sub.topic, group: sub.group };
+  }
+
+  /** Whether a handler of `sub` is the caller and has not yet returned. */
+  #calledFrom(sub: Subscription): boolean {
+    const call = this.#handling.getStore();
+    return call?.active === true && call.sub === sub;
   }
 
   #key(topic: string): string {

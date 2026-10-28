@@ -79,15 +79,19 @@ Every log carries `adapter: 'queue'`. `connection` is `commands` or `blocking`, 
 
 | Event | Level | Fields |
 | --- | --- | --- |
-| A connection error, or a connection that ended after `start()` | `error` | `adapter`, `connection`, and `topic`, `group` on a blocking connection |
+| A connection error | `error` | `adapter`, `connection`, and `topic`, `group` on a blocking connection |
+| A connection that ended after `start()` | `error` | `adapter`, `connection`, and `topic`, `group` on a blocking connection |
+| `QUIT` fails during `stop()` | `error` | `adapter`, `connection` |
+| The stop cleanup threw | `error` | `adapter` |
 | A failed `XREADGROUP`, `XCLAIM`, `XAUTOCLAIM`, group recreate, or consumer removal | `error` | `adapter`, `connection`, `topic`, `group` |
 | A failed `XACK` | `error` | `adapter`, `connection`, `topic`, `group`, `id` |
-| A failed age trim | `error` | `adapter`, `connection`, `topic` |
-| A background command that `stop()` cut short | `warn` | `adapter`, `connection`, `topic`, `group`, `code` |
-| `unsubscribe()` gave up on removing its consumer | `error` | `adapter`, `connection`, `topic`, `group` |
+| A failed age trim, after a publish or on the minute | `error` | `adapter`, `connection`, `topic` |
+| A background command that `stop()` cut short | `warn` | the failed command's fields, plus `code` |
+| `unsubscribe()` stopped waiting for handlers, and left the consumer for `maintain()` | `warn` | `adapter`, `connection`, `topic`, `group` |
+| `unsubscribe()` stopped waiting for Redis to remove the consumer | `error` | `adapter`, `connection`, `topic`, `group` |
 | A handler throws | `error` | `adapter`, `topic`, `group`, `id` |
 | A payload fails to decode | `error` | `adapter`, `topic`, `group`, `id` |
-| A `maintain()` command fails on one key | `error` | `adapter`, `connection`, `topic`, and `group` when it is about a group |
+| An `XINFO`, `XTRIM`, consumer removal, group destroy, or stream delete fails in `maintain()` | `error` | `adapter`, `connection`, `topic`, and `group` when it is about a group |
 | The quarantine sink fails to park | `error` | `adapter` |
 
 `NotStarted`, `Starting`, and `Stopped` from background work are not logged. An error returned to the caller, such as a failed `publish()` or a `maintain()` that `stop()` cut short, is not logged.
@@ -98,7 +102,7 @@ Every log carries `adapter: 'queue'`. `connection` is `commands` or `blocking`, 
 - If `retryStrategy` gives up after `start()`, the connection ends and is logged at `error`. `state` stays `ready` and commands fail until `stop()` and `start()`. The default `retryStrategy` never gives up.
 - During an outage, ioredis holds commands such as `XADD` and the group create in its offline queue. They wait for Redis. On `stop()`, a command queued that way rejects with `StoppedBeforeReply`.
 - A read on a blocking connection that is reconnecting never settles in ioredis. `unsubscribe()` and `stop()` end it themselves.
-- `unsubscribe()` gives up on Redis after `stopTimeoutMs`. When it gives up on removing the consumer, it logs an error, and `maintain()` removes the consumer later. If Redis runs the late removal, the script still keeps a consumer that owns entries.
+- `unsubscribe()` stops waiting after `stopTimeoutMs`. When it stops waiting for handlers, it logs at `warn` and leaves the consumer for `maintain()`. When it stops waiting for Redis to remove the consumer, it logs an `error`, and `maintain()` removes the consumer later. If Redis runs the late removal, the script still keeps a consumer that owns entries.
 - When the commands connection is not ready, `stop()` and `unsubscribe()` skip removing the consumer, and `stop()` skips `QUIT` and disconnects. `maintain()` removes a consumer left that way.
 - When Redis is unreachable, the process can stay alive for the ioredis `disconnectTimeout` after `stop()` resolves. That is 2 seconds by default. Set `disconnectTimeout` in the `redis` options to shorten it.
 
@@ -107,10 +111,10 @@ Every log carries `adapter: 'queue'`. `connection` is `commands` or `blocking`, 
 | Option | Default | Why |
 | --- | --- | --- |
 | `redis` | required | A URL or ioredis options. Every connection uses it. `maxRetriesPerRequest` is `null`, so a command waits through an outage. Options you pass win. |
+| `stopTimeoutMs` | `10000` | How long `stop()` and `unsubscribe()` wait for handlers, consumer removal, and `QUIT`. A handler still running is no longer waited for. It keeps running until the process exits, and its entry is not acked, so another consumer delivers it again after `visibilityMs`. So a stop shorter than `visibilityMs` is safe. |
+| `startTimeoutMs` | unset | Unset, `start()` waits for Redis. Set it under an orchestrator, so `start()` rejects with `StartTimeout` and the process restarts. |
 | `keyPrefix` | `'hexok:queue:'` | Each topic is the stream `<keyPrefix><topic>`. `maintain()` scans this prefix. |
 | `visibilityMs` | `30000` | How long an entry stays with a consumer that stopped heartbeating. After it, `XAUTOCLAIM` delivers it again. |
-| `stopTimeoutMs` | `10000` | How long `stop()` and `unsubscribe()` wait for handlers, consumer removal, and `QUIT`. A handler still running is cut off, and another consumer reclaims its entry after `visibilityMs`, so a shorter stop is safe. |
-| `startTimeoutMs` | unset | How long `start()` waits for Redis before it rejects with `StartTimeout`. |
 | `batch` | `10` | Entries per `XREADGROUP` and `XAUTOCLAIM`. Handlers in a batch run one at a time. |
 | `blockMs` | `1000` | How long one `XREADGROUP` blocks before it reads again. |
 | `maxLen` | `10000` | The approximate `MAXLEN ~` cap per stream, applied on `XADD`. It keeps memory bounded. |
@@ -149,6 +153,6 @@ A parked record's `context` is `{ adapter: 'redis' }`. A `publish()` that reject
 
 The report lists what was trimmed, removed, destroyed, and deleted. It lists `stuck` groups whose pending entries have no consumer, or belong to an idle consumer. It lists `skipped` keys with a reason.
 
-`maintain()` decides from `XINFO`, and Redis can change before it acts. Each removal is one Lua script that checks again and acts in one step. A consumer is removed only while `XPENDING` shows it owns no entry. A group is destroyed only while it has no consumers and nothing pending. A stream is deleted only while it has no groups and its last id is still old. What a script keeps is not reported as removed, destroyed, or deleted. `unsubscribe()` and `stop()` use the same consumer script. A consumer kept with pending entries, such as one that returned `'retry'`, is left for `XAUTOCLAIM` or a later `maintain()`.
+`maintain()` decides from `XINFO`, and Redis can change before it acts. Each removal is one Lua script that checks again and acts in one step. A consumer is removed only while `XPENDING` shows it owns no entry. A group is destroyed only while it has no consumers and nothing pending. A stream is deleted only while it has no groups and its last id is still old, measured on the Redis clock. What a script keeps, and what another run removed first, is not reported as removed, destroyed, or deleted, and is not logged. `unsubscribe()` and `stop()` use the same consumer script. A consumer kept with pending entries, such as one that returned `'retry'`, is left for `XAUTOCLAIM` or a later `maintain()`.
 
 `stop()` interrupts `maintain()`, which then rejects with the `LifecycleError` code.

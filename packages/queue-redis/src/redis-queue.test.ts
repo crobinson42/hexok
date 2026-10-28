@@ -140,10 +140,17 @@ class FakeRedis extends EventEmitter {
   /** Runs the consumer release script with this fake's own XPENDING and DELCONSUMER, as Redis would. */
   readonly scripts: unknown[] = [];
 
+  /** Keys, `key\0group`, and `key\0group\0consumer` that another client removed. A script on them replies -1. */
+  readonly gone = new Set<string>();
+
   async eval(script: unknown, ...args: unknown[]): Promise<unknown> {
     this.calls.push(['eval', ...args]);
     this.scripts.push(script);
     if (script === ackDeletedScript) return [];
+    const path = args.slice(1, 4).map(String);
+    for (let depth = 1; depth <= 3; depth += 1) {
+      if (this.gone.has(path.slice(0, depth).join('\0'))) return -1;
+    }
     if (script === destroyIdleGroupScript) {
       const [, key, group] = args;
       if (this.#seen(['CONSUMERS', key, group]).length > 0) return 0;
@@ -151,12 +158,12 @@ class FakeRedis extends EventEmitter {
       return 1;
     }
     if (script === deleteIdleStreamScript) {
-      const [, key, cutoff] = args;
+      const [, key, idleMs] = args;
       if (this.#seen(['GROUPS', key]).length > 0) return 0;
       const stream = this.#seen(['STREAM', key]);
       const last = String(stream[stream.indexOf('last-generated-id') + 1]);
       const ms = Number(last.split('-')[0]);
-      if (!(ms > 0) || ms > Number(cutoff)) return 0;
+      if (!(ms > 0) || ms > Date.now() - Number(idleMs)) return 0;
       await this.del(key);
       return 1;
     }
@@ -1140,6 +1147,12 @@ describe('RedisQueue commands', () => {
     expect(commands.calls.filter((call) => call[0] === 'del')).toEqual([
       ['del', 'hexok:queue:empty'],
     ]);
+    // The script reads the clock from Redis, so it gets idleMs, not a time from this process.
+    expect(
+      commands.calls.filter(
+        (call) => call[0] === 'eval' && call[2] === 'hexok:queue:empty',
+      ),
+    ).toEqual([['eval', 1, 'hexok:queue:empty', 1000]]);
     await queue.stop();
   });
 
@@ -1797,6 +1810,86 @@ describe('RedisQueue reliability', () => {
     ]);
   });
 
+  it('stop armed on a timer inside a handler still waits for and acks a later handler', async () => {
+    // Real timers: a fake timer runs its callback outside the handler's async context.
+    const queue = new RedisQueue({ redis: 'redis://127.0.0.1:6379' });
+    await queue.start();
+    let release: (value: 'ack') => void = () => {};
+    let stopping: Promise<void> | undefined;
+    await queue.subscribe('jobs', {
+      consumerGroup: 'billing',
+      handler: async (message) => {
+        if (message.id === '4-1') {
+          setTimeout(() => {
+            stopping = queue.stop();
+          }, 50);
+          return 'ack';
+        }
+        return new Promise((resolve) => {
+          release = resolve;
+        });
+      },
+    });
+    FakeRedis.instances[1]?.pending?.resolve([
+      [
+        'hexok:queue:jobs',
+        [
+          ['4-1', ['payload', '{}']],
+          ['4-2', ['payload', '{}']],
+        ],
+      ],
+    ]);
+    await new Promise((resolve) => setTimeout(resolve, 150));
+    if (!stopping) throw new Error('stop was not called');
+    const stopped = settledFlag(stopping);
+    await new Promise((resolve) => setImmediate(resolve));
+    expect(stopped()).toBe(false);
+    release('ack');
+    await stopping;
+    const commands = FakeRedis.instances[0];
+    expect(commands?.calls.filter((call) => call[0] === 'xack')).toEqual([
+      ['xack', 'hexok:queue:jobs', 'billing', '4-1'],
+      ['xack', 'hexok:queue:jobs', 'billing', '4-2'],
+    ]);
+  });
+
+  it('unsubscribe warns when it stops waiting for a handler and leaves the consumer', async () => {
+    vi.useFakeTimers();
+    const logs = recordingLogger();
+    const queue = new RedisQueue({
+      redis: 'redis://127.0.0.1:6379',
+      stopTimeoutMs: 500,
+      logger: logs.sink,
+    });
+    await queue.start();
+    await queue.subscribe('jobs', {
+      consumerGroup: 'billing',
+      handler: () => new Promise(() => {}),
+    });
+    FakeRedis.instances[1]?.pending?.resolve([
+      ['hexok:queue:jobs', [['4-1', ['payload', '{}']]]],
+    ]);
+    await vi.advanceTimersByTimeAsync(0);
+    const unsubscribing = queue.unsubscribe('jobs', {
+      consumerGroup: 'billing',
+    });
+    await vi.advanceTimersByTimeAsync(500);
+    await unsubscribing;
+    expect(logs.calls).toEqual([
+      [
+        'warn',
+        'queue: unsubscribe() stopped waiting for handlers after 500ms. The consumer is left for maintain().',
+        {
+          adapter: 'queue',
+          connection: 'commands',
+          topic: 'jobs',
+          group: 'billing',
+        },
+      ],
+    ]);
+    await queue.stop();
+  });
+
   it('a recovery tick is skipped while the previous one runs', async () => {
     vi.useFakeTimers();
     const queue = new RedisQueue({
@@ -2001,13 +2094,20 @@ describe('RedisQueue reliability', () => {
     await queue.stop();
   });
 
-  it('the release script reply means deleted, kept, or a failure', async () => {
-    const replies: unknown[] = [1, 0, 'OK'];
+  it('the release script reply means removed, kept, gone, or a failure', async () => {
+    const replies: unknown[] = [1, 0, -1, 'OK'];
     const commands = {
       eval: async () => replies.shift(),
     } as unknown as import('ioredis').Redis;
-    await expect(releaseConsumer(commands, 'k', 'g', 'c')).resolves.toBe(true);
-    await expect(releaseConsumer(commands, 'k', 'g', 'c')).resolves.toBe(false);
+    await expect(releaseConsumer(commands, 'k', 'g', 'c')).resolves.toBe(
+      'removed',
+    );
+    await expect(releaseConsumer(commands, 'k', 'g', 'c')).resolves.toBe(
+      'kept',
+    );
+    await expect(releaseConsumer(commands, 'k', 'g', 'c')).resolves.toBe(
+      'gone',
+    );
     await expect(releaseConsumer(commands, 'k', 'g', 'c')).rejects.toThrow(
       'queue: the consumer release script replied unexpectedly',
     );
@@ -2127,6 +2227,57 @@ describe('RedisQueue reliability', () => {
 
     expect(commands.calls.some((call) => call[0] === 'del')).toBe(false);
     expect(report.streamsDeleted).toEqual([]);
+    await queue.stop();
+  });
+
+  it('maintain does not report or log what another run removed first', async () => {
+    const now = Date.now();
+    const old = `${now - 60_000}-0`;
+    const logs = recordingLogger();
+    const queue = new RedisQueue({
+      redis: 'redis://127.0.0.1:6379',
+      logger: logs.sink,
+    });
+    await queue.start();
+    const commands = FakeRedis.instances[0];
+    if (!commands) throw new Error('missing commands client');
+    const key = 'hexok:queue:jobs';
+    scriptStream(commands, key, {
+      length: 1,
+      lastGeneratedId: old,
+      groups: 1,
+      firstId: old,
+    });
+    scriptGroup(commands, key, {
+      name: 'billing',
+      consumers: 1,
+      pending: 0,
+      lastDeliveredId: old,
+    });
+    scriptConsumer(commands, key, 'billing', {
+      name: 'hexok:1:abc',
+      pending: 0,
+      idle: 50_000,
+    });
+    commands.gone.add(key);
+
+    const report = await queue.maintain({
+      dryRun: false,
+      topics: ['jobs'],
+      idleConsumerMs: 1000,
+      dropIdleGroups: { idleMs: 1000 },
+      dropIdleStreams: { idleMs: 1000 },
+    });
+
+    expect(commands.scripts).toEqual([
+      releaseConsumerScript,
+      destroyIdleGroupScript,
+      deleteIdleStreamScript,
+    ]);
+    expect(report.consumersRemoved).toEqual([]);
+    expect(report.groupsDestroyed).toEqual([]);
+    expect(report.streamsDeleted).toEqual([]);
+    expect(logs.calls).toEqual([]);
     await queue.stop();
   });
 

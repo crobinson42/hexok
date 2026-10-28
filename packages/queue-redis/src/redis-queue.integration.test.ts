@@ -679,8 +679,12 @@ console.log(JSON.stringify({ growth, total: count * payload.length }));
       key,
       '>',
     );
-    expect(await destroyIdleGroup(admin, key, 'busy')).toBe(false);
-    expect(await destroyIdleGroup(admin, key, 'idle')).toBe(true);
+    expect(await destroyIdleGroup(admin, key, 'busy')).toBe('kept');
+    expect(await destroyIdleGroup(admin, key, 'idle')).toBe('removed');
+    expect(await destroyIdleGroup(admin, key, 'idle')).toBe('gone');
+    expect(await destroyIdleGroup(admin, `${key}:missing`, 'idle')).toBe(
+      'gone',
+    );
     const groups = (await admin.xinfo('GROUPS', key)) as unknown[][];
     expect(groups.map((group) => group[1])).toEqual(['busy']);
     await admin.del(key);
@@ -690,7 +694,7 @@ console.log(JSON.stringify({ growth, total: count * payload.length }));
     const admin = probe();
     const prefix = newPrefix();
     const old = Date.now() - 60_000;
-    const cutoff = Date.now() - 1000;
+    const idleMs = 1000;
     const grouped = `${prefix}grouped`;
     const fresh = `${prefix}fresh`;
     const idle = `${prefix}idle`;
@@ -698,9 +702,10 @@ console.log(JSON.stringify({ growth, total: count * payload.length }));
     await admin.xgroup('CREATE', grouped, 'workers', '0');
     await admin.xadd(fresh, '*', 'payload', '1');
     await admin.xadd(idle, `${old}-0`, 'payload', '1');
-    expect(await deleteIdleStream(admin, grouped, cutoff)).toBe(false);
-    expect(await deleteIdleStream(admin, fresh, cutoff)).toBe(false);
-    expect(await deleteIdleStream(admin, idle, cutoff)).toBe(true);
+    expect(await deleteIdleStream(admin, grouped, idleMs)).toBe('kept');
+    expect(await deleteIdleStream(admin, fresh, idleMs)).toBe('kept');
+    expect(await deleteIdleStream(admin, idle, idleMs)).toBe('removed');
+    expect(await deleteIdleStream(admin, idle, idleMs)).toBe('gone');
     expect(await admin.exists(grouped, fresh, idle)).toBe(2);
     await admin.del(grouped, fresh);
   });
@@ -730,8 +735,15 @@ console.log(JSON.stringify({ growth, total: count * payload.length }));
       key,
       '>',
     );
-    expect(await releaseConsumer(admin, key, 'workers', 'busy')).toBe(false);
-    expect(await releaseConsumer(admin, key, 'workers', 'idle')).toBe(true);
+    expect(await releaseConsumer(admin, key, 'workers', 'busy')).toBe('kept');
+    expect(await releaseConsumer(admin, key, 'workers', 'idle')).toBe(
+      'removed',
+    );
+    expect(await releaseConsumer(admin, key, 'workers', 'idle')).toBe('gone');
+    expect(await releaseConsumer(admin, key, 'missing', 'idle')).toBe('gone');
+    expect(
+      await releaseConsumer(admin, `${key}:missing`, 'workers', 'idle'),
+    ).toBe('gone');
     expect(await consumersOf(admin, key, 'workers')).toEqual([
       { name: 'busy', pending: 1 },
     ]);
@@ -793,6 +805,28 @@ describe.each(recoveryTargets)('RedisQueue recovery on %s', (_name, url) => {
         expect(handled).toEqual([kept]);
       } finally {
         await queue.stop();
+        await admin.del(key);
+        await admin.quit();
+      }
+    },
+  );
+});
+
+describe.each(recoveryTargets)('RedisQueue scripts on %s', (_name, url) => {
+  it.skipIf(!url)(
+    'the stream script measures idleness on the Redis clock',
+    async () => {
+      const admin = new Redis(url ?? '');
+      const key = `${newPrefix()}jobs`;
+      try {
+        const [seconds, micros] = await admin.time();
+        const redisNow =
+          Number(seconds) * 1000 + Math.floor(Number(micros) / 1000);
+        await admin.xadd(key, `${redisNow - 5000}-0`, 'payload', '1');
+        expect(await deleteIdleStream(admin, key, 10_000)).toBe('kept');
+        expect(await deleteIdleStream(admin, key, 1000)).toBe('removed');
+        expect(await admin.exists(key)).toBe(0);
+      } finally {
         await admin.del(key);
         await admin.quit();
       }

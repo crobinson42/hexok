@@ -83,10 +83,12 @@ The lifecycle logs these through the `LogSink`. `fields` are the ones passed to 
 | `QUIT` fails during `stop()` | `error` | `adapter`, `connection`, `fields` |
 | `cleanup` throws during `stop()` | `error` | `adapter` |
 
-Adapters follow two rules in their own logs:
+Adapters follow four rules in their own logs:
 
 - An adapter logs a `StoppedBeforeReply` from its own background commands at `warn`. It does not log `NotStarted`, `Starting`, or `Stopped` from background work. Errors returned to the caller are not logged by the adapter.
+- A log of a `LifecycleError` carries its `code` as a field, such as `{ adapter, connection, code: 'StoppedBeforeReply' }`, so log queries filter on it without parsing messages.
 - The `connection` field is present only on a connection error or a failed Redis command. A handler, job, or decode failure is user-code or data failure and carries no `connection`.
+- Every adapter log carries `adapter`. Then `connection`, by the rule above, and the adapter's subject field: `topic` and `group` for the queue, `channel` for broadcast, and `job` for schedule.
 
 ## When Redis is down
 
@@ -205,6 +207,7 @@ export class RedisLock {
         this.#logger.warn(error.message, {
           adapter: 'lock',
           connection: 'commands',
+          code: error.code,
           key,
         });
       }

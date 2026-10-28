@@ -55,9 +55,9 @@ interface Subscription {
   blocking: Redis;
   heartbeat: ReturnType<typeof setInterval> | undefined;
   recovery: ReturnType<typeof setInterval> | undefined;
-  backoff:
-    | { timer: ReturnType<typeof setTimeout>; wake: () => void }
-    | undefined;
+  /** Resolves when the subscription aborts. A read or backoff races it. */
+  aborting: Promise<void>;
+  wake: () => void;
   done: Promise<void>;
   finish: () => void;
 }
@@ -241,14 +241,17 @@ export class RedisQueue extends Adapter(Queue) {
   ): Promise<void> {
     const commands = this.#requireCommands();
     const mapKey = `${topic}\0${options.consumerGroup}`;
-    if (this.#subs.has(mapKey)) {
-      throw new Error(
-        `queue: already subscribed to ${topic} group ${options.consumerGroup}`,
-      );
-    }
+    const already = new Error(
+      `queue: already subscribed to ${topic} group ${options.consumerGroup}`,
+    );
+    if (this.#subs.has(mapKey)) throw already;
     const key = this.#key(topic);
     const startId = startIdOf(options.startFrom);
     await this.#createGroup(commands, key, options.consumerGroup, startId);
+    if (this.#commands !== commands) {
+      throw new Error('queue: stop() was called during subscribe');
+    }
+    if (this.#subs.has(mapKey)) throw already;
     const blocking = openRedis(this.#redis);
     blocking.on('error', (error: Error) => {
       this.#logger.error(error, { topic, connection: 'blocking' });
@@ -256,6 +259,10 @@ export class RedisQueue extends Adapter(Queue) {
     let finish = () => {};
     const done = new Promise<void>((resolve) => {
       finish = resolve;
+    });
+    let wake = () => {};
+    const aborting = new Promise<void>((resolve) => {
+      wake = resolve;
     });
     const sub: Subscription = {
       topic,
@@ -270,7 +277,8 @@ export class RedisQueue extends Adapter(Queue) {
       blocking,
       heartbeat: undefined,
       recovery: undefined,
-      backoff: undefined,
+      aborting,
+      wake,
       done,
       finish,
     };
@@ -296,9 +304,8 @@ export class RedisQueue extends Adapter(Queue) {
     if (!sub) return;
     const idle = sub.inflight.size === 0;
     await this.#closeSub(sub, false);
-    if (idle && sub.inflight.size === 0) {
-      await this.#releaseConsumer(sub);
-    }
+    const commands = this.#commands;
+    if (commands && idle) await this.#releaseConsumer(commands, sub);
     this.#subs.delete(mapKey);
   }
 
@@ -322,48 +329,57 @@ export class RedisQueue extends Adapter(Queue) {
       starting.abort.abort(new Error('queue: stop() was called before ready'));
       starting.client.disconnect();
     }
-    const idleSubs: Subscription[] = [];
-    for (const sub of this.#subs.values()) {
-      sub.aborted = true;
-      this.#clearSubTimers(sub);
-      if (sub.inflight.size === 0) idleSubs.push(sub);
-    }
+    const commands = this.#commands;
+    this.#commands = undefined;
     if (this.#trimTimer) {
       clearInterval(this.#trimTimer);
       this.#trimTimer = undefined;
     }
-    for (const sub of this.#subs.values()) {
+    const subs = [...this.#subs.values()];
+    this.#subs.clear();
+    const idleSubs = subs.filter((sub) => sub.inflight.size === 0);
+    for (const sub of subs) {
+      this.#abortSub(sub);
       sub.blocking.disconnect();
     }
-    await settleWithin(
-      Promise.all([...this.#subs.values()].map((sub) => sub.done)),
-      this.#visibilityMs,
-    );
-    for (const sub of idleSubs) {
-      if (sub.inflight.size === 0) await this.#releaseConsumer(sub);
+    const deadline = Date.now() + this.#visibilityMs;
+    const remaining = () => Math.max(0, deadline - Date.now());
+    await settleWithin(Promise.all(subs.map((sub) => sub.done)), remaining());
+    if (commands) {
+      await settleWithin(
+        Promise.all(
+          idleSubs.map((sub) => this.#releaseConsumer(commands, sub)),
+        ),
+        remaining(),
+      );
+      let closed = false;
+      if (commands.status === 'ready' && remaining() > 0) {
+        await settleWithin(
+          commands.quit().then(
+            () => {
+              closed = true;
+            },
+            (error: unknown) => {
+              this.#logger.error(
+                error instanceof Error
+                  ? error
+                  : new Error('queue: quit failed'),
+              );
+            },
+          ),
+          remaining(),
+        );
+      }
+      if (!closed) commands.disconnect();
     }
-    for (const sub of this.#subs.values()) {
+    for (const sub of subs) {
       sub.inflight.clear();
     }
-    const commands = this.#commands;
-    this.#commands = undefined;
-    if (commands) {
-      await commands.quit().catch((error: unknown) => {
-        this.#logger.error(
-          error instanceof Error ? error : new Error('queue: quit failed'),
-        );
-      });
-    }
-    for (const sub of this.#subs.values()) {
-      await sub.blocking.quit().catch(() => undefined);
-    }
-    this.#subs.clear();
   }
 
-  async #releaseConsumer(sub: Subscription): Promise<void> {
-    if (sub.inflight.size > 0) return;
-    const commands = this.#commands;
-    if (!commands) return;
+  /** Skips a client that is not ready, since ioredis would queue the command until Redis returns. */
+  async #releaseConsumer(commands: Redis, sub: Subscription): Promise<void> {
+    if (sub.inflight.size > 0 || commands.status !== 'ready') return;
     try {
       await commands.xgroup('DELCONSUMER', sub.key, sub.group, sub.consumer);
     } catch (error) {
@@ -374,24 +390,20 @@ export class RedisQueue extends Adapter(Queue) {
     }
   }
 
+  /** `disconnect` alone closes the blocking client. A `quit` after it can wait in the offline queue forever. */
   async #closeSub(sub: Subscription, wait: boolean): Promise<void> {
-    sub.aborted = true;
-    this.#clearSubTimers(sub);
+    this.#abortSub(sub);
     sub.blocking.disconnect();
     if (wait) await settleWithin(sub.done, this.#visibilityMs);
-    await sub.blocking.quit().catch(() => undefined);
   }
 
-  #clearSubTimers(sub: Subscription): void {
+  #abortSub(sub: Subscription): void {
+    sub.aborted = true;
+    sub.wake();
     if (sub.heartbeat) clearInterval(sub.heartbeat);
     if (sub.recovery) clearInterval(sub.recovery);
     sub.heartbeat = undefined;
     sub.recovery = undefined;
-    if (sub.backoff) {
-      clearTimeout(sub.backoff.timer);
-      sub.backoff.wake();
-      sub.backoff = undefined;
-    }
   }
 
   async #readLoop(sub: Subscription): Promise<void> {
@@ -400,31 +412,29 @@ export class RedisQueue extends Adapter(Queue) {
       while (!sub.aborted) {
         let rows: StreamRead[] | null;
         try {
-          rows = (await sub.blocking.xreadgroup(
-            'GROUP',
-            sub.group,
-            sub.consumer,
-            'COUNT',
-            this.#batch,
-            'BLOCK',
-            this.#blockMs,
-            'STREAMS',
-            sub.key,
-            '>',
-          )) as StreamRead[] | null;
+          // A reconnecting client never settles the read, even after `disconnect`.
+          rows = (await Promise.race([
+            sub.blocking.xreadgroup(
+              'GROUP',
+              sub.group,
+              sub.consumer,
+              'COUNT',
+              this.#batch,
+              'BLOCK',
+              this.#blockMs,
+              'STREAMS',
+              sub.key,
+              '>',
+            ),
+            sub.aborting.then(() => null),
+          ])) as StreamRead[] | null;
           failures = 0;
         } catch (error) {
           if (sub.aborted) break;
           if (isNoGroup(error)) {
-            const commands = this.#commands;
-            if (commands) {
-              await this.#createGroup(
-                commands,
-                sub.key,
-                sub.group,
-                sub.startId,
-              );
-            }
+            if (await this.#restoreGroup(sub)) continue;
+            failures += 1;
+            await this.#backoff(sub, failures);
             continue;
           }
           failures += 1;
@@ -623,13 +633,33 @@ export class RedisQueue extends Adapter(Queue) {
     } catch (error) {
       if (sub.aborted) return;
       if (isNoGroup(error)) {
-        await this.#createGroup(commands, sub.key, sub.group, sub.startId);
+        await this.#restoreGroup(sub);
         return;
       }
       this.#logger.error(
         error instanceof Error ? error : new Error('queue: XAUTOCLAIM failed'),
         { topic: sub.topic },
       );
+    }
+  }
+
+  /** Recreates a group deleted under a running subscription. Logs a failure and returns false. */
+  async #restoreGroup(sub: Subscription): Promise<boolean> {
+    const commands = this.#commands;
+    if (!commands) return true;
+    try {
+      await this.#createGroup(commands, sub.key, sub.group, sub.startId);
+      return true;
+    } catch (error) {
+      if (!sub.aborted) {
+        this.#logger.error(
+          error instanceof Error
+            ? error
+            : new Error('queue: XGROUP CREATE failed'),
+          { topic: sub.topic },
+        );
+      }
+      return false;
     }
   }
 
@@ -666,14 +696,9 @@ export class RedisQueue extends Adapter(Queue) {
     }
   }
 
-  /** Sleeps before the next read. `#clearSubTimers` wakes it early. */
+  /** Sleeps before the next read. Aborting the subscription wakes it early. */
   async #backoff(sub: Subscription, failures: number): Promise<void> {
-    if (sub.aborted) return;
-    const ms = Math.min(1000 * failures, 5000);
-    await new Promise<void>((resolve) => {
-      sub.backoff = { timer: setTimeout(resolve, ms), wake: resolve };
-    });
-    sub.backoff = undefined;
+    await settleWithin(sub.aborting, Math.min(1000 * failures, 5000));
   }
 
   #key(topic: string): string {

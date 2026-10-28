@@ -14,6 +14,14 @@ class FakeRedis extends EventEmitter {
   pending: Pending | undefined;
   failTrim = false;
   failXadd = false;
+  failCreate: Error | undefined;
+  failXautoclaim: Error | undefined;
+  holdCreate = false;
+  heldCreate: Pending | undefined;
+  /** Commands never settle, as on a socket that stopped answering. */
+  stalled = false;
+  /** A reconnecting client: commands sit in the offline queue and `disconnect` does not flush them. */
+  offline = false;
   status = FakeRedis.initialStatus;
 
   constructor(..._args: unknown[]) {
@@ -30,6 +38,15 @@ class FakeRedis extends EventEmitter {
   becomeReady(): void {
     this.status = 'ready';
     this.emit('ready');
+  }
+
+  goOffline(): void {
+    this.status = 'reconnecting';
+    this.offline = true;
+  }
+
+  #stuck(): boolean {
+    return this.stalled || this.offline;
   }
 
   xadd(...args: unknown[]): Promise<string> {
@@ -53,11 +70,21 @@ class FakeRedis extends EventEmitter {
 
   xgroup(...args: unknown[]): Promise<string> {
     this.calls.push(['xgroup', ...args]);
+    if (this.#stuck()) return new Promise(() => {});
+    if (args[0] === 'CREATE' && this.failCreate) {
+      return Promise.reject(this.failCreate);
+    }
+    if (args[0] === 'CREATE' && this.holdCreate) {
+      return new Promise((resolve, reject) => {
+        this.heldCreate = { resolve: () => resolve('OK'), reject };
+      });
+    }
     return Promise.resolve('OK');
   }
 
   xreadgroup(...args: unknown[]): Promise<unknown> {
     this.calls.push(['xreadgroup', ...args]);
+    if (this.offline) return new Promise(() => {});
     return new Promise((resolve, reject) => {
       this.pending = { resolve, reject };
     });
@@ -75,6 +102,7 @@ class FakeRedis extends EventEmitter {
 
   xautoclaim(...args: unknown[]): Promise<unknown[]> {
     this.calls.push(['xautoclaim', ...args]);
+    if (this.failXautoclaim) return Promise.reject(this.failXautoclaim);
     return Promise.resolve(['0-0', []]);
   }
 
@@ -106,12 +134,15 @@ class FakeRedis extends EventEmitter {
 
   disconnect(): void {
     this.calls.push(['disconnect']);
+    if (this.offline) return;
     this.status = 'end';
     this.pending?.reject(new Error('Connection is closed'));
   }
 
   quit(): Promise<string> {
     this.calls.push(['quit']);
+    if (this.#stuck()) return new Promise(() => {});
+    this.status = 'end';
     return Promise.resolve('OK');
   }
 }
@@ -566,7 +597,7 @@ describe('RedisQueue commands', () => {
     blocking?.pending?.resolve([
       ['hexok:queue:jobs', [['4-1', ['payload', '{}']]]],
     ]);
-    await Promise.resolve();
+    await vi.advanceTimersByTimeAsync(0);
     await queue.unsubscribe('jobs', { consumerGroup: 'billing' });
     release('ack');
     await vi.waitFor(() => {
@@ -593,7 +624,7 @@ describe('RedisQueue commands', () => {
     blocking2?.pending?.resolve([
       ['hexok:queue:jobs', [['4-2', ['payload', '{}']]]],
     ]);
-    await Promise.resolve();
+    await vi.advanceTimersByTimeAsync(0);
     const stopping = queue2.stop();
     release2('ack');
     await stopping;
@@ -1085,6 +1116,131 @@ describe('RedisQueue lifecycle', () => {
     await queue.stop();
   });
 
+  it('stop disconnects an unready commands client without DELCONSUMER', async () => {
+    const queue = new RedisQueue({ redis: 'redis://127.0.0.1:6379' });
+    await queue.start();
+    await queue.subscribe('jobs', {
+      consumerGroup: 'billing',
+      handler: async () => 'ack',
+    });
+    const commands = FakeRedis.instances[0];
+    if (!commands) throw new Error('missing commands client');
+    commands.goOffline();
+    await expect(promptly(queue.stop())).resolves.toBe('settled');
+    expect(callsOf(commands, 'DELCONSUMER')).toHaveLength(0);
+    expect(commands.calls).toContainEqual(['disconnect']);
+    expect(commands.calls).not.toContainEqual(['quit']);
+  });
+
+  it('stop does not wait on a blocking read that never settles', async () => {
+    const queue = new RedisQueue({ redis: 'redis://127.0.0.1:6379' });
+    await queue.start();
+    await queue.subscribe('jobs', {
+      consumerGroup: 'billing',
+      handler: async () => 'ack',
+    });
+    const blocking = FakeRedis.instances[1];
+    if (!blocking) throw new Error('missing blocking client');
+    blocking.goOffline();
+    await expect(promptly(queue.stop())).resolves.toBe('settled');
+    expect(blocking.calls).toContainEqual(['disconnect']);
+    expect(blocking.calls).not.toContainEqual(['quit']);
+  });
+
+  it('stop closes the commands client when its commands never settle', async () => {
+    vi.useFakeTimers();
+    const queue = new RedisQueue({
+      redis: 'redis://127.0.0.1:6379',
+      visibilityMs: 1000,
+    });
+    await queue.start();
+    await queue.subscribe('jobs', {
+      consumerGroup: 'billing',
+      handler: async () => 'ack',
+    });
+    const commands = FakeRedis.instances[0];
+    if (!commands) throw new Error('missing commands client');
+    commands.stalled = true;
+    const stopped = settledFlag(queue.stop());
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(stopped()).toBe(true);
+    expect(callsOf(commands, 'DELCONSUMER')).toHaveLength(1);
+    expect(commands.calls).toContainEqual(['disconnect']);
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it('subscribe rejects when stop runs while it creates the group', async () => {
+    vi.useFakeTimers();
+    const queue = new RedisQueue({ redis: 'redis://127.0.0.1:6379' });
+    await queue.start();
+    const commands = FakeRedis.instances[0];
+    if (!commands) throw new Error('missing commands client');
+    commands.holdCreate = true;
+    const subscribing = queue.subscribe('jobs', {
+      consumerGroup: 'billing',
+      handler: async () => 'ack',
+    });
+    subscribing.catch(() => undefined);
+    await queue.stop();
+    commands.heldCreate?.resolve(undefined);
+    await expect(subscribing).rejects.toThrow(
+      'queue: stop() was called during subscribe',
+    );
+    expect(FakeRedis.instances).toHaveLength(1);
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it('the read loop logs a failed group create and backs off', async () => {
+    vi.useFakeTimers();
+    const logs = recordingLogger();
+    const queue = new RedisQueue({
+      redis: 'redis://127.0.0.1:6379',
+      logger: logs.sink,
+    });
+    await queue.start();
+    await queue.subscribe('jobs', {
+      consumerGroup: 'billing',
+      handler: async () => 'ack',
+    });
+    const commands = FakeRedis.instances[0];
+    const blocking = FakeRedis.instances[1];
+    if (!commands || !blocking) throw new Error('missing clients');
+    const wrongType = new Error('WRONGTYPE Operation against a key');
+    commands.failCreate = wrongType;
+    blocking.pending?.reject(new Error('NOGROUP No such key'));
+    await vi.advanceTimersByTimeAsync(0);
+    expect(logs.calls).toEqual([['error', wrongType, { topic: 'jobs' }]]);
+    const reads = () =>
+      blocking.calls.filter((call) => call[0] === 'xreadgroup');
+    expect(reads()).toHaveLength(1);
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(reads()).toHaveLength(2);
+    await queue.stop();
+  });
+
+  it('recover logs a failed group create', async () => {
+    vi.useFakeTimers();
+    const logs = recordingLogger();
+    const queue = new RedisQueue({
+      redis: 'redis://127.0.0.1:6379',
+      visibilityMs: 1000,
+      logger: logs.sink,
+    });
+    await queue.start();
+    await queue.subscribe('jobs', {
+      consumerGroup: 'billing',
+      handler: async () => 'ack',
+    });
+    const commands = FakeRedis.instances[0];
+    if (!commands) throw new Error('missing commands client');
+    const wrongType = new Error('WRONGTYPE Operation against a key');
+    commands.failXautoclaim = new Error('NOGROUP No such key');
+    commands.failCreate = wrongType;
+    await vi.advanceTimersByTimeAsync(500);
+    expect(logs.calls).toEqual([['error', wrongType, { topic: 'jobs' }]]);
+    await queue.stop();
+  });
+
   it('stop leaves no timer behind without subscriptions', async () => {
     vi.useFakeTimers();
     const queue = new RedisQueue({ redis: 'redis://127.0.0.1:6379' });
@@ -1157,6 +1313,17 @@ const silentLogger = {
   warn() {},
   error() {},
 };
+
+/** Resolves `'settled'` if `promise` settles within 200ms of real time, else `'pending'`. */
+function promptly(promise: Promise<unknown>): Promise<string> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const pending = new Promise<string>((resolve) => {
+    timer = setTimeout(() => resolve('pending'), 200);
+  });
+  return Promise.race([promise.then(() => 'settled'), pending]).finally(() =>
+    clearTimeout(timer),
+  );
+}
 
 function settledFlag(promise: Promise<unknown>): () => boolean {
   let settled = false;

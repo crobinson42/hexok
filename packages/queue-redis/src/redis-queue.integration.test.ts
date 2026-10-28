@@ -36,7 +36,13 @@ const { RedisQueue } = await import(process.env.QUEUE_ENTRY);
 async function runChild(
   body: string,
   env: Record<string, string>,
-): Promise<{ code: number | null; ms: number; stderr: string }> {
+): Promise<{
+  code: number | null;
+  ms: number;
+  exitedAt: number;
+  stdout: string;
+  stderr: string;
+}> {
   const started = Date.now();
   const child = spawn(
     process.execPath,
@@ -47,18 +53,23 @@ async function runChild(
         QUEUE_ENTRY: new URL('./redis-queue.ts', import.meta.url).href,
         ...env,
       },
-      stdio: ['ignore', 'ignore', 'pipe'],
+      stdio: ['ignore', 'pipe', 'pipe'],
       timeout: 6000,
     },
   );
+  let stdout = '';
   let stderr = '';
+  child.stdout.on('data', (chunk: Buffer) => {
+    stdout += chunk.toString();
+  });
   child.stderr.on('data', (chunk: Buffer) => {
     stderr += chunk.toString();
   });
   const code = await new Promise<number | null>((resolve) => {
     child.on('exit', resolve);
   });
-  return { code, ms: Date.now() - started, stderr };
+  const exitedAt = Date.now();
+  return { code, ms: exitedAt - started, exitedAt, stdout, stderr };
 }
 
 describe.skipIf(!process.env.REDIS_URL)('RedisQueue integration', () => {
@@ -272,6 +283,48 @@ await starting;
     expect(result.stderr).toBe('');
     expect(result.code).toBe(0);
     expect(result.ms).toBeLessThan(1500);
+  });
+
+  it('stops promptly when Redis goes away under an idle subscription', async () => {
+    const result = await runChild(
+      `
+import net from 'node:net';
+const target = new URL(process.env.REDIS_URL);
+const sockets = new Set();
+const proxy = net.createServer((client) => {
+  const upstream = net.connect(Number(target.port || 6379), target.hostname);
+  for (const socket of [client, upstream]) {
+    sockets.add(socket);
+    socket.on('error', () => {});
+  }
+  client.pipe(upstream).pipe(client);
+});
+await new Promise((resolve) => proxy.listen(0, '127.0.0.1', resolve));
+const queue = new RedisQueue({
+  redis: { host: '127.0.0.1', port: proxy.address().port, disconnectTimeout: 100 },
+  keyPrefix: process.env.KEY_PREFIX,
+  blockMs: 200,
+});
+await queue.start();
+await queue.subscribe('jobs', { consumerGroup: 'workers', handler: async () => 'ack' });
+await new Promise((resolve) => setTimeout(resolve, 100));
+proxy.close();
+for (const socket of sockets) socket.destroy();
+await new Promise((resolve) => setTimeout(resolve, 300));
+const stopping = Date.now();
+await queue.stop();
+console.log(JSON.stringify({ stopMs: Date.now() - stopping, stoppedAt: Date.now() }));
+`,
+      { KEY_PREFIX: `hexok:queue:it:${randomUUID()}:` },
+    );
+    expect(result.stderr).toBe('');
+    expect(result.code).toBe(0);
+    const { stopMs, stoppedAt } = JSON.parse(result.stdout) as {
+      stopMs: number;
+      stoppedAt: number;
+    };
+    expect(stopMs).toBeLessThan(500);
+    expect(result.exitedAt - stoppedAt).toBeLessThan(1000);
   });
 
   it('removes the local consumer on unsubscribe and leaves the group', async () => {

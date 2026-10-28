@@ -1,6 +1,6 @@
 # @hexok/ioredis-lifecycle
 
-Connection lifecycle for hexok Redis adapters built on ioredis. Redis adapters import it. App code does not. It holds no queue, broadcast, or schedule logic.
+Connection lifecycle for hexok Redis adapters built on ioredis. Redis adapters import it. App code does not: each adapter re-exports `LifecycleError`, so an app imports it from the adapter it uses. It holds no queue, broadcast, or schedule logic.
 
 `ioredis` 5 is a peer dependency, because the lifecycle works on the adapter's own clients. Install with `npm i @hexok/ioredis-lifecycle ioredis`.
 

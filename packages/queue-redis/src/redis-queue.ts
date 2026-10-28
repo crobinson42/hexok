@@ -47,8 +47,8 @@ export interface RedisQueueConfig {
   readonly retentionMs?: number;
   /**
    * How long `stop()` and `unsubscribe()` wait for handlers, consumer release, and `QUIT`. Default 10000.
-   * A handler still running when it runs out is cut off, and its entry stays pending until another consumer reclaims it after `visibilityMs`.
-   * So a stop shorter than `visibilityMs` is safe, and 10 seconds fits the default Kubernetes grace period beside other adapters.
+   * A handler still running is no longer waited for. It keeps running until the process exits, and its entry is not acked,
+   * so another consumer delivers it again after `visibilityMs`. A stop shorter than `visibilityMs` is safe, and 10 seconds fits the default Kubernetes grace period beside other adapters.
    */
   readonly stopTimeoutMs?: number;
   /** Rejects `start()` with `StartTimeout` when Redis is not ready in time. Unset, `start()` waits for Redis. */

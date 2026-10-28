@@ -7,7 +7,8 @@ Connection lifecycle for hexok Redis adapters built on ioredis. Redis adapters i
 ## Guarantees
 
 - Every client has an `error` listener from the moment it opens. Errors go to the `LogSink` with `{ adapter, connection }`. ioredis does not print "Unhandled error event".
-- A guarded command runs only while the state is `ready`. Otherwise it rejects with `NotStarted`, `Starting`, or `Stopped`, and it does not run.
+- Outside `stop()` cleanup, a guarded command runs only while the state is `ready`. Otherwise it rejects with `NotStarted`, `Starting`, or `Stopped`, and it does not run. During cleanup, `context.run` works while the state is `stopping`.
+- A client that ends after `start()` is logged at `error`.
 - `stop()` resolves within `stopTimeoutMs` while Redis refuses connections, stops answering, or the client is reconnecting.
 - A guarded command still pending when `stop()` stops waiting rejects with `StoppedBeforeReply`. It does not hang.
 - `stop()` clears every timer it made. It removes every `ready`, `end`, and `abort` listener it added.
@@ -17,6 +18,8 @@ Connection lifecycle for hexok Redis adapters built on ioredis. Redis adapters i
 ## Lifecycle
 
 The states are `idle`, `starting`, `ready`, `stopping`, and `stopped`. A failed start returns to `idle`. Read `lifecycle.state` to add it to logs.
+
+`state` is `ready` from `start()` until `stop()`, even while Redis is down. It says whether the adapter accepts calls, not whether Redis answers. Use it to gate traffic during startup and shutdown, not as a Redis health check.
 
 `start(open, onReady?)` calls `open` to make the clients, then waits until each one is `ready`. It connects a client made with `lazyConnect`. A `start()` during a pending start joins it, and its `open` is not called. A `start()` while ready resolves at once. `onReady` runs once, when the state becomes `ready` and before `start()` resolves. Set adapter timers there, so two `start()` calls cannot set them twice. If `onReady` throws, the start fails.
 
@@ -44,7 +47,7 @@ Cleanup runs before pending commands are rejected, because cleanup usually needs
 
 ### Errors
 
-Every error is a `LifecycleError`, a hexok `Errors` catalog. Match on `code`.
+Every error is a `LifecycleError`, a hexok `Errors` catalog. Match on `code`. An error's `name` is `ioredis-lifecycle.<Code>`, such as `ioredis-lifecycle.StoppedBeforeReply`.
 
 ```ts
 import { LifecycleError } from '@hexok/ioredis-lifecycle';
@@ -65,9 +68,30 @@ if (LifecycleError.is(error) && error.code === 'StoppedBeforeReply') {
 
 Each message starts with the adapter name and says the fix, such as `queue: start() has not finished. Await start() before publish().`
 
+`NotStarted`, `Starting`, and `Stopped` mean the call came at the wrong time. Fix the call order. Do not retry them. `StoppedBeforeReply` means Redis may or may not have run the command. The adapter is stopping, so do not retry on it. `StartTimeout` and `EndedBeforeReady` reject `start()` and close every connection. Call `start()` again, or exit and let the orchestrator restart the process.
+
+`LifecycleError.is` uses `instanceof`, so it matches only errors from the same copy of this package. Code that may see errors from several adapter versions should match on `error.code`.
+
+### Logs
+
+The lifecycle logs these through the `LogSink`. `fields` are the ones passed to `attach`.
+
+| Event | Level | Fields |
+| --- | --- | --- |
+| A client emits `error`, such as a failed connection attempt | `error` | `adapter`, `connection`, `fields` |
+| A client ends after `start()` | `error` | `adapter`, `connection`, `fields` |
+| `QUIT` fails during `stop()` | `error` | `adapter`, `connection`, `fields` |
+| `cleanup` throws during `stop()` | `error` | `adapter` |
+
+Adapters follow two rules in their own logs:
+
+- An adapter logs a `StoppedBeforeReply` from its own background commands at `warn`. It does not log `NotStarted`, `Starting`, or `Stopped` from background work. Errors returned to the caller are not logged by the adapter.
+- The `connection` field is present only on a connection error or a failed Redis command. A handler, job, or decode failure is user-code or data failure and carries no `connection`.
+
 ## When Redis is down
 
 - During `start()`, ioredis retries with its `retryStrategy`, and each failed attempt is logged. Without `startTimeoutMs`, `start()` waits until Redis returns. An app that boots before Redis then waits for it.
+- If `retryStrategy` gives up after `start()`, the connection ends and is logged at `error`. `state` stays `ready` and commands fail until `stop()` and `start()`. The default `retryStrategy` never gives up.
 - During an outage, ioredis holds commands in its offline queue. `openRedis` sets `maxRetriesPerRequest: null`, so they wait for Redis instead of failing after 20 attempts.
 - `disconnect()` on a reconnecting client does not end it and does not flush its offline queue. ioredis would never settle those commands. The guard rejects them with `StoppedBeforeReply` when `stop()` stops waiting.
 - A Redis that accepts connections and does not answer never replies to `QUIT`. The `QUIT` gets only the time left, and then the client is disconnected.
@@ -81,12 +105,14 @@ Each message starts with the adapter name and says the fix, such as `queue: star
 | --- | --- | --- |
 | `adapter` | required | Prefixes every error message and is the `adapter` log field. |
 | `stopTimeoutMs` | required | Each adapter knows how long its cleanup needs, such as waiting for handlers. The adapter sets and documents its default. |
-| `startTimeoutMs` | unset | Waiting suits a process that starts before Redis. Set it to fail fast, such as behind a health check. |
+| `startTimeoutMs` | unset | See below. |
 | `logger` | no-op | A structural `LogSink`. `@hexok/logger` and `console` fit it. |
 
-`openRedis(redis)` takes a URL or ioredis options and sets `maxRetriesPerRequest: null`. Options you pass win.
+Unset, `start()` waits for Redis, which suits compose-style boot. Set it under an orchestrator such as Kubernetes, so the process exits and is restarted.
 
-`settleWithin(promise, ms)` resolves `true` when the promise settles in time and `false` when time runs out. It never rejects and clears its timer. It adds one reaction to `promise`, so do not call it in a loop on a long-lived promise.
+An invalid `stopTimeoutMs` or `startTimeoutMs` throws a `RangeError` that starts with the adapter name.
+
+`openRedis(redis)` takes a URL or ioredis options and sets `maxRetriesPerRequest: null`. Options you pass win.
 
 `sleep(ms, signal?)` resolves after `ms` or as soon as `signal` aborts. Use it for backoff. It never rejects and leaves no timer or listener.
 
@@ -96,6 +122,7 @@ The adapter owns one `RedisLifecycle`. `start`, every command, and `stop` go thr
 
 ```ts
 import {
+  LifecycleError,
   type LogSink,
   openRedis,
   RedisLifecycle,
@@ -109,14 +136,18 @@ export interface RedisLockConfig {
   readonly logger?: LogSink;
 }
 
+const silent: LogSink = { debug() {}, info() {}, warn() {}, error() {} };
+
 export class RedisLock {
   readonly #redis: string | RedisOptions;
+  readonly #logger: LogSink;
   readonly #lifecycle: RedisLifecycle<{ commands: Redis }>;
   readonly #held = new Set<string>();
   #renew: ReturnType<typeof setInterval> | undefined;
 
   constructor(config: RedisLockConfig) {
     this.#redis = config.redis;
+    this.#logger = config.logger ?? silent;
     this.#lifecycle = new RedisLifecycle({
       adapter: 'lock',
       stopTimeoutMs: config.stopTimeoutMs ?? 5000,
@@ -157,10 +188,32 @@ export class RedisLock {
 
   async #renewAll(): Promise<void> {
     for (const key of this.#held) {
-      await this.#lifecycle
-        .run('renew', ({ commands }) => commands.pexpire(key, 30_000))
-        .catch(() => undefined);
+      try {
+        await this.#lifecycle.run('renew', ({ commands }) =>
+          commands.pexpire(key, 30_000),
+        );
+      } catch (error) {
+        this.#logRenewFailure(error, key);
+      }
     }
+  }
+
+  /** Background work: a stop in progress is a `warn`, a call at the wrong time is not logged. */
+  #logRenewFailure(error: unknown, key: string): void {
+    if (LifecycleError.is(error)) {
+      if (error.code === 'StoppedBeforeReply') {
+        this.#logger.warn(error.message, {
+          adapter: 'lock',
+          connection: 'commands',
+          key,
+        });
+      }
+      return;
+    }
+    this.#logger.error(
+      error instanceof Error ? error : new Error('lock: renew failed'),
+      { adapter: 'lock', connection: 'commands', key },
+    );
   }
 }
 ```

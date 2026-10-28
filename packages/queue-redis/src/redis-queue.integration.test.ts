@@ -93,7 +93,7 @@ describe.skipIf(!process.env.REDIS_URL)('RedisQueue integration', () => {
     return { queue, proxy };
   }
 
-  it('acks void and drop, leaves retry pending, and skips XACK after unsubscribe and stop', async () => {
+  it('acks void and drop, leaves retry pending, and skips XACK once unsubscribe and stop stop waiting', async () => {
     const url = process.env.REDIS_URL ?? '';
     const probe = new Redis(url);
     open.push(probe);
@@ -104,6 +104,7 @@ describe.skipIf(!process.env.REDIS_URL)('RedisQueue integration', () => {
       visibilityMs: 5000,
       blockMs: 200,
       retentionMs: 86_400_000,
+      stopTimeoutMs: 200,
     });
     queues.push(queue);
     await queue.start();
@@ -168,6 +169,7 @@ describe.skipIf(!process.env.REDIS_URL)('RedisQueue integration', () => {
       keyPrefix: prefix,
       visibilityMs: 300,
       blockMs: 200,
+      stopTimeoutMs: 200,
     });
     queues.push(queue2);
     await queue2.start();
@@ -181,9 +183,9 @@ describe.skipIf(!process.env.REDIS_URL)('RedisQueue integration', () => {
     });
     await queue2.publish('jobs', 'stopping');
     await waitFor(async () => (await pending()) >= 2);
-    const stopping = queue2.stop();
+    await queue2.stop();
     releaseStop('ack');
-    await stopping;
+    await new Promise((resolve) => setTimeout(resolve, 100));
     expect(await pending()).toBeGreaterThanOrEqual(2);
 
     const before = await probe.xlen(`${prefix}encoded`);
@@ -480,6 +482,35 @@ console.log(JSON.stringify({ growth, total: count * payload.length }));
     await waitFor(() => new Set(calls).size === 10);
     await new Promise((resolve) => setTimeout(resolve, 600));
     expect({ calls: calls.length, most }).toEqual({ calls: 10, most: 1 });
+  });
+
+  it('stop acks a handler that finishes within stopTimeoutMs', async () => {
+    const keyPrefix = newPrefix();
+    const admin = probe();
+    const queue = new RedisQueue({
+      redis: process.env.REDIS_URL ?? '',
+      keyPrefix,
+      blockMs: 200,
+      stopTimeoutMs: 2000,
+    });
+    queues.push(queue);
+    await queue.start();
+    let started = false;
+    await queue.subscribe('jobs', {
+      consumerGroup: 'workers',
+      handler: async () => {
+        started = true;
+        await new Promise((resolve) => setTimeout(resolve, 300));
+      },
+    });
+    await queue.publish('jobs', 'deploy');
+    await waitFor(() => started);
+    await queue.stop();
+    const summary = (await admin.xpending(`${keyPrefix}jobs`, 'workers')) as [
+      number,
+    ];
+    expect(summary[0]).toBe(0);
+    expect(await consumersOf(admin, `${keyPrefix}jobs`, 'workers')).toEqual([]);
   });
 
   it('a publish queued while Redis refuses connections rejects with StoppedBeforeReply on stop', async () => {

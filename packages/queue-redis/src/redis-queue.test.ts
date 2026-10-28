@@ -642,12 +642,13 @@ describe('RedisQueue commands', () => {
     await queue.stop();
   });
 
-  it('does not XACK after unsubscribe or stop', async () => {
+  it('does not XACK once unsubscribe or stop stops waiting', async () => {
     vi.useFakeTimers();
     const queue = new RedisQueue({
       redis: 'redis://127.0.0.1:6379',
       visibilityMs: 30_000,
       blockMs: 1000,
+      stopTimeoutMs: 100,
     });
     await queue.start();
     let release: (value: 'ack') => void = () => {};
@@ -666,8 +667,9 @@ describe('RedisQueue commands', () => {
     const unsubscribing = queue.unsubscribe('jobs', {
       consumerGroup: 'billing',
     });
-    release('ack');
+    await vi.advanceTimersByTimeAsync(100);
     await unsubscribing;
+    release('ack');
     await vi.waitFor(() => {
       const commands = FakeRedis.instances[0];
       expect(commands?.calls.some((call) => call[0] === 'xack')).toBe(false);
@@ -677,6 +679,7 @@ describe('RedisQueue commands', () => {
     const queue2 = new RedisQueue({
       redis: 'redis://127.0.0.1:6379',
       visibilityMs: 50,
+      stopTimeoutMs: 100,
     });
     await queue2.start();
     let release2: (value: 'ack') => void = () => {};
@@ -694,8 +697,10 @@ describe('RedisQueue commands', () => {
     ]);
     await vi.advanceTimersByTimeAsync(0);
     const stopping = queue2.stop();
-    release2('ack');
+    await vi.advanceTimersByTimeAsync(100);
     await stopping;
+    release2('ack');
+    await vi.advanceTimersByTimeAsync(0);
     const commands2 = FakeRedis.instances[started - 2];
     expect(commands2?.calls.some((call) => call[0] === 'xack')).toBe(false);
     expect(callsOf(commands2, 'DELCONSUMER')).toHaveLength(0);
@@ -1539,6 +1544,64 @@ describe('RedisQueue reliability', () => {
     const claims = commands?.calls.filter((call) => call[0] === 'xclaim');
     expect(claims?.[0]?.slice(5)).toEqual(['4-1', '4-2', '4-3', 'JUSTID']);
     release('ack');
+    await queue.stop();
+  });
+
+  it('stop acks a handler that finishes while it waits, then removes the consumer', async () => {
+    vi.useFakeTimers();
+    const queue = new RedisQueue({ redis: 'redis://127.0.0.1:6379' });
+    await queue.start();
+    let release: (value: 'ack') => void = () => {};
+    await queue.subscribe('jobs', {
+      consumerGroup: 'billing',
+      handler: () =>
+        new Promise((resolve) => {
+          release = resolve;
+        }),
+    });
+    FakeRedis.instances[1]?.pending?.resolve([
+      ['hexok:queue:jobs', [['4-1', ['payload', '{}']]]],
+    ]);
+    await vi.advanceTimersByTimeAsync(0);
+    const stopped = settledFlag(queue.stop());
+    await vi.advanceTimersByTimeAsync(50);
+    expect(stopped()).toBe(false);
+    release('ack');
+    await vi.advanceTimersByTimeAsync(0);
+    expect(stopped()).toBe(true);
+    const commands = FakeRedis.instances[0];
+    expect(commands?.calls.filter((call) => call[0] === 'xack')).toEqual([
+      ['xack', 'hexok:queue:jobs', 'billing', '4-1'],
+    ]);
+    expect(callsOf(commands, 'DELCONSUMER')).toHaveLength(1);
+  });
+
+  it('unsubscribe acks a handler that finishes while it waits', async () => {
+    vi.useFakeTimers();
+    const queue = new RedisQueue({ redis: 'redis://127.0.0.1:6379' });
+    await queue.start();
+    let release: (value: 'ack') => void = () => {};
+    await queue.subscribe('jobs', {
+      consumerGroup: 'billing',
+      handler: () =>
+        new Promise((resolve) => {
+          release = resolve;
+        }),
+    });
+    FakeRedis.instances[1]?.pending?.resolve([
+      ['hexok:queue:jobs', [['4-1', ['payload', '{}']]]],
+    ]);
+    await vi.advanceTimersByTimeAsync(0);
+    const unsubscribing = queue.unsubscribe('jobs', {
+      consumerGroup: 'billing',
+    });
+    release('ack');
+    await unsubscribing;
+    const commands = FakeRedis.instances[0];
+    expect(commands?.calls.filter((call) => call[0] === 'xack')).toEqual([
+      ['xack', 'hexok:queue:jobs', 'billing', '4-1'],
+    ]);
+    expect(callsOf(commands, 'DELCONSUMER')).toHaveLength(1);
     await queue.stop();
   });
 

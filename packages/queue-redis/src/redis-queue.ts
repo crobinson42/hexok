@@ -72,6 +72,11 @@ interface Subscription {
   readonly handler: QueueHandler<unknown>;
   /** Aborts on `unsubscribe` or `stop()`. It ends the current read or backoff. */
   readonly abort: AbortController;
+  /**
+   * How a settled handler runs `XACK`. `unsubscribe` and `stop()` swap in their own run while they wait for handlers,
+   * and clear it when they stop waiting, so a handler that returns later does not `XACK`.
+   */
+  ack: CommandRun | undefined;
   readonly inflight: Set<string>;
   readonly blocking: Redis;
   heartbeat: ReturnType<typeof setInterval> | undefined;
@@ -315,6 +320,7 @@ export class RedisQueue extends Adapter(Queue) {
       onError: options.onError ?? 'retry',
       handler: options.handler as QueueHandler<unknown>,
       abort: new AbortController(),
+      ack: (command) => this.#lifecycle.run('subscribe', command),
       inflight: new Set(),
       blocking,
       heartbeat: undefined,
@@ -352,7 +358,6 @@ export class RedisQueue extends Adapter(Queue) {
     const mapKey = `${topic}\0${options.consumerGroup}`;
     const sub = this.#subs.get(mapKey);
     if (!sub) return;
-    const idle = sub.inflight.size === 0;
     this.#closeSub(sub);
     // Redis can stop answering mid-call, and ioredis would hold the release until it returns.
     const deadline = new AbortController();
@@ -363,16 +368,15 @@ export class RedisQueue extends Adapter(Queue) {
         ),
       );
     }, this.#stopTimeoutMs);
+    const run: CommandRun = (command) =>
+      this.#lifecycle.run('unsubscribe', command, { signal: deadline.signal });
+    sub.ack = run;
     try {
       await settledOrAborted(handlersOf(sub), deadline.signal);
-      if (idle && !deadline.signal.aborted) {
-        await this.#releaseConsumer(sub, (command) =>
-          this.#lifecycle.run('unsubscribe', command, {
-            signal: deadline.signal,
-          }),
-        );
-      }
+      sub.ack = undefined;
+      if (!deadline.signal.aborted) await this.#releaseConsumer(sub, run);
     } finally {
+      sub.ack = undefined;
       clearTimeout(timer);
     }
     // stop() and a new subscribe() can run while this waits. Only this subscription's entry is removed.
@@ -399,16 +403,17 @@ export class RedisQueue extends Adapter(Queue) {
       this.#trimTimer = undefined;
       const subs = [...this.#subs.values()];
       this.#subs.clear();
-      const idle = subs.filter((sub) => sub.inflight.size === 0);
-      for (const sub of subs) this.#closeSub(sub);
+      const stopRun: CommandRun = (command) => run('stop', command);
+      for (const sub of subs) {
+        this.#closeSub(sub);
+        // A handler that finishes during a deploy is acked, so its entry is not delivered again.
+        sub.ack = stopRun;
+      }
       // Handlers finish before consumers are released. `signal` aborts when stop() stops waiting.
       await settledOrAborted(Promise.all(subs.map(handlersOf)), signal);
+      for (const sub of subs) sub.ack = undefined;
       if (signal.aborted) return;
-      await Promise.all(
-        idle.map((sub) =>
-          this.#releaseConsumer(sub, (command) => run('stop', command)),
-        ),
-      );
+      await Promise.all(subs.map((sub) => this.#releaseConsumer(sub, stopRun)));
     });
   }
 
@@ -603,27 +608,24 @@ export class RedisQueue extends Adapter(Queue) {
     await this.#settle(sub, id, disposition);
   }
 
-  /** After `unsubscribe` or `stop()`, a handler that returns does not `XACK`. Its entry stays pending for another consumer. */
+  /** Once `unsubscribe` or `stop()` stops waiting, a handler that returns does not `XACK`. Its entry stays pending for another consumer. */
   async #settle(
     sub: Subscription,
     id: string,
     disposition: QueueDisposition,
   ): Promise<void> {
-    if (sub.abort.signal.aborted || disposition === 'retry') {
+    const ack = sub.ack;
+    if (ack === undefined || disposition === 'retry') {
       sub.inflight.delete(id);
       return;
     }
     try {
-      await this.#lifecycle.run('subscribe', ({ commands }) =>
-        commands.xack(sub.key, sub.group, id),
-      );
+      await ack(({ commands }) => commands.xack(sub.key, sub.group, id));
     } catch (error) {
-      if (!sub.abort.signal.aborted) {
-        this.#logFailure(error, 'queue: XACK failed', {
-          ...this.#fields(sub, 'commands'),
-          id,
-        });
-      }
+      this.#logFailure(error, 'queue: XACK failed', {
+        ...this.#fields(sub, 'commands'),
+        id,
+      });
     }
     sub.inflight.delete(id);
   }

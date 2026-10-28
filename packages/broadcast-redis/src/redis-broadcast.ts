@@ -4,6 +4,7 @@ import {
   type Channel,
 } from '@hexok/broadcast';
 import {
+  LifecycleError,
   type LifecycleState,
   type LogSink,
   openRedis,
@@ -65,12 +66,12 @@ export class RedisBroadcast extends Adapter(Broadcast) {
     });
   }
 
-  /** The lifecycle state. It suits a readiness or health check. */
+  /** `ready` from `start()` until `stop()`, even while Redis is down. Use it to gate traffic, not as a Redis health check. */
   get state(): LifecycleState {
     return this.#lifecycle.state;
   }
 
-  start(): Promise<void> {
+  override start(): Promise<void> {
     return this.#lifecycle.start(() => {
       const publisher = openRedis(this.#redis);
       const subscriber = openRedis(this.#redis);
@@ -110,10 +111,15 @@ export class RedisBroadcast extends Adapter(Broadcast) {
     listening.handlers.delete(handler as BroadcastHandler<unknown>);
     if (listening.handlers.size > 0) return;
     this.#channels.delete(channel.name);
-    // run() sends UNSUBSCRIBE synchronously, so it follows any SUBSCRIBE already sent for the channel.
-    await this.#lifecycle.run('unsubscribe', ({ subscriber }) =>
-      subscriber.unsubscribe(this.#wire(channel.name)),
-    );
+    try {
+      // run() sends UNSUBSCRIBE synchronously, so it follows any SUBSCRIBE already sent for the channel.
+      await this.#lifecycle.run('unsubscribe', ({ subscriber }) =>
+        subscriber.unsubscribe(this.#wire(channel.name)),
+      );
+    } catch (error) {
+      // The handler is already removed. A lifecycle error means stop() is closing the connection, which ends the subscription, or the SUBSCRIBE never ran.
+      if (!LifecycleError.is(error)) throw error;
+    }
   }
 
   /** Sends no `UNSUBSCRIBE`. `QUIT` ends the subscriptions, and a dead Redis would never answer it. */
@@ -147,7 +153,8 @@ export class RedisBroadcast extends Adapter(Broadcast) {
     const channel = wire.startsWith(this.#channelPrefix)
       ? wire.slice(this.#channelPrefix.length)
       : wire;
-    const fields = { adapter: ADAPTER, connection: 'subscriber', channel };
+    // A decode or handler failure is not a connection failure, so it carries no `connection`.
+    const fields = { adapter: ADAPTER, channel };
     let payload: unknown;
     try {
       payload = this.#decode(raw);

@@ -90,6 +90,14 @@ class FakeRedis extends EventEmitter {
     });
   }
 
+  /** XPENDING replies by consumer name. A consumer not listed owns nothing. */
+  pendingByConsumer = new Map<string, unknown[]>();
+
+  xpending(...args: unknown[]): Promise<unknown[]> {
+    this.calls.push(['xpending', ...args]);
+    return Promise.resolve(this.pendingByConsumer.get(String(args[5])) ?? []);
+  }
+
   xack(...args: unknown[]): Promise<number> {
     this.calls.push(['xack', ...args]);
     return Promise.resolve(1);
@@ -672,6 +680,44 @@ describe('RedisQueue commands', () => {
     expect(stopped[1]?.[2]).toBe('hexok:queue:other');
     expect(stopped[1]?.[3]).toBe('mail');
     expect(String(stopped[1]?.[4])).toMatch(/^hexok:/);
+  });
+
+  it('keeps a consumer that still owns pending entries on unsubscribe and stop', async () => {
+    vi.useFakeTimers();
+    const queue = new RedisQueue({ redis: 'redis://127.0.0.1:6379' });
+    await queue.start();
+    const commands = FakeRedis.instances[0];
+    if (!commands) throw new Error('missing commands client');
+    for (const topic of ['jobs', 'other']) {
+      await queue.subscribe(topic, {
+        consumerGroup: 'billing',
+        handler: async () => 'retry',
+      });
+    }
+    const consumers = FakeRedis.instances
+      .slice(1)
+      .flatMap((client) =>
+        client.calls.filter((call) => call[0] === 'xreadgroup'),
+      )
+      .map((call) => String(call[3]));
+    for (const consumer of consumers) {
+      commands.pendingByConsumer.set(consumer, [['7-1', consumer, 1000, 1]]);
+    }
+    await queue.unsubscribe('jobs', { consumerGroup: 'billing' });
+    await queue.stop();
+    expect(callsOf(commands, 'DELCONSUMER')).toHaveLength(0);
+    const checks = commands.calls.filter((call) => call[0] === 'xpending');
+    expect(checks).toEqual(
+      consumers.map((consumer, index) => [
+        'xpending',
+        `hexok:queue:${index === 0 ? 'jobs' : 'other'}`,
+        'billing',
+        '-',
+        '+',
+        1,
+        consumer,
+      ]),
+    );
   });
 
   it('maintain defaults to a dry run and does not write', async () => {

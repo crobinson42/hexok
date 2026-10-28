@@ -327,6 +327,44 @@ console.log(JSON.stringify({ stopMs: Date.now() - stopping, stoppedAt: Date.now(
     expect(result.exitedAt - stoppedAt).toBeLessThan(1000);
   });
 
+  it('keeps a consumer that owns a pending entry on unsubscribe', async () => {
+    const url = process.env.REDIS_URL ?? '';
+    const probe = new Redis(url);
+    open.push(probe);
+    const prefix = `hexok:queue:it:${randomUUID()}:`;
+    const queue = new RedisQueue({
+      redis: url,
+      keyPrefix: prefix,
+      blockMs: 200,
+    });
+    queues.push(queue);
+    await queue.start();
+    let handled = 0;
+    await queue.subscribe('jobs', {
+      consumerGroup: 'workers',
+      handler: async () => {
+        handled += 1;
+        return 'retry';
+      },
+    });
+    await queue.publish('jobs', 'kept');
+    await waitFor(() => handled === 1);
+    const key = `${prefix}jobs`;
+    await queue.unsubscribe('jobs', { consumerGroup: 'workers' });
+    const consumers = (await probe.xinfo(
+      'CONSUMERS',
+      key,
+      'workers',
+    )) as unknown[][];
+    expect(consumers).toHaveLength(1);
+    expect(consumers[0]?.slice(0, 4)).toEqual([
+      'name',
+      expect.stringMatching(/^hexok:/),
+      'pending',
+      1,
+    ]);
+  });
+
   it('removes the local consumer on unsubscribe and leaves the group', async () => {
     const url = process.env.REDIS_URL ?? '';
     const probe = new Redis(url);

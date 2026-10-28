@@ -377,10 +377,22 @@ export class RedisQueue extends Adapter(Queue) {
     }
   }
 
-  /** Skips a client that is not ready, since ioredis would queue the command until Redis returns. */
+  /**
+   * DELCONSUMER drops the consumer's pending entries, so a consumer that owns any is left for `XAUTOCLAIM` or `maintain()`.
+   * Skips a client that is not ready, since ioredis would queue the command until Redis returns.
+   */
   async #releaseConsumer(commands: Redis, sub: Subscription): Promise<void> {
     if (sub.inflight.size > 0 || commands.status !== 'ready') return;
     try {
+      const owned = await commands.xpending(
+        sub.key,
+        sub.group,
+        '-',
+        '+',
+        1,
+        sub.consumer,
+      );
+      if (owned.length > 0) return;
       await commands.xgroup('DELCONSUMER', sub.key, sub.group, sub.consumer);
     } catch (error) {
       this.#logger.error(

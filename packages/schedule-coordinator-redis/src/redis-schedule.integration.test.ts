@@ -4,7 +4,7 @@ import { describeRedisLifecycle, RedisProxy, runNode } from '@hexok/test-redis';
 import { Redis, type RedisOptions } from 'ioredis';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { CronScheduler } from './cron-scheduler.js';
-import type { LogSink } from './index.js';
+import { LifecycleError, type LogSink } from './index.js';
 import { RedisScheduleCoordinator } from './redis-schedule.js';
 
 if (process.env.CI && !process.env.REDIS_URL) {
@@ -33,13 +33,22 @@ interface Logged {
   readonly fields: Record<string, unknown> | undefined;
 }
 
-function recorder(): LogSink & { errors: Logged[] } {
+interface Warned {
+  readonly message: string;
+  readonly fields: Record<string, unknown> | undefined;
+}
+
+function recorder(): LogSink & { errors: Logged[]; warnings: Warned[] } {
   const errors: Logged[] = [];
+  const warnings: Warned[] = [];
   return {
     errors,
+    warnings,
     debug() {},
     info() {},
-    warn() {},
+    warn(message, fields) {
+      warnings.push({ message, fields });
+    },
     error(error, fields) {
       errors.push({ error, fields });
     },
@@ -48,8 +57,9 @@ function recorder(): LogSink & { errors: Logged[] } {
 
 /**
  * `register` is synchronous, and Redis work happens on a tick, which reports failures to the `LogSink` with the `job` field.
- * So `operate` registers a fresh job, fires its tick through the scheduler seam, and rethrows the error logged for that job.
- * `register` throws `NotStarted`, `Starting`, and `Stopped`. The lock `SET` rejects with `StoppedBeforeReply`.
+ * So `operate` registers a fresh job, fires its tick through the scheduler seam, and turns what was logged for that job into a rejection.
+ * `register` throws `NotStarted`, `Starting`, and `Stopped`. A lock `SET` cut short by `stop()` is logged at `warn` with the
+ * `StoppedBeforeReply` message, and a `LogSink` warning carries no error object, so `operate` restores the code from that message.
  */
 describeRedisLifecycle(
   'RedisScheduleCoordinator',
@@ -74,6 +84,14 @@ describeRedisLifecycle(
         await scheduler.jobs.at(-1)?.fire();
         const failed = logger.errors.find((item) => item.fields?.job === job);
         if (failed) throw failed.error;
+        const warned = logger.warnings.find(
+          (item) =>
+            item.fields?.job === job &&
+            item.message.includes('stop() was called before Redis replied'),
+        );
+        if (warned) {
+          throw LifecycleError.StoppedBeforeReply(warned.message);
+        }
       },
     };
   },
@@ -155,11 +173,17 @@ describe.skipIf(!process.env.REDIS_URL)(
       });
       const stoppingTick = left.jobs[1]?.fire();
       await vi.waitFor(() => expect(releaseStop).toBeDefined());
-      await a.stop();
-      expect(await probe.get(`${prefix}lock:stop-me`)).toBeNull();
+      const stopping = a.stop();
+      await new Promise((resolve) => setTimeout(resolve, 100));
+      // The tick still runs, so it still holds its lock.
+      expect(await probe.get(`${prefix}lock:stop-me`)).toEqual(
+        expect.any(String),
+      );
       releaseStop?.();
+      await stopping;
       await stoppingTick;
       expect(aborted).toBe(true);
+      expect(await probe.get(`${prefix}lock:stop-me`)).toBeNull();
     });
   },
 );
@@ -190,24 +214,25 @@ describe.skipIf(!process.env.REDIS_URL)(
       return made;
     }
 
-    /** Registers a job whose tick holds the lock until its signal aborts, fires it, and waits until Redis has the lock. */
+    /** Registers a job whose tick holds the lock until its signal aborts, fires it, and waits until onTick runs. */
     async function hold(
       made: RedisScheduleCoordinator,
       scheduler: ReturnType<typeof seam>,
       job: string,
     ): Promise<{ ticking: Promise<void> }> {
+      let running = false;
       made.register({
         name: job,
         cron: '0 * * * *',
         onTick: ({ signal }) =>
           new Promise((resolve) => {
+            running = true;
             signal.addEventListener('abort', () => resolve(), { once: true });
           }),
       });
       const ticking = scheduler.jobs.at(-1)?.fire() ?? Promise.resolve();
-      await vi.waitFor(async () =>
-        expect(await probe.get(`${prefix}lock:${job}`)).not.toBeNull(),
-      );
+      // onTick runs once the coordinator has the SET reply. Redis can show the key a moment earlier.
+      await vi.waitFor(() => expect(running).toBe(true));
       // Wrapped, because an async function would wait for a returned promise.
       return { ticking };
     }
@@ -229,6 +254,7 @@ describe.skipIf(!process.env.REDIS_URL)(
       const scheduler = seam();
       const made = coordinator(scheduler);
       await made.start();
+      let started = 0;
       let finished = 0;
       for (const job of ['a', 'b']) {
         made.register({
@@ -236,6 +262,7 @@ describe.skipIf(!process.env.REDIS_URL)(
           cron: '0 * * * *',
           onTick: ({ signal }) =>
             new Promise((resolve) => {
+              started += 1;
               signal.addEventListener(
                 'abort',
                 () => {
@@ -251,14 +278,126 @@ describe.skipIf(!process.env.REDIS_URL)(
         });
         void scheduler.jobs.at(-1)?.fire();
       }
-      await vi.waitFor(async () =>
-        expect(await probe.exists(`${prefix}lock:a`, `${prefix}lock:b`)).toBe(
-          2,
-        ),
-      );
+      await vi.waitFor(() => expect(started).toBe(2));
       await made.stop();
       expect(finished).toBe(2);
       expect(await probe.exists(`${prefix}lock:a`, `${prefix}lock:b`)).toBe(0);
+    });
+
+    it('another process does not take the lock until a stopping tick has finished', async () => {
+      const left = seam();
+      const right = seam();
+      const a = coordinator(left);
+      const b = new RedisScheduleCoordinator({
+        redis: process.env.REDIS_URL ?? '',
+        keyPrefix: prefix,
+        scheduler: right,
+      });
+      coordinators.push(b);
+      await a.start();
+      await b.start();
+      let running = false;
+      let finishedAt = 0;
+      let acquiredAt = 0;
+      a.register({
+        name: 'overlap',
+        cron: '0 * * * *',
+        onTick: ({ signal }) =>
+          new Promise((resolve) => {
+            running = true;
+            // The tick honours its signal and takes 300ms to wind down.
+            signal.addEventListener(
+              'abort',
+              () => {
+                setTimeout(() => {
+                  finishedAt = Date.now();
+                  resolve();
+                }, 300);
+              },
+              { once: true },
+            );
+          }),
+      });
+      b.register({
+        name: 'overlap',
+        cron: '0 * * * *',
+        onTick: () => {
+          acquiredAt = Date.now();
+        },
+      });
+      void left.jobs[0]?.fire();
+      await vi.waitFor(() => expect(running).toBe(true));
+      const stopping = a.stop();
+      await vi.waitFor(
+        async () => {
+          await right.jobs[0]?.fire();
+          expect(acquiredAt).toBeGreaterThan(0);
+        },
+        { timeout: 3000, interval: 5 },
+      );
+      await stopping;
+      expect(finishedAt).toBeGreaterThan(0);
+      expect(acquiredAt).toBeGreaterThanOrEqual(finishedAt);
+    });
+
+    it('a process cut off from Redis aborts its tick before another process can take the lock', async () => {
+      const left = seam();
+      const right = seam();
+      const a = new RedisScheduleCoordinator({
+        redis,
+        keyPrefix: prefix,
+        lockTtlSec: 2,
+        stopTimeoutMs,
+        scheduler: left,
+      });
+      const b = new RedisScheduleCoordinator({
+        redis: process.env.REDIS_URL ?? '',
+        keyPrefix: prefix,
+        lockTtlSec: 2,
+        scheduler: right,
+      });
+      coordinators.push(a, b);
+      await a.start();
+      await b.start();
+      let running = false;
+      let abortedAt = 0;
+      let acquiredAt = 0;
+      a.register({
+        name: 'partition',
+        cron: '0 * * * *',
+        onTick: ({ signal }) =>
+          new Promise((resolve) => {
+            running = true;
+            signal.addEventListener(
+              'abort',
+              () => {
+                abortedAt = Date.now();
+                resolve();
+              },
+              { once: true },
+            );
+          }),
+      });
+      b.register({
+        name: 'partition',
+        cron: '0 * * * *',
+        onTick: () => {
+          acquiredAt = Date.now();
+        },
+      });
+      void left.jobs[0]?.fire();
+      await vi.waitFor(() => expect(running).toBe(true));
+      proxy.blackhole();
+      await vi.waitFor(
+        async () => {
+          await right.jobs[0]?.fire();
+          expect(acquiredAt).toBeGreaterThan(0);
+        },
+        { timeout: 5000, interval: 5 },
+      );
+      expect(abortedAt).toBeGreaterThan(0);
+      // The abort margin is min(1000, TTL / 4), 500ms here. Half of it allows for timer and event-loop lag.
+      expect(acquiredAt - abortedAt).toBeGreaterThanOrEqual(250);
     });
 
     it('stop resolves within stopTimeoutMs while Redis refuses connections, with a lock held', async () => {
@@ -302,7 +441,7 @@ describe.skipIf(!process.env.REDIS_URL)(
       expect(await settleWithin(ticking, 100)).toBe(true);
     });
 
-    it('a lock SET queued during an outage settles on stop and is logged with StoppedBeforeReply', async () => {
+    it('a lock SET queued during an outage settles on stop and is logged at warn with StoppedBeforeReply', async () => {
       const scheduler = seam();
       const logger = recorder();
       const made = coordinator(scheduler, logger);
@@ -324,8 +463,12 @@ describe.skipIf(!process.env.REDIS_URL)(
       );
       expect(await settleWithin(ticking, 100)).toBe(true);
       expect(ran).toBe(false);
-      expect(logger.errors).toContainEqual({
-        error: expect.objectContaining({ code: 'StoppedBeforeReply' }),
+      // Connection errors are logged while Redis refuses. Nothing about the job is an error.
+      expect(logger.errors.filter((item) => item.fields?.job)).toEqual([]);
+      expect(logger.warnings).toContainEqual({
+        message: expect.stringContaining(
+          'stop() was called before Redis replied to acquire()',
+        ),
         fields: { adapter: 'schedule', connection: 'commands', job: 'queued' },
       });
     });

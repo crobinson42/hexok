@@ -10,4 +10,4 @@ export {
   type StopCleanup,
   type StopContext,
 } from './redis-lifecycle.js';
-export { settleWithin, sleep } from './timing.js';
+export { sleep } from './timing.js';

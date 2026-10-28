@@ -227,7 +227,8 @@ describe.skipIf(!process.env.REDIS_URL)('RedisLifecycle integration', () => {
   it('the process exits soon after stop while Redis is blackholed', async () => {
     const running = runNode(
       `
-import { openRedis, RedisLifecycle, settleWithin } from ${JSON.stringify(entry)};
+import { openRedis, RedisLifecycle } from ${JSON.stringify(entry)};
+import { settleWithin } from '@hexok/test-redis';
 const lifecycle = new RedisLifecycle({ adapter: 'child', stopTimeoutMs: 300 });
 await lifecycle.start(() => ({
   main: openRedis({ host: '127.0.0.1', port: Number(process.env.PORT), disconnectTimeout: 200 }),

@@ -1763,6 +1763,40 @@ describe('RedisQueue reliability', () => {
     expect(stopped()).toBe(true);
   });
 
+  it('logs a background command that stop cut short at warn', async () => {
+    vi.useFakeTimers();
+    const logs = recordingLogger();
+    const queue = new RedisQueue({
+      redis: 'redis://127.0.0.1:6379',
+      stopTimeoutMs: 500,
+      logger: logs.sink,
+    });
+    await queue.start();
+    await queue.subscribe('jobs', {
+      consumerGroup: 'billing',
+      handler: async () => 'ack',
+    });
+    const commands = FakeRedis.instances[0];
+    if (!commands) throw new Error('missing commands client');
+    commands.stalled = true;
+    const stopping = queue.stop();
+    await vi.advanceTimersByTimeAsync(500);
+    await stopping;
+    expect(logs.calls).toEqual([
+      [
+        'warn',
+        'queue: stop() stopped waiting before Redis replied to the consumer release. Redis may or may not have run it.',
+        {
+          adapter: 'queue',
+          connection: 'commands',
+          topic: 'jobs',
+          group: 'billing',
+          code: 'StoppedBeforeReply',
+        },
+      ],
+    ]);
+  });
+
   it('a recovery tick is skipped while the previous one runs', async () => {
     vi.useFakeTimers();
     const queue = new RedisQueue({

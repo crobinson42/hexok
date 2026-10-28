@@ -221,7 +221,7 @@ export class RedisQueue extends Adapter(Queue) {
     });
   }
 
-  /** The lifecycle state. It suits a readiness or health check. */
+  /** `ready` from `start()` until `stop()`, even while Redis is down. Gate traffic on it, not Redis health. */
   get state(): LifecycleState {
     return this.#lifecycle.state;
   }
@@ -282,7 +282,7 @@ export class RedisQueue extends Adapter(Queue) {
     try {
       await this.#trim(topic);
     } catch (error) {
-      this.#logFailure(error, 'queue: XTRIM failed', {
+      this.#logFailure(error, 'XTRIM', {
         adapter: ADAPTER,
         connection: 'commands',
         topic,
@@ -444,7 +444,7 @@ export class RedisQueue extends Adapter(Queue) {
     } catch (error) {
       this.#logFailure(
         error,
-        'queue: consumer release failed',
+        'consumer release',
         this.#fields(sub, 'commands'),
       );
     }
@@ -497,11 +497,7 @@ export class RedisQueue extends Adapter(Queue) {
             continue;
           }
           failures += 1;
-          this.#logFailure(
-            error,
-            'queue: XREADGROUP failed',
-            this.#fields(sub, 'blocking'),
-          );
+          this.#logFailure(error, 'XREADGROUP', this.#fields(sub, 'blocking'));
           await sleep(backoffMs(failures), signal);
           continue;
         }
@@ -639,7 +635,7 @@ export class RedisQueue extends Adapter(Queue) {
     try {
       await ack(({ commands }) => commands.xack(sub.key, sub.group, id));
     } catch (error) {
-      this.#logFailure(error, 'queue: XACK failed', {
+      this.#logFailure(error, 'XACK', {
         ...this.#fields(sub, 'commands'),
         id,
       });
@@ -656,11 +652,7 @@ export class RedisQueue extends Adapter(Queue) {
         commands.xclaim(sub.key, sub.group, sub.consumer, 0, ...ids, 'JUSTID'),
       );
     } catch (error) {
-      this.#logFailure(
-        error,
-        'queue: XCLAIM failed',
-        this.#fields(sub, 'commands'),
-      );
+      this.#logFailure(error, 'XCLAIM', this.#fields(sub, 'commands'));
     }
   }
 
@@ -691,20 +683,15 @@ export class RedisQueue extends Adapter(Queue) {
         entries.filter(([id]) => !sub.inflight.has(id)),
       );
     } catch (error) {
-      if (sub.abort.signal.aborted) return;
-      if (isNoGroup(error)) {
+      if (isNoGroup(error) && !sub.abort.signal.aborted) {
         await this.#restoreGroup(sub);
         return;
       }
-      this.#logFailure(
-        error,
-        'queue: XAUTOCLAIM failed',
-        this.#fields(sub, 'commands'),
-      );
+      this.#logFailure(error, 'XAUTOCLAIM', this.#fields(sub, 'commands'));
     }
   }
 
-  /** Recreates a group deleted under a running subscription. Logs a failure and returns false. */
+  /** Recreates a group deleted under a running subscription. Logs a failure and returns false, unless the queue is stopping. */
   async #restoreGroup(sub: Subscription): Promise<boolean> {
     try {
       await this.#lifecycle.run('subscribe', ({ commands }) =>
@@ -712,16 +699,9 @@ export class RedisQueue extends Adapter(Queue) {
       );
       return true;
     } catch (error) {
+      this.#logFailure(error, 'XGROUP CREATE', this.#fields(sub, 'commands'));
       // After stop(), the read loop sees the abort and ends.
-      if (LifecycleError.is(error)) return true;
-      if (!sub.abort.signal.aborted) {
-        this.#logFailure(
-          error,
-          'queue: XGROUP CREATE failed',
-          this.#fields(sub, 'commands'),
-        );
-      }
-      return false;
+      return LifecycleError.is(error);
     }
   }
 
@@ -737,7 +717,7 @@ export class RedisQueue extends Adapter(Queue) {
       try {
         await this.#trim(topic);
       } catch (error) {
-        this.#logFailure(error, 'queue: age trim failed', {
+        this.#logFailure(error, 'XTRIM', {
           adapter: ADAPTER,
           connection: 'commands',
           topic,
@@ -746,15 +726,26 @@ export class RedisQueue extends Adapter(Queue) {
     }
   }
 
-  /** Logs a failed command. A lifecycle error means stop() cut the command short, which is not a failure. */
+  /**
+   * Logs a failed background command. Redis may have run one that `stop()` cut short, so `StoppedBeforeReply` goes to `warn`.
+   * `NotStarted`, `Starting`, and `Stopped` mean the queue was not running, which is not a failure.
+   */
   #logFailure(
     error: unknown,
-    fallback: string,
+    command: string,
     fields: Record<string, unknown>,
   ): void {
-    if (LifecycleError.is(error)) return;
+    if (LifecycleError.is(error)) {
+      if (error.code === 'StoppedBeforeReply') {
+        this.#logger.warn(
+          `queue: stop() stopped waiting before Redis replied to the ${command}. Redis may or may not have run it.`,
+          { ...fields, code: error.code },
+        );
+      }
+      return;
+    }
     this.#logger.error(
-      error instanceof Error ? error : new Error(fallback),
+      error instanceof Error ? error : new Error(`queue: ${command} failed`),
       fields,
     );
   }

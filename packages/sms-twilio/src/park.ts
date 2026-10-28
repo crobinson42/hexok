@@ -50,7 +50,9 @@ export function smsParkInput(message: SmsMessage, error: unknown): ParkInput {
   return {
     source: 'sms',
     operation: 'send',
-    payload: { to: message.to, body: message.body },
+    payload: message.sensitive
+      ? { sensitive: true, bodyLength: message.body.length }
+      : { to: message.to, body: message.body },
     error: parkedError(error),
     occurredAt: new Date(),
     context: { adapter: 'twilio' },

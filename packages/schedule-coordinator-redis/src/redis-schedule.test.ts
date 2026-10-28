@@ -9,8 +9,11 @@ class FakeRedis {
   setGate: Promise<void> | undefined;
   /** When set, a renew waits for it. */
   renewGate: Promise<void> | undefined;
+  /** When set, a release waits for it, like a command held during a partition. */
+  releaseGate: Promise<void> | undefined;
   readonly calls: string[] = [];
-  readonly store = new Map<string, string>();
+  /** Replace it to share keys between clients, as one Redis would. */
+  store = new Map<string, string>();
   // The lifecycle reads `status` and adds an `error` listener.
   status = 'ready';
 
@@ -43,6 +46,7 @@ class FakeRedis {
       if (this.store.get(key) !== owner) return 0;
       return this.renewResult;
     }
+    await this.releaseGate;
     if (this.store.get(key) !== owner) return 0;
     this.store.delete(key);
     return 1;
@@ -175,7 +179,7 @@ describe('RedisScheduleCoordinator', () => {
     }
   });
 
-  it('a tick starts no Redis work after stop begins', async () => {
+  it('a tick whose lock arrives after stop begins does not run onTick, and each lock is released once', async () => {
     const seam = scheduler();
     const coordinator = new RedisScheduleCoordinator({
       redis: 'redis://127.0.0.1:6379',
@@ -217,11 +221,11 @@ describe('RedisScheduleCoordinator', () => {
     await running;
     await late;
     expect(ran).toBe(1);
-    // One release per lock, both from stop(). The running tick does not release after stop() begins.
+    // The running tick releases its lock once it finishes. The late tick releases its lock without running onTick.
     expect(redis.calls).toEqual(['set', 'set', 'release', 'release']);
   });
 
-  it('aborts the tick when a renew has not answered by the next renew', async () => {
+  it('aborts the tick before the lock can expire when a renew does not answer', async () => {
     vi.useFakeTimers();
     try {
       const seam = scheduler();
@@ -252,10 +256,10 @@ describe('RedisScheduleCoordinator', () => {
           }),
       });
       const ticking = seam.jobs[0]?.fire();
-      // The first renew goes out after half the TTL and never answers.
+      // Renews never answer. The lock is valid until 2000ms after SET was sent.
       await vi.advanceTimersByTimeAsync(1000);
       expect(signal?.aborted).toBe(false);
-      // By the next renew the lock may have expired.
+      // The tick aborts at 1500ms, the TTL less a margin of min(1000, TTL / 4).
       await vi.advanceTimersByTimeAsync(1000);
       expect(signal?.aborted).toBe(true);
       expect(warned).toEqual([
@@ -270,5 +274,71 @@ describe('RedisScheduleCoordinator', () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  it('a late release from an earlier session does not delete a later lock', async () => {
+    const seam = scheduler();
+    const coordinator = new RedisScheduleCoordinator({
+      redis: 'redis://127.0.0.1:6379',
+      stopTimeoutMs: 100,
+      scheduler: seam,
+    });
+    const key = 'hexok:sched:lock:token';
+    await coordinator.start();
+    const first = latest();
+    let heal: () => void = () => {};
+    // The release is sent during a partition, and Redis runs it after the partition heals.
+    first.releaseGate = new Promise((resolve) => {
+      heal = resolve;
+    });
+    coordinator.register({ name: 'token', cron: '0 * * * *', onTick() {} });
+    const ticking = seam.jobs[0]?.fire();
+    await vi.waitFor(() => expect(first.calls).toContain('release'));
+    await coordinator.stop();
+    await ticking;
+    // The first lock expires by its TTL.
+    first.store.delete(key);
+
+    await coordinator.start();
+    const second = latest();
+    second.store = first.store;
+    let heldAfterHeal = false;
+    coordinator.register({
+      name: 'token',
+      cron: '0 * * * *',
+      onTick: async () => {
+        heal();
+        await new Promise((resolve) => setTimeout(resolve, 10));
+        heldAfterHeal = first.store.has(key);
+      },
+    });
+    await seam.jobs[1]?.fire();
+    expect(heldAfterHeal).toBe(true);
+    expect(first.store.has(key)).toBe(false);
+    await coordinator.stop();
+  });
+
+  it('stop() called from inside onTick does not wait for that tick', async () => {
+    const coordinator = new RedisScheduleCoordinator({
+      redis: 'redis://127.0.0.1:6379',
+      scheduler: new CronPackageScheduler(),
+    });
+    await coordinator.start();
+    let stopMs = -1;
+    await new Promise<void>((resolve) => {
+      coordinator.register({
+        name: 'self-stop',
+        cron: '0 * * * *',
+        runOnRegister: true,
+        onTick: async () => {
+          const started = Date.now();
+          await coordinator.stop();
+          stopMs = Date.now() - started;
+          resolve();
+        },
+      });
+    });
+    expect(stopMs).toBeLessThan(1000);
+    expect(coordinator.state).toBe('stopped');
   });
 });

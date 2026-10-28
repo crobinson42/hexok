@@ -266,9 +266,8 @@ async function processKey(
   }
   if (!report.dryRun) {
     try {
-      const cutoff = now - idleMs;
       const deleted = await input.run((commands) =>
-        deleteIdleStream(commands, key, cutoff),
+        deleteIdleStream(commands, key, idleMs),
       );
       // It gained a group or an entry after XINFO, or another run deleted it first.
       if (deleted !== 'removed') return;

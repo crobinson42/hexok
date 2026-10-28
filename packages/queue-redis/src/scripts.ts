@@ -113,7 +113,11 @@ redis.call('XGROUP', 'DESTROY', KEYS[1], ARGV[1])
 return 1
 `;
 
-/** Deletes a stream only while it has no groups and its last id is no newer than `ARGV[1]` ms. A `0-0` last id is never old. */
+/**
+ * Deletes a stream only while it has no groups and its last id is at least `ARGV[1]` ms old. A `0-0` last id is never old.
+ * Stream ids carry Redis time, so the age is measured on the Redis clock from `TIME`, not on this process's clock.
+ * `TIME` before a write is allowed, because scripts replicate their effects, the default since Redis 5.
+ */
 // Atomic, because a group or an entry can arrive between the XINFO that maintain() read and the delete.
 export const deleteIdleStreamScript = `
 if redis.call('EXISTS', KEYS[1]) == 0 then
@@ -128,7 +132,9 @@ for i = 1, #info, 2 do
   if info[i] == 'last-generated-id' then last = info[i + 1] end
 end
 local ms = tonumber(string.match(last, '^(%d+)-'))
-if ms == nil or ms == 0 or ms > tonumber(ARGV[1]) then
+local time = redis.call('TIME')
+local now = tonumber(time[1]) * 1000 + math.floor(tonumber(time[2]) / 1000)
+if ms == nil or ms == 0 or ms > now - tonumber(ARGV[1]) then
   return 0
 end
 redis.call('DEL', KEYS[1])
@@ -149,9 +155,9 @@ export async function destroyIdleGroup(
 export async function deleteIdleStream(
   commands: Redis,
   key: string,
-  cutoffMs: number,
+  idleMs: number,
 ): Promise<ScriptOutcome> {
-  const reply = await commands.eval(deleteIdleStreamScript, 1, key, cutoffMs);
+  const reply = await commands.eval(deleteIdleStreamScript, 1, key, idleMs);
   return verdict(reply, 'stream delete');
 }
 

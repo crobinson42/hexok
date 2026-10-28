@@ -694,7 +694,7 @@ console.log(JSON.stringify({ growth, total: count * payload.length }));
     const admin = probe();
     const prefix = newPrefix();
     const old = Date.now() - 60_000;
-    const cutoff = Date.now() - 1000;
+    const idleMs = 1000;
     const grouped = `${prefix}grouped`;
     const fresh = `${prefix}fresh`;
     const idle = `${prefix}idle`;
@@ -702,10 +702,10 @@ console.log(JSON.stringify({ growth, total: count * payload.length }));
     await admin.xgroup('CREATE', grouped, 'workers', '0');
     await admin.xadd(fresh, '*', 'payload', '1');
     await admin.xadd(idle, `${old}-0`, 'payload', '1');
-    expect(await deleteIdleStream(admin, grouped, cutoff)).toBe('kept');
-    expect(await deleteIdleStream(admin, fresh, cutoff)).toBe('kept');
-    expect(await deleteIdleStream(admin, idle, cutoff)).toBe('removed');
-    expect(await deleteIdleStream(admin, idle, cutoff)).toBe('gone');
+    expect(await deleteIdleStream(admin, grouped, idleMs)).toBe('kept');
+    expect(await deleteIdleStream(admin, fresh, idleMs)).toBe('kept');
+    expect(await deleteIdleStream(admin, idle, idleMs)).toBe('removed');
+    expect(await deleteIdleStream(admin, idle, idleMs)).toBe('gone');
     expect(await admin.exists(grouped, fresh, idle)).toBe(2);
     await admin.del(grouped, fresh);
   });
@@ -805,6 +805,28 @@ describe.each(recoveryTargets)('RedisQueue recovery on %s', (_name, url) => {
         expect(handled).toEqual([kept]);
       } finally {
         await queue.stop();
+        await admin.del(key);
+        await admin.quit();
+      }
+    },
+  );
+});
+
+describe.each(recoveryTargets)('RedisQueue scripts on %s', (_name, url) => {
+  it.skipIf(!url)(
+    'the stream script measures idleness on the Redis clock',
+    async () => {
+      const admin = new Redis(url ?? '');
+      const key = `${newPrefix()}jobs`;
+      try {
+        const [seconds, micros] = await admin.time();
+        const redisNow =
+          Number(seconds) * 1000 + Math.floor(Number(micros) / 1000);
+        await admin.xadd(key, `${redisNow - 5000}-0`, 'payload', '1');
+        expect(await deleteIdleStream(admin, key, 10_000)).toBe('kept');
+        expect(await deleteIdleStream(admin, key, 1000)).toBe('removed');
+        expect(await admin.exists(key)).toBe(0);
+      } finally {
         await admin.del(key);
         await admin.quit();
       }

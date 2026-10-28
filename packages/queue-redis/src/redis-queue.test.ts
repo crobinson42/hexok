@@ -158,12 +158,12 @@ class FakeRedis extends EventEmitter {
       return 1;
     }
     if (script === deleteIdleStreamScript) {
-      const [, key, cutoff] = args;
+      const [, key, idleMs] = args;
       if (this.#seen(['GROUPS', key]).length > 0) return 0;
       const stream = this.#seen(['STREAM', key]);
       const last = String(stream[stream.indexOf('last-generated-id') + 1]);
       const ms = Number(last.split('-')[0]);
-      if (!(ms > 0) || ms > Number(cutoff)) return 0;
+      if (!(ms > 0) || ms > Date.now() - Number(idleMs)) return 0;
       await this.del(key);
       return 1;
     }
@@ -1147,6 +1147,12 @@ describe('RedisQueue commands', () => {
     expect(commands.calls.filter((call) => call[0] === 'del')).toEqual([
       ['del', 'hexok:queue:empty'],
     ]);
+    // The script reads the clock from Redis, so it gets idleMs, not a time from this process.
+    expect(
+      commands.calls.filter(
+        (call) => call[0] === 'eval' && call[2] === 'hexok:queue:empty',
+      ),
+    ).toEqual([['eval', 1, 'hexok:queue:empty', 1000]]);
     await queue.stop();
   });
 

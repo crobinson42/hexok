@@ -3,7 +3,7 @@ import { describeRedisLifecycle, RedisProxy, runNode } from '@hexok/test-redis';
 import { Redis } from 'ioredis';
 import { afterEach, describe, expect, it } from 'vitest';
 import { RedisQueue } from './redis-queue.js';
-import { releaseConsumer } from './release-consumer.js';
+import { releaseConsumer } from './scripts.js';
 
 describeRedisLifecycle('RedisQueue', ({ redis, stopTimeoutMs }) => {
   const queue = new RedisQueue({
@@ -624,4 +624,65 @@ console.log(JSON.stringify({ growth, total: count * payload.length }));
     ]);
     await admin.del(key);
   });
+});
+
+/**
+ * Redis 6.2 returns a deleted pending entry from `XAUTOCLAIM` as `nil` and keeps it pending. Redis 7 returns its id apart.
+ * Run against 6.2 with `docker run --rm -p 6380:6379 redis:6.2-alpine` and `REDIS62_URL=redis://127.0.0.1:6380`.
+ */
+const recoveryTargets = [
+  ['REDIS_URL', process.env.REDIS_URL],
+  ['REDIS62_URL', process.env.REDIS62_URL],
+] as const;
+
+describe.each(recoveryTargets)('RedisQueue recovery on %s', (_name, url) => {
+  it.skipIf(!url)(
+    'recovers past a pending entry deleted from the stream and acks it',
+    async () => {
+      const admin = new Redis(url ?? '');
+      const keyPrefix = newPrefix();
+      const key = `${keyPrefix}jobs`;
+      const queue = new RedisQueue({
+        redis: url ?? '',
+        keyPrefix,
+        visibilityMs: 300,
+        blockMs: 100,
+      });
+      try {
+        await admin.xgroup('CREATE', key, 'workers', '0', 'MKSTREAM');
+        const deleted = await admin.xadd(key, '*', 'payload', '"gone"');
+        const kept = await admin.xadd(key, '*', 'payload', '"kept"');
+        // A consumer that died while it held both entries.
+        await admin.xreadgroup(
+          'GROUP',
+          'workers',
+          'hexok:dead:1',
+          'COUNT',
+          10,
+          'STREAMS',
+          key,
+          '>',
+        );
+        await admin.xdel(key, deleted ?? '');
+        await new Promise((resolve) => setTimeout(resolve, 300));
+        const handled: string[] = [];
+        await queue.start();
+        await queue.subscribe('jobs', {
+          consumerGroup: 'workers',
+          handler: async (message) => {
+            handled.push(message.id);
+          },
+        });
+        await waitFor(async () => {
+          const summary = (await admin.xpending(key, 'workers')) as [number];
+          return handled.includes(kept ?? '') && summary[0] === 0;
+        });
+        expect(handled).toEqual([kept]);
+      } finally {
+        await queue.stop();
+        await admin.del(key);
+        await admin.quit();
+      }
+    },
+  );
 });

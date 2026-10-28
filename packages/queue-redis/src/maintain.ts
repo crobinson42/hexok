@@ -1,6 +1,6 @@
 import { LifecycleError, type LogSink } from '@hexok/ioredis-lifecycle';
 import type { Redis } from 'ioredis';
-import { releaseConsumer } from './release-consumer.js';
+import { releaseConsumer } from './scripts.js';
 
 export interface RedisQueueMaintainOptions {
   readonly dryRun?: boolean;

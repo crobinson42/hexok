@@ -31,3 +31,41 @@ export async function releaseConsumer(
   if (reply === 0) return false;
   throw new Error('queue: the consumer release script replied unexpectedly');
 }
+
+/**
+ * Acks the consumer's pending entries that are gone from the stream, and returns their ids.
+ * Redis 6.2 keeps such an entry pending and `XAUTOCLAIM` returns it as `nil`, without its id.
+ */
+export const ackDeletedScript = `
+local gone = {}
+for _, row in ipairs(redis.call('XPENDING', KEYS[1], ARGV[1], '-', '+', ARGV[3], ARGV[2])) do
+  if #redis.call('XRANGE', KEYS[1], row[1], row[1]) == 0 then
+    gone[#gone + 1] = row[1]
+  end
+end
+if #gone > 0 then
+  redis.call('XACK', KEYS[1], ARGV[1], unpack(gone))
+end
+return gone
+`;
+
+/** How many of the consumer's pending entries one {@link ackDeleted} call checks. */
+const ACK_DELETED_SCAN = 1000;
+
+/** Acks the consumer's pending entries that are gone from the stream. Resolves their ids. */
+export async function ackDeleted(
+  commands: Redis,
+  key: string,
+  group: string,
+  consumer: string,
+): Promise<string[]> {
+  const reply = await commands.eval(
+    ackDeletedScript,
+    1,
+    key,
+    group,
+    consumer,
+    ACK_DELETED_SCAN,
+  );
+  return Array.isArray(reply) ? reply.map(String) : [];
+}

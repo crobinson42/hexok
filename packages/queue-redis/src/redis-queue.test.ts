@@ -1,7 +1,11 @@
 import { EventEmitter } from 'node:events';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { ParkInput } from './park.js';
-import { releaseConsumer, releaseConsumerScript } from './release-consumer.js';
+import {
+  ackDeletedScript,
+  releaseConsumer,
+  releaseConsumerScript,
+} from './scripts.js';
 
 interface Pending {
   resolve: (value: unknown) => void;
@@ -111,8 +115,12 @@ class FakeRedis extends EventEmitter {
   }
 
   /** Runs the consumer release script with this fake's own XPENDING and DELCONSUMER, as Redis would. */
+  readonly scripts: unknown[] = [];
+
   async eval(script: unknown, ...args: unknown[]): Promise<unknown> {
     this.calls.push(['eval', ...args]);
+    this.scripts.push(script);
+    if (script === ackDeletedScript) return [];
     if (script !== releaseConsumerScript) throw new Error('unknown script');
     const [, key, group, consumer] = args;
     const owned = await this.xpending(key, group, '-', '+', 1, consumer);
@@ -131,9 +139,14 @@ class FakeRedis extends EventEmitter {
     return Promise.resolve([]);
   }
 
+  /** Replies to each `XAUTOCLAIM` as is, such as a Redis 6.2 reply with `nil` for a deleted entry. */
+  autoclaimReplies: unknown[][] = [];
+
   xautoclaim(...args: unknown[]): Promise<unknown[]> {
     this.calls.push(['xautoclaim', ...args]);
     if (this.failXautoclaim) return Promise.reject(this.failXautoclaim);
+    const reply = this.autoclaimReplies.shift();
+    if (reply) return Promise.resolve(reply);
     return Promise.resolve(['0-0', this.autoclaimEntries.splice(0)]);
   }
 
@@ -1459,6 +1472,66 @@ describe('RedisQueue reliability', () => {
     vi.useRealTimers();
     FakeRedis.instances.length = 0;
     FakeRedis.initialStatus = 'ready';
+  });
+
+  it('recovery skips an entry Redis 6.2 returns as nil, acks the deleted ids, and keeps running', async () => {
+    vi.useFakeTimers();
+    const logs = recordingLogger();
+    const queue = new RedisQueue({
+      redis: 'redis://127.0.0.1:6379',
+      visibilityMs: 1000,
+      logger: logs.sink,
+    });
+    await queue.start();
+    const commands = FakeRedis.instances[0];
+    if (!commands) throw new Error('missing commands client');
+    commands.autoclaimReplies = [
+      ['0-0', [null, ['3-1', ['payload', '{"n":1}']]]],
+      ['0-0', [null, ['3-2', ['payload', '{"n":2}']]]],
+    ];
+    const handled: string[] = [];
+    await queue.subscribe('jobs', {
+      consumerGroup: 'billing',
+      handler: async (message) => {
+        handled.push(message.id);
+      },
+    });
+    await vi.advanceTimersByTimeAsync(500);
+    await vi.advanceTimersByTimeAsync(500);
+    expect(handled).toEqual(['3-1', '3-2']);
+    expect(
+      commands.scripts.filter((script) => script === ackDeletedScript),
+    ).toHaveLength(2);
+    expect(logs.calls).toEqual([]);
+    await queue.stop();
+  });
+
+  it('recovery accepts the deleted ids Redis 7 returns as a third element', async () => {
+    vi.useFakeTimers();
+    const logs = recordingLogger();
+    const queue = new RedisQueue({
+      redis: 'redis://127.0.0.1:6379',
+      visibilityMs: 1000,
+      logger: logs.sink,
+    });
+    await queue.start();
+    const commands = FakeRedis.instances[0];
+    if (!commands) throw new Error('missing commands client');
+    commands.autoclaimReplies = [
+      ['0-0', [['3-1', ['payload', '{"n":1}']]], ['2-9']],
+    ];
+    const handled: string[] = [];
+    await queue.subscribe('jobs', {
+      consumerGroup: 'billing',
+      handler: async (message) => {
+        handled.push(message.id);
+      },
+    });
+    await vi.advanceTimersByTimeAsync(500);
+    expect(handled).toEqual(['3-1']);
+    expect(commands.scripts).not.toContain(ackDeletedScript);
+    expect(logs.calls).toEqual([]);
+    await queue.stop();
   });
 
   it('state follows start and stop, and a failed start returns to idle', async () => {

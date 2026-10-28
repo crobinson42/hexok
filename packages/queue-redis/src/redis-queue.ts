@@ -27,7 +27,7 @@ import {
   type RedisQueueStuckReason,
 } from './maintain.js';
 import { courtesyPark, type ParkSink, parkedError } from './park.js';
-import { releaseConsumer } from './release-consumer.js';
+import { ackDeleted, releaseConsumer } from './scripts.js';
 
 export type {
   RedisQueueMaintainOptions,
@@ -118,6 +118,14 @@ function scrubbed(error: unknown, message: string): Error {
   const code: unknown = (error as { code?: unknown }).code;
   if (typeof code === 'string') return Object.assign(clean, { code });
   return clean;
+}
+
+function isStreamEntry(entry: unknown): entry is StreamEntry {
+  return (
+    Array.isArray(entry) &&
+    typeof entry[0] === 'string' &&
+    Array.isArray(entry[1])
+  );
 }
 
 function fieldOf(fields: string[], name: string): string | undefined {
@@ -633,7 +641,7 @@ export class RedisQueue extends Adapter(Queue) {
   async #recover(sub: Subscription): Promise<void> {
     if (sub.abort.signal.aborted) return;
     try {
-      const claimed = (await this.#lifecycle.run('subscribe', ({ commands }) =>
+      const reply = await this.#lifecycle.run('subscribe', ({ commands }) =>
         commands.xautoclaim(
           sub.key,
           sub.group,
@@ -643,8 +651,15 @@ export class RedisQueue extends Adapter(Queue) {
           'COUNT',
           this.#batch,
         ),
-      )) as [string, StreamEntry[]];
-      const entries = claimed[1] ?? [];
+      );
+      // Redis 7 lists deleted ids as a third element and drops them itself. Redis 6.2 returns each as `nil` and keeps it pending.
+      const claimed = Array.isArray(reply[1]) ? (reply[1] as unknown[]) : [];
+      const entries = claimed.filter(isStreamEntry);
+      if (entries.length < claimed.length) {
+        await this.#lifecycle.run('subscribe', ({ commands }) =>
+          ackDeleted(commands, sub.key, sub.group, sub.consumer),
+        );
+      }
       for (const [id, fields] of entries) {
         if (sub.abort.signal.aborted) return;
         if (sub.inflight.has(id)) continue;

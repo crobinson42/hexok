@@ -195,7 +195,7 @@ export class RedisQueue extends Adapter(Queue) {
         sensitive,
         generic: 'queue: encode failed',
       });
-      throw error;
+      throw sensitive ? scrubbed(error, 'queue: encode failed') : error;
     }
     const key = this.#key(topic);
     const fields = ['payload', encoded];

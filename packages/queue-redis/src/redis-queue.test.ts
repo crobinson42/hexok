@@ -436,9 +436,16 @@ describe('RedisQueue commands', () => {
       },
     });
     await queue.start();
-    await expect(
-      queue.publish('codes', { code: 'SECRET-4821' }, { sensitive: true }),
-    ).rejects.toBe(invalid);
+    const thrown = await queue
+      .publish('codes', { code: 'SECRET-4821' }, { sensitive: true })
+      .catch((error: unknown) => error);
+    expect(thrown).toBeInstanceOf(Error);
+    expect(thrown).toMatchObject({
+      name: 'Error',
+      message: 'queue: encode failed',
+      code: 'E_INVALID',
+    });
+    expect(textOf(thrown)).not.toContain('SECRET-4821');
     expect(parked).toHaveLength(1);
     expect(parked[0]?.payload).toEqual({ sensitive: true });
     expect(parked[0]?.error).toEqual({

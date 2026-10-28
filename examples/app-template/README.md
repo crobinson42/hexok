@@ -51,7 +51,7 @@ npm run start -w @hexok/app-template
 npm run start:worker -w @hexok/app-template
 ```
 
-HTTP and the worker stop on `SIGINT` or `SIGTERM`. HTTP closes its server. Each stops the queue and closes Redis. A second signal exits at once.
+HTTP and the worker stop on `SIGINT` or `SIGTERM`. HTTP closes its server. Each stops the schedule coordinator, then the queue, then closes Redis. A second signal exits at once.
 
 `REDIS_URL` defaults to `redis://127.0.0.1:6379`. `PORT` defaults to `3000`. `AUTH_TOKENS` is `userId=token` pairs, comma separated. Unset means every caller is anonymous. Names and which ones are required are in `.env.example`. Node does not load that file.
 

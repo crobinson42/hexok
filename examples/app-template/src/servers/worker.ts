@@ -18,6 +18,8 @@ import {
 
 export async function main(): Promise<void> {
   const runtime = await createRuntime();
+  // Registered before start, so a signal during startup still stops what has started.
+  onShutdown(runtime.logger, () => runtime.stop());
   /** Adapters connect in `start`. `register` and `subscribe` need that connection. Scheduled jobs publish to the queue, so the queue starts first and stops last. */
   await runtime.domainEventsQueue.start();
   await runtime.scheduleCoordinator.start();
@@ -69,8 +71,6 @@ export async function main(): Promise<void> {
   }
 
   runtime.logger.info('domain events queue subscriptions', { subscriptions });
-
-  onShutdown(runtime.logger, () => runtime.stop());
 }
 
 if (

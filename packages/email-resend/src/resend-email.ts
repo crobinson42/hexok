@@ -15,21 +15,26 @@ import {
 } from './park.js';
 import { type RetrySettings, retryOptions } from './retry.js';
 
-export interface ResendEmailPayload {
+interface ResendEmailFields {
   from: string;
   to: string[];
   cc?: string[];
   bcc?: string[];
   replyTo?: string;
   subject: string;
-  text?: string;
-  html?: string;
   attachments?: Array<{
     content: string;
     filename: string;
   }>;
   tags?: Array<{ name: string; value: string }>;
 }
+
+type ResendEmailBody =
+  | { html: string; text?: string }
+  | { text: string; html?: string };
+
+/** The SDK requires `html` or `text`. The union keeps the real `Resend` client assignable. */
+export type ResendEmailPayload = ResendEmailFields & ResendEmailBody;
 
 export interface ResendLike {
   emails: {
@@ -75,6 +80,13 @@ function emailKind(error: unknown): 'rejected' | 'unavailable' | undefined {
 function formatFrom(message: EmailMessage): string {
   const name = message.from.name;
   return name ? `${name} <${message.from.email}>` : message.from.email;
+}
+
+function emailBody(message: EmailMessage): ResendEmailBody {
+  const { text, html } = message;
+  if (html?.trim()) return text ? { html, text } : { html };
+  if (text?.trim()) return html ? { text, html } : { text };
+  throw EmailError.InvalidMessage();
 }
 
 function addresses(
@@ -142,6 +154,7 @@ export class ResendEmailSender extends Adapter(EmailSender) {
   async send(message: EmailMessage): Promise<{ id: string }> {
     assertEmailMessage(message);
     const payload: ResendEmailPayload = {
+      ...emailBody(message),
       from: formatFrom(message),
       to: addresses(message.to, this.#sandbox) ?? [],
       subject: message.subject,
@@ -151,8 +164,6 @@ export class ResendEmailSender extends Adapter(EmailSender) {
     if (cc) payload.cc = cc;
     if (bcc) payload.bcc = bcc;
     if (message.replyTo) payload.replyTo = message.replyTo;
-    if (message.text) payload.text = message.text;
-    if (message.html) payload.html = message.html;
     if (message.tags) {
       payload.tags = Object.entries(message.tags).map(([name, value]) => ({
         name,

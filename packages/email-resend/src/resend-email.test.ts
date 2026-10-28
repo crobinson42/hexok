@@ -1,4 +1,5 @@
 import { EmailError, type EmailMessage } from '@hexok/email';
+import { Resend } from 'resend';
 import { describe, expect, it } from 'vitest';
 import type { ParkInput } from './park.js';
 import { ResendEmailSender, type ResendLike } from './resend-email.js';
@@ -86,8 +87,10 @@ describe('ResendEmailSender', () => {
       from: 'From <from@example.com>',
       to: ['delivered@resend.dev'],
       cc: ['delivered@resend.dev'],
+      text: 'body',
       tags: [{ name: 'env', value: 'test' }],
     });
+    expect(payload).not.toHaveProperty('html');
     expect(options).toEqual({ idempotencyKey: 'key-1' });
   });
 
@@ -199,5 +202,10 @@ describe('ResendEmailSender', () => {
     await expect(sender.send(base)).rejects.toMatchObject({
       code: 'Unavailable',
     });
+  });
+
+  it('accepts the resend SDK client without a cast', () => {
+    const sender = new ResendEmailSender({ client: new Resend('re_test') });
+    expect(sender).toBeInstanceOf(ResendEmailSender);
   });
 });

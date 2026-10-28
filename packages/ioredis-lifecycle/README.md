@@ -11,7 +11,7 @@ Connection lifecycle for hexok Redis adapters built on ioredis. Redis adapters i
 - A client that ends after `start()` is logged at `error`.
 - `stop()` resolves within `stopTimeoutMs` while Redis refuses connections, stops answering, or the client is reconnecting.
 - A guarded command still pending when `stop()` stops waiting rejects with `StoppedBeforeReply`. It does not hang.
-- `stop()` clears every timer it made. It removes every `ready`, `end`, and `abort` listener it added.
+- `stop()` clears every timer it made. It removes every `ready` and `abort` listener it added. Each client keeps its `error` listener, which still logs, and its `end` listener, which does nothing once the lifecycle stops.
 - A settled guarded command leaves nothing behind. Its listeners belong to that call and are removed when it settles.
 - `start()` works again after `stop()` or after a failed start. It opens new clients.
 

@@ -51,17 +51,16 @@ export type StopCleanup<Clients> = (
   context: StopContext<Clients>,
 ) => Promise<void> | void;
 
-interface Connection {
-  /** `{ ...fields, adapter, connection }`, for every log about this client. */
-  readonly fields: Record<string, unknown>;
-  /** Removes the `end` listener. The `error` listener stays. */
-  readonly forget: () => void;
+interface LogFields {
+  readonly [field: string]: unknown;
+  readonly adapter: string;
+  readonly connection: string;
 }
 
 interface Session<Clients> {
   readonly clients: Clients;
-  /** Each open client, started or attached. */
-  readonly connections: Map<Redis, Connection>;
+  /** Each open client, started or attached, and the fields of every log about it. */
+  readonly connections: Map<Redis, LogFields>;
   /** Cancels the readiness wait. */
   readonly opening: AbortController;
   /** Rejects guarded commands that are still pending. `stop()` aborts it after cleanup. */
@@ -162,6 +161,7 @@ export class RedisLifecycle<
     }
     const client = options.open();
     this.#listen(session, client, options.connection, options.fields);
+    this.#watchEnd(session, client);
     return client;
   }
 
@@ -170,7 +170,7 @@ export class RedisLifecycle<
    * A guarded command on that client may never settle if the client was reconnecting, so pass that command a `signal` and abort it first.
    */
   detach(client: Redis): void {
-    if (this.#session) forget(this.#session, client);
+    this.#session?.connections.delete(client);
     client.disconnect();
   }
 
@@ -225,6 +225,9 @@ export class RedisLifecycle<
       // stop() can run after every client is ready and before this line.
       session.opening.signal.throwIfAborted();
       this.#state = 'ready';
+      for (const client of session.connections.keys()) {
+        this.#watchEnd(session, client);
+      }
       onReady?.(clients);
     } catch (error) {
       // Once stop() begins, it closes the clients itself.
@@ -271,10 +274,7 @@ export class RedisLifecycle<
   #discard(session: Session<Clients>): void {
     this.#session = undefined;
     this.#state = 'idle';
-    for (const client of [...session.connections.keys()]) {
-      forget(session, client);
-      client.disconnect();
-    }
+    for (const client of session.connections.keys()) client.disconnect();
   }
 
   async #shutdown(
@@ -303,10 +303,8 @@ export class RedisLifecycle<
     session.guard.abort(
       LifecycleError.Stopped(messages.closing(this.#adapter)),
     );
-    const closing = [...session.connections];
-    for (const [client] of closing) forget(session, client);
     await Promise.all(
-      closing.map(([client, { fields }]) =>
+      [...session.connections].map(([client, fields]) =>
         this.#close(client, fields, remaining),
       ),
     );
@@ -337,7 +335,7 @@ export class RedisLifecycle<
    */
   async #close(
     client: Redis,
-    fields: Record<string, unknown>,
+    fields: LogFields,
     remaining: () => number,
   ): Promise<void> {
     if (client.status === 'ready' && remaining() > 0) {
@@ -367,25 +365,35 @@ export class RedisLifecycle<
     connection: string,
     fields: Record<string, unknown> | undefined,
   ): void {
-    const logFields = { ...fields, adapter: this.#adapter, connection };
+    const logFields: LogFields = {
+      ...fields,
+      adapter: this.#adapter,
+      connection,
+    };
     const onError = (error: Error) => {
       this.#logger.error(error, logFields);
     };
     // This listener stays after stop(). ioredis can emit while a socket closes, and with no listener it prints "Unhandled error event".
     client.on('error', onError);
-    // `state` stays `ready` when a client ends, such as when `retryStrategy` gives up, so the log is the only signal.
+    session.connections.set(client, logFields);
+  }
+
+  /**
+   * Logs a client that ends while the lifecycle is ready, such as when `retryStrategy` gives up.
+   * `state` stays `ready`, so the log is the only signal. Before ready, the readiness wait handles `end`.
+   * The listener stays on the client, so `stop()` needs no `off`. Once the client is detached or its session stops, it does nothing.
+   */
+  #watchEnd(session: Session<Clients>, client: Redis): void {
     const onEnd = () => {
       if (this.#session !== session || this.#state !== 'ready') return;
+      const fields = session.connections.get(client);
+      if (fields === undefined) return;
       this.#logger.error(
-        messages.endedAfterReady(this.#adapter, connection),
-        logFields,
+        messages.endedAfterReady(this.#adapter, fields.connection),
+        fields,
       );
     };
     client.on('end', onEnd);
-    session.connections.set(client, {
-      fields: logFields,
-      forget: () => client.off('end', onEnd),
-    });
   }
 
   #guarded<T>(
@@ -467,12 +475,6 @@ function assertDuration(adapter: string, name: string, ms: number): void {
       `${adapter}: ${name} must be a finite number of ms >= 0`,
     );
   }
-}
-
-/** Removes the client's `end` listener and drops it from the session. Its `error` listener stays. */
-function forget(session: Session<unknown>, client: Redis): void {
-  session.connections.get(client)?.forget();
-  session.connections.delete(client);
 }
 
 /** Resolves when no guarded command of `session` is in flight. */

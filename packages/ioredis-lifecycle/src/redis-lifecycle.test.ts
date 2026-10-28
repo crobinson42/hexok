@@ -380,6 +380,7 @@ describe('start', () => {
     );
     expect(a.disconnects).toBe(1);
     expect(a.listenerCount('ready')).toBe(0);
+    // A client that never became ready never gets the end-after-ready listener.
     expect(a.listenerCount('end')).toBe(0);
   });
 
@@ -790,6 +791,29 @@ describe('stop', () => {
     }
   });
 
+  it('a ready client needs only status, on, quit, and disconnect', async () => {
+    // Adapter tests fake ioredis this way, so start and stop must not need more.
+    const client = {
+      status: 'ready',
+      on: () => client,
+      quit: async () => {
+        client.status = 'end';
+        return 'OK';
+      },
+      disconnect: () => {
+        client.status = 'end';
+      },
+    };
+    const lifecycle = new RedisLifecycle<{ main: Redis }>({
+      adapter: 'test',
+      stopTimeoutMs: 1000,
+    });
+    await lifecycle.start(() => ({ main: client as unknown as Redis }));
+    await lifecycle.run('get', async () => 'OK');
+    await lifecycle.stop();
+    expect(client.status).toBe('end');
+  });
+
   it('concurrent stop calls share one stop and its cleanup', async () => {
     const { lifecycle, fake } = await started();
     const first = vi.fn();
@@ -819,13 +843,13 @@ describe('stop', () => {
     expect(vi.getTimerCount()).toBe(0);
   });
 
-  it('stop returns listener counts to zero, except the lifetime error listener', async () => {
+  it('stop returns listener counts to zero, except the lifetime error and end listeners', async () => {
     const { lifecycle, fake, open } = setup({ startTimeoutMs: 1000 });
     const signal = new AbortController().signal;
     const starting = lifecycle.start(open);
     expect(fake.listenerCount('ready')).toBe(1);
-    // The readiness wait's, and the one that logs an end after ready.
-    expect(fake.listenerCount('end')).toBe(2);
+    // Only the readiness wait's. The end-after-ready listener comes with ready.
+    expect(fake.listenerCount('end')).toBe(1);
     fake.ready();
     await starting;
     expect(fake.listenerCount('ready')).toBe(0);
@@ -840,7 +864,8 @@ describe('stop', () => {
     await pending;
     expect(getEventListeners(signal, 'abort')).toHaveLength(0);
     expect(fake.listenerCount('ready')).toBe(0);
-    expect(fake.listenerCount('end')).toBe(0);
+    // It stays, and does nothing once the lifecycle has stopped.
+    expect(fake.listenerCount('end')).toBe(1);
     // ioredis prints "Unhandled error event" without it.
     expect(fake.listenerCount('error')).toBe(1);
   });

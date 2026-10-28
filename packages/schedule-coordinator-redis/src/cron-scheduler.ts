@@ -6,7 +6,11 @@ export interface CronScheduler {
     readonly timezone?: string;
     readonly runOnInit: boolean;
     readonly onTick: () => void | Promise<void>;
-  }): { stop(): void; fire(): Promise<void> };
+  }): {
+    /** Stops new ticks. A returned promise resolves once a running tick has finished. */
+    stop(): void | Promise<void>;
+    fire(): Promise<void>;
+  };
 }
 
 export function cronJobOptions(input: {
@@ -40,11 +44,12 @@ export class CronPackageScheduler implements CronScheduler {
     readonly timezone?: string;
     readonly runOnInit: boolean;
     readonly onTick: () => void | Promise<void>;
-  }): { stop(): void; fire(): Promise<void> } {
+  }): { stop(): Promise<void>; fire(): Promise<void> } {
     const job = CronJob.from(cronJobOptions(input));
     return {
-      stop() {
-        job.stop();
+      async stop() {
+        // With `waitForCompletion`, cron polls every 100ms until a running tick finishes. Awaiting it leaves no poll timer behind.
+        await job.stop();
       },
       fire() {
         return Promise.resolve(input.onTick());

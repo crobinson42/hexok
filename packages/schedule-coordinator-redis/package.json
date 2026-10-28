@@ -41,9 +41,13 @@
     "clean": "rm -rf dist *.tsbuildinfo"
   },
   "dependencies": {
+    "@hexok/ioredis-lifecycle": "^0.0.0",
     "@hexok/schedule-coordinator": "^0.1.0",
     "cron": "^4.3.4",
     "hexok": "^2.2.0",
     "ioredis": "^5"
+  },
+  "devDependencies": {
+    "@hexok/test-redis": "0.0.0"
   }
 }

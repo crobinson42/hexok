@@ -1,9 +1,13 @@
 export {
+  LifecycleError,
+  type LifecycleState,
+  type LogSink,
+} from '@hexok/ioredis-lifecycle';
+export {
   CronPackageScheduler,
   type CronScheduler,
   cronJobOptions,
 } from './cron-scheduler.js';
-export type { LogSink } from './log-sink.js';
 export {
   type RedisScheduleConfig,
   RedisScheduleCoordinator,

@@ -23,7 +23,7 @@ export interface MailgunEmailSenderConfig {
   readonly sandbox?: boolean;
   readonly logger?: LogSink;
   readonly quarantine?: ParkSink;
-  /** Puts Mailgun's error text in `Rejected` and logs. Off by default because it can hold the recipient. A `sensitive` message never exposes it. */
+  /** Puts Mailgun's error text in `Rejected` and logs raw provider and park errors. Off by default because they can hold the recipient. A `sensitive` message never exposes them. */
   readonly exposeProviderErrors?: boolean;
 }
 
@@ -73,6 +73,7 @@ export class MailgunEmailSender extends Adapter(EmailSender) {
       this.#quarantine,
       emailParkInput(message, error, 'mailgun'),
       this.#logger,
+      this.#exposeProviderErrors && !message.sensitive,
     );
   }
 

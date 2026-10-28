@@ -41,7 +41,7 @@ function spyLogger(): LogSink & { calls: unknown[][] } {
   };
 }
 
-/** `JSON.stringify(new Error())` is `{}`, so errors are expanded. */
+/** `JSON.stringify(new Error())` is `{}`, so errors and their causes are expanded. */
 function serialize(value: unknown): string {
   return JSON.stringify(value, (_key, field: unknown) =>
     field instanceof Error
@@ -50,6 +50,7 @@ function serialize(value: unknown): string {
           name: field.name,
           message: field.message,
           stack: field.stack,
+          cause: field.cause,
         }
       : field,
   );
@@ -248,6 +249,51 @@ describe('MailgunEmailSender', () => {
     for (const leaked of [address, code]) {
       expect(serialize(quiet.calls)).not.toContain(leaked);
       expect(serialize(thrown)).not.toContain(leaked);
+    }
+  });
+
+  it('logs only the error name when park fails', async () => {
+    const quoting = {
+      async park(): Promise<{ id: string }> {
+        throw new Error(`Cannot park ${address}: Your code is ${code}`, {
+          cause: new Error(`Duplicate row for ${address}`),
+        });
+      },
+    };
+    const plain: EmailMessage = { ...secret, sensitive: false };
+    const cases: Array<[EmailMessage, boolean, boolean]> = [
+      [plain, false, false],
+      [secret, false, false],
+      [secret, true, false],
+      [plain, true, true],
+    ];
+    for (const [message, exposeProviderErrors, exposed] of cases) {
+      const logger = spyLogger();
+      const sender = new MailgunEmailSender({
+        client: failing(503),
+        domain: 'mg.example',
+        logger,
+        quarantine: quoting,
+        exposeProviderErrors,
+      });
+      await expect(sender.send(message)).rejects.toMatchObject({
+        code: 'Unavailable',
+      });
+      if (exposed) {
+        expect(serialize(logger.calls)).toContain(
+          `Duplicate row for ${address}`,
+        );
+        expect(serialize(logger.calls)).toContain(code);
+        continue;
+      }
+      expect(logger.calls).toContainEqual([
+        'error',
+        'quarantine: park failed',
+        { name: 'Error' },
+      ]);
+      for (const leaked of [address, code]) {
+        expect(serialize(logger.calls)).not.toContain(leaked);
+      }
     }
   });
 });

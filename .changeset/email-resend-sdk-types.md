@@ -4,4 +4,6 @@
 
 `ResendLike` accepts the `Resend` client from `resend` without a cast. `ResendEmailPayload` requires `html` or `text`, as the SDK does. `send` passes `attachments` to Resend.
 
-`Rejected` carries its default message instead of Resend's error text. Set `exposeProviderErrors: true` to keep the text. A `sensitive` message never exposes it and parks only counts.
+`Rejected` carries its default message instead of Resend's error text. Set `exposeProviderErrors: true` to keep the text. A `sensitive` message never exposes it and parks only counts. A failed park logs only the error name.
+
+`ResendEmailPayload` is now a union type that requires `html` or `text`, so an interface can no longer extend it.

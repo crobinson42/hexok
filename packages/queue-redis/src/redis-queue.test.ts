@@ -1311,6 +1311,7 @@ describe('RedisQueue lifecycle', () => {
     const queue = new RedisQueue({
       redis: 'redis://127.0.0.1:6379',
       visibilityMs: 1000,
+      stopTimeoutMs: 1000,
     });
     await queue.start();
     await queue.subscribe('jobs', {
@@ -1739,6 +1740,27 @@ describe('RedisQueue reliability', () => {
       payload: { n: 1 },
       error: { code: 'StoppedBeforeReply' },
     });
+  });
+
+  it('stopTimeoutMs defaults to 10000 whatever visibilityMs is', async () => {
+    vi.useFakeTimers();
+    const queue = new RedisQueue({
+      redis: 'redis://127.0.0.1:6379',
+      visibilityMs: 60_000,
+    });
+    await queue.start();
+    await queue.subscribe('jobs', {
+      consumerGroup: 'billing',
+      handler: async () => 'ack',
+    });
+    const commands = FakeRedis.instances[0];
+    if (!commands) throw new Error('missing commands client');
+    commands.stalled = true;
+    const stopped = settledFlag(queue.stop());
+    await vi.advanceTimersByTimeAsync(9999);
+    expect(stopped()).toBe(false);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(stopped()).toBe(true);
   });
 
   it('a recovery tick is skipped while the previous one runs', async () => {

@@ -46,8 +46,9 @@ export interface RedisQueueConfig {
   readonly maxLen?: number;
   readonly retentionMs?: number;
   /**
-   * How long `stop()` and `unsubscribe()` wait for handlers, consumer release, and `QUIT`. Default `visibilityMs`.
-   * After `visibilityMs`, another consumer reclaims an unacked entry, so waiting longer gains nothing.
+   * How long `stop()` and `unsubscribe()` wait for handlers, consumer release, and `QUIT`. Default 10000.
+   * A handler still running when it runs out is cut off, and its entry stays pending until another consumer reclaims it after `visibilityMs`.
+   * So a stop shorter than `visibilityMs` is safe, and 10 seconds fits the default Kubernetes grace period beside other adapters.
    */
   readonly stopTimeoutMs?: number;
   /** Rejects `start()` with `StartTimeout` when Redis is not ready in time. Unset, `start()` waits for Redis. */
@@ -203,7 +204,7 @@ export class RedisQueue extends Adapter(Queue) {
     this.#redis = config.redis;
     this.#keyPrefix = config.keyPrefix ?? 'hexok:queue:';
     this.#visibilityMs = config.visibilityMs ?? 30_000;
-    this.#stopTimeoutMs = config.stopTimeoutMs ?? this.#visibilityMs;
+    this.#stopTimeoutMs = config.stopTimeoutMs ?? 10_000;
     this.#batch = config.batch ?? 10;
     this.#blockMs = config.blockMs ?? 1000;
     this.#maxLen = config.maxLen ?? 10_000;

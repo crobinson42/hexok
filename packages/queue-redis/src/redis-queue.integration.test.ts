@@ -36,6 +36,7 @@ const { RedisQueue } = await import(process.env.QUEUE_ENTRY);
 async function runChild(
   body: string,
   env: Record<string, string>,
+  flags: string[] = [],
 ): Promise<{
   code: number | null;
   ms: number;
@@ -46,7 +47,13 @@ async function runChild(
   const started = Date.now();
   const child = spawn(
     process.execPath,
-    ['--no-warnings', '--input-type=module', '-e', childPrelude + body],
+    [
+      '--no-warnings',
+      ...flags,
+      '--input-type=module',
+      '-e',
+      childPrelude + body,
+    ],
     {
       env: {
         ...process.env,
@@ -363,6 +370,59 @@ console.log(JSON.stringify({ stopMs: Date.now() - stopping, stoppedAt: Date.now(
       'pending',
       1,
     ]);
+  });
+
+  it('does not hold delivered payloads after their handlers finish', async () => {
+    const result = await runChild(
+      `
+const { Redis } = await import('ioredis');
+const count = 2000;
+const payload = JSON.stringify('x'.repeat(16_000));
+const admin = new Redis(process.env.REDIS_URL);
+const key = process.env.KEY_PREFIX + 'jobs';
+for (let i = 0; i < count; i += 500) {
+  const pipeline = admin.pipeline();
+  for (let j = 0; j < 500; j += 1) pipeline.xadd(key, '*', 'payload', payload);
+  await pipeline.exec();
+}
+const heap = () => {
+  globalThis.gc();
+  globalThis.gc();
+  return process.memoryUsage().heapUsed;
+};
+const queue = new RedisQueue({
+  redis: process.env.REDIS_URL,
+  keyPrefix: process.env.KEY_PREFIX,
+  maxLen: 1e9,
+});
+await queue.start();
+const before = heap();
+let handled = 0;
+await queue.subscribe('jobs', {
+  consumerGroup: 'workers',
+  handler: async () => {
+    handled += 1;
+  },
+});
+while (handled < count) await new Promise((resolve) => setTimeout(resolve, 20));
+await new Promise((resolve) => setTimeout(resolve, 50));
+const growth = heap() - before;
+await queue.stop();
+await admin.del(key);
+await admin.quit();
+console.log(JSON.stringify({ growth, total: count * payload.length }));
+`,
+      { KEY_PREFIX: `hexok:queue:it:${randomUUID()}:` },
+      ['--expose-gc'],
+    );
+    expect(result.stderr).toBe('');
+    expect(result.code).toBe(0);
+    const { growth, total } = JSON.parse(result.stdout) as {
+      growth: number;
+      total: number;
+    };
+    expect(total).toBeGreaterThan(30_000_000);
+    expect(growth).toBeLessThan(total / 10);
   });
 
   it('removes the local consumer on unsubscribe and leaves the group', async () => {

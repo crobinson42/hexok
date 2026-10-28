@@ -16,6 +16,7 @@ class FakeRedis extends EventEmitter {
   failXadd = false;
   failCreate: Error | undefined;
   failXautoclaim: Error | undefined;
+  autoclaimEntries: unknown[] = [];
   holdCreate = false;
   heldCreate: Pending | undefined;
   /** Commands never settle, as on a socket that stopped answering. */
@@ -93,9 +94,19 @@ class FakeRedis extends EventEmitter {
   /** XPENDING replies by consumer name. A consumer not listed owns nothing. */
   pendingByConsumer = new Map<string, unknown[]>();
 
+  holdXpending = false;
+  heldXpending: Pending | undefined;
+
   xpending(...args: unknown[]): Promise<unknown[]> {
     this.calls.push(['xpending', ...args]);
-    return Promise.resolve(this.pendingByConsumer.get(String(args[5])) ?? []);
+    const reply = this.pendingByConsumer.get(String(args[5])) ?? [];
+    if (this.holdXpending) {
+      this.holdXpending = false;
+      return new Promise((resolve, reject) => {
+        this.heldXpending = { resolve: () => resolve(reply), reject };
+      });
+    }
+    return Promise.resolve(reply);
   }
 
   xack(...args: unknown[]): Promise<number> {
@@ -111,7 +122,7 @@ class FakeRedis extends EventEmitter {
   xautoclaim(...args: unknown[]): Promise<unknown[]> {
     this.calls.push(['xautoclaim', ...args]);
     if (this.failXautoclaim) return Promise.reject(this.failXautoclaim);
-    return Promise.resolve(['0-0', []]);
+    return Promise.resolve(['0-0', this.autoclaimEntries.splice(0)]);
   }
 
   scanPages: Array<[string, string[]]> = [['0', []]];
@@ -1291,6 +1302,64 @@ describe('RedisQueue lifecycle', () => {
     commands.failCreate = wrongType;
     await vi.advanceTimersByTimeAsync(500);
     expect(logs.calls).toEqual([['error', wrongType, { topic: 'jobs' }]]);
+    await queue.stop();
+  });
+
+  it('stop waits for a handler that XAUTOCLAIM dispatched', async () => {
+    vi.useFakeTimers();
+    const queue = new RedisQueue({
+      redis: 'redis://127.0.0.1:6379',
+      visibilityMs: 1000,
+    });
+    await queue.start();
+    const commands = FakeRedis.instances[0];
+    if (!commands) throw new Error('missing commands client');
+    commands.autoclaimEntries = [['3-1', ['payload', '{}']]];
+    let release: (value: 'ack') => void = () => {};
+    let started = false;
+    await queue.subscribe('jobs', {
+      consumerGroup: 'billing',
+      handler: () => {
+        started = true;
+        return new Promise((resolve) => {
+          release = resolve;
+        });
+      },
+    });
+    await vi.advanceTimersByTimeAsync(500);
+    expect(started).toBe(true);
+    const stopped = settledFlag(queue.stop());
+    await vi.advanceTimersByTimeAsync(100);
+    expect(stopped()).toBe(false);
+    release('ack');
+    await vi.advanceTimersByTimeAsync(0);
+    expect(stopped()).toBe(true);
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it('unsubscribe leaves a newer subscription for the same group alone', async () => {
+    const queue = new RedisQueue({ redis: 'redis://127.0.0.1:6379' });
+    const options = {
+      consumerGroup: 'billing',
+      handler: async () => 'ack' as const,
+    };
+    await queue.start();
+    await queue.subscribe('jobs', options);
+    const first = FakeRedis.instances[0];
+    if (!first) throw new Error('missing commands client');
+    first.holdXpending = true;
+    const unsubscribing = queue.unsubscribe('jobs', {
+      consumerGroup: 'billing',
+    });
+    await new Promise((resolve) => setImmediate(resolve));
+    await queue.stop();
+    await queue.start();
+    await queue.subscribe('jobs', options);
+    first.heldXpending?.resolve(undefined);
+    await unsubscribing;
+    await expect(queue.subscribe('jobs', options)).rejects.toThrow(
+      'queue: already subscribed to jobs group billing',
+    );
     await queue.stop();
   });
 

@@ -14,6 +14,9 @@
       "complexity": {
         "noThisInStatic": "off",
         "noStaticOnlyClass": "off"
+      },
+      "nursery": {
+        "noFloatingPromises": "error"
       }
     }
   },
@@ -39,5 +42,19 @@
       "!**/coverage",
       "!**/*.tsbuildinfo"
     ]
-  }
+  },
+  "overrides": [
+    {
+      // Temporary. `job.stop()` on line 47 floats a promise. The Redis adapter
+      // migration owns this package. Delete this entry once that line is fixed.
+      "includes": ["packages/schedule-coordinator-redis/src/cron-scheduler.ts"],
+      "linter": {
+        "rules": {
+          "nursery": {
+            "noFloatingPromises": "off"
+          }
+        }
+      }
+    }
+  ]
 }

@@ -96,6 +96,16 @@ async function settleWithin(
   }
 }
 
+/** Keeps `name` and a string `code`. Drops `command`, `cause`, and any other field that can carry the payload. */
+function scrubbed(error: unknown, message: string): Error {
+  const clean = new Error(message);
+  if (!(error instanceof Error)) return clean;
+  clean.name = error.name;
+  const code: unknown = (error as { code?: unknown }).code;
+  if (typeof code === 'string') return Object.assign(clean, { code });
+  return clean;
+}
+
 function fieldOf(fields: string[], name: string): string | undefined {
   for (let i = 0; i < fields.length - 1; i += 2) {
     if (fields[i] === name) return fields[i + 1];
@@ -143,7 +153,7 @@ export class RedisQueue extends Adapter(Queue) {
     if (!this.#starting) {
       const client = openRedis(this.#redis);
       client.on('error', (error: Error) => {
-        this.#logger.error(error);
+        this.#logger.error(error, { connection: 'commands' });
       });
       const abort = new AbortController();
       this.#starting = {
@@ -176,17 +186,20 @@ export class RedisQueue extends Adapter(Queue) {
     options: QueuePublishOptions = {},
   ): Promise<string> {
     const commands = this.#requireCommands();
-    const parked = options.sensitive ? { sensitive: true } : payload;
+    const sensitive = options.sensitive === true;
     let encoded: string;
     try {
       encoded = this.#encode(payload);
     } catch (error) {
-      await this.#parkPublish(topic, parked, error);
+      await this.#parkPublish(topic, payload, error, {
+        sensitive,
+        generic: 'queue: encode failed',
+      });
       throw error;
     }
     const key = this.#key(topic);
     const fields = ['payload', encoded];
-    if (options.sensitive) fields.push('sensitive', '1');
+    if (sensitive) fields.push('sensitive', '1');
     let id: string;
     try {
       const written = await commands.xadd(
@@ -202,8 +215,13 @@ export class RedisQueue extends Adapter(Queue) {
       }
       id = written;
     } catch (error) {
-      await this.#parkPublish(topic, parked, error);
-      throw error instanceof Error ? error : new Error('queue: XADD failed');
+      await this.#parkPublish(topic, payload, error, {
+        sensitive,
+        generic: 'queue: XADD failed',
+      });
+      if (!(error instanceof Error)) throw new Error('queue: XADD failed');
+      // ioredis puts the XADD args, payload included, on `error.command`.
+      throw sensitive ? scrubbed(error, error.message) : error;
     }
     this.#topics.add(topic);
     try {
@@ -232,6 +250,9 @@ export class RedisQueue extends Adapter(Queue) {
     const startId = startIdOf(options.startFrom);
     await this.#createGroup(commands, key, options.consumerGroup, startId);
     const blocking = openRedis(this.#redis);
+    blocking.on('error', (error: Error) => {
+      this.#logger.error(error, { topic, connection: 'blocking' });
+    });
     let finish = () => {};
     const done = new Promise<void>((resolve) => {
       finish = resolve;
@@ -429,10 +450,12 @@ export class RedisQueue extends Adapter(Queue) {
     }
   }
 
+  /** A sensitive publish parks `{ sensitive: true }` and a `generic` error that keeps only `name` and `code`. */
   async #parkPublish(
     topic: string,
     payload: unknown,
     error: unknown,
+    options: { sensitive: boolean; generic: string },
   ): Promise<void> {
     await courtesyPark(
       this.#quarantine,
@@ -440,8 +463,10 @@ export class RedisQueue extends Adapter(Queue) {
         source: 'queue',
         operation: 'publish',
         subject: topic,
-        payload,
-        error: parkedError(error),
+        payload: options.sensitive ? { sensitive: true } : payload,
+        error: parkedError(
+          options.sensitive ? scrubbed(error, options.generic) : error,
+        ),
         occurredAt: new Date(),
         context: { adapter: 'redis' },
       },

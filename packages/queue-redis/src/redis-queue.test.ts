@@ -34,7 +34,14 @@ class FakeRedis extends EventEmitter {
 
   xadd(...args: unknown[]): Promise<string> {
     this.calls.push(['xadd', ...args]);
-    if (this.failXadd) return Promise.reject(new Error('xadd failed'));
+    if (this.failXadd) {
+      // ioredis puts the command and its args on a ReplyError.
+      const error = Object.assign(new Error('xadd failed'), {
+        command: { name: 'xadd', args: args.map(String) },
+      });
+      error.name = 'ReplyError';
+      return Promise.reject(error);
+    }
     return Promise.resolve('1-0');
   }
 
@@ -342,17 +349,95 @@ describe('RedisQueue commands', () => {
     ]);
 
     commands.failXadd = true;
-    await expect(
-      queue.publish('codes', secret, { sensitive: true }),
-    ).rejects.toThrow('xadd failed');
+    const thrown = await queue
+      .publish('codes', secret, { sensitive: true })
+      .catch((error: unknown) => error);
+    expect(thrown).toBeInstanceOf(Error);
+    expect(thrown).toMatchObject({
+      name: 'ReplyError',
+      message: 'xadd failed',
+    });
+    expect(thrown).not.toHaveProperty('command');
+    expect(thrown).not.toHaveProperty('cause');
+    expect(textOf(thrown)).not.toContain('SECRET-4821');
     expect(parked).toHaveLength(1);
     expect(parked[0]).toMatchObject({
       operation: 'publish',
       subject: 'codes',
       payload: { sensitive: true },
     });
+    expect(parked[0]?.error).toEqual({
+      name: 'ReplyError',
+      message: 'queue: XADD failed',
+    });
     expect(textOf(parked)).not.toContain('SECRET-4821');
     expect(textOf(logs.calls)).not.toContain('SECRET-4821');
+
+    const plain = await queue
+      .publish('codes', secret)
+      .catch((error: unknown) => error);
+    expect(plain).toHaveProperty('command.name', 'xadd');
+    expect(parked[1]?.error).toEqual({
+      name: 'ReplyError',
+      message: 'xadd failed',
+    });
+    await queue.stop();
+  });
+
+  it('parks a generic error when a sensitive encode fails', async () => {
+    const parked: ParkInput[] = [];
+    const logs = recordingLogger();
+    const invalid = Object.assign(
+      new Error('invalid payload: code=SECRET-4821'),
+      { code: 'E_INVALID' },
+    );
+    const queue = new RedisQueue({
+      redis: 'redis://127.0.0.1:6379',
+      logger: logs.sink,
+      encode: () => {
+        throw invalid;
+      },
+      quarantine: {
+        async park(input: ParkInput) {
+          parked.push(input);
+          return { id: 'q1' };
+        },
+      },
+    });
+    await queue.start();
+    await expect(
+      queue.publish('codes', { code: 'SECRET-4821' }, { sensitive: true }),
+    ).rejects.toBe(invalid);
+    expect(parked).toHaveLength(1);
+    expect(parked[0]?.payload).toEqual({ sensitive: true });
+    expect(parked[0]?.error).toEqual({
+      name: 'Error',
+      message: 'queue: encode failed',
+      code: 'E_INVALID',
+    });
+    expect(textOf(parked)).not.toContain('SECRET-4821');
+    expect(textOf(logs.calls)).not.toContain('SECRET-4821');
+    await queue.stop();
+  });
+
+  it('logs blocking connection errors with the topic', async () => {
+    const logs = recordingLogger();
+    const queue = new RedisQueue({
+      redis: 'redis://127.0.0.1:6379',
+      logger: logs.sink,
+    });
+    await queue.start();
+    await queue.subscribe('jobs', {
+      consumerGroup: 'billing',
+      handler: async () => 'ack',
+    });
+    const blocking = FakeRedis.instances[1];
+    if (!blocking) throw new Error('missing blocking client');
+    const reset = new Error('read ECONNRESET');
+    blocking.emit('error', reset);
+    expect(logs.calls).toEqual([
+      ['error', reset, { topic: 'jobs', connection: 'blocking' }],
+    ]);
     await queue.stop();
   });
 
@@ -1051,11 +1136,17 @@ function recordingLogger() {
   return { calls, sink };
 }
 
-/** `JSON.stringify(new Error())` is `{}`, so errors expand to their message and stack. */
+/** `JSON.stringify(new Error())` is `{}`, so errors expand to their fields, message, and stack. */
 function textOf(value: unknown): string {
   return JSON.stringify(value, (_key, item: unknown) =>
     item instanceof Error
-      ? { name: item.name, message: item.message, stack: item.stack }
+      ? {
+          ...item,
+          name: item.name,
+          message: item.message,
+          stack: item.stack,
+          cause: item.cause,
+        }
       : item,
   );
 }

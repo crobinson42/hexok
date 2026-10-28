@@ -10,7 +10,7 @@ export interface LifecycleSubject {
   operate(): Promise<unknown>;
   /**
    * Optional. Starts work that is still running when `stop()` begins and finishes on its own within `stopTimeoutMs`, such as a handler that takes 100 ms.
-   * With it, the suite asserts that a healthy `stop()` lets that work settle without `StoppedBeforeReply`. Without it, that test is skipped.
+   * With it, the suite asserts that a healthy `stop()` lets that work resolve. Any rejection fails the test. Without it, that test is skipped.
    */
   inFlight?(): Promise<unknown>;
 }
@@ -237,7 +237,7 @@ export function describeRedisLifecycle(
       await expectNoHandles();
     });
 
-    it('a healthy stop lets in-flight work settle without StoppedBeforeReply', async (context) => {
+    it('a healthy stop lets in-flight work finish', async (context) => {
       const made = subject();
       if (made.inFlight === undefined) {
         context.skip('the factory has no inFlight');
@@ -249,10 +249,8 @@ export function describeRedisLifecycle(
         (error: unknown) => error,
       );
       expect(await timedStop(made)).toBeLessThan(stopTimeoutMs + slackMs);
-      const error = await outcome;
-      expect((error as { code?: unknown } | undefined)?.code).not.toBe(
-        'StoppedBeforeReply',
-      );
+      // Resolved. Any rejection, Stopped and StoppedBeforeReply included, means stop cut the work short.
+      expect(await outcome).toBeUndefined();
     });
   });
 }

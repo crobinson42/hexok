@@ -40,7 +40,7 @@ describeRedisLifecycle('RedisQueue', ({ redis, stopTimeoutMs }) => {
 });
 ```
 
-The factory gets `redis` options that point at the proxy, and a `stopTimeoutMs`. It returns `start`, `stop`, and one guarded `operate`. It may also return `inFlight`, which starts work that is still running when `stop()` begins and finishes on its own within `stopTimeoutMs`, such as a subscription handler that takes 100 ms. Without it, the in-flight test is skipped. The suite checks errors by `code`, so `operate` must let the lifecycle error reach the caller with its `code`. It asserts:
+The factory gets `redis` options that point at the proxy, and a `stopTimeoutMs`. It returns `start`, `stop`, and one guarded `operate`. It may also return `inFlight`, which starts work that is still running when `stop()` begins and resolves on its own within `stopTimeoutMs`, such as a subscription handler that takes 100 ms. Without it, the in-flight test is skipped. The suite checks errors by `code`, so `operate` must let the lifecycle error reach the caller with its `code`. It asserts:
 
 - `start` waits until Redis is ready.
 - `operate` rejects with `NotStarted` before start, `Starting` during start, and `Stopped` after stop.
@@ -49,4 +49,4 @@ The factory gets `redis` options that point at the proxy, and a `stopTimeoutMs`.
 - `stop` resolves within `stopTimeoutMs` while Redis refuses connections, is blackholed, or has just dropped them.
 - No socket or timer the adapter made outlives `stop`, after one cycle and after three.
 - `start` works again after `stop`.
-- With `inFlight`, a healthy `stop` lets that work settle without `StoppedBeforeReply`.
+- With `inFlight`, a healthy `stop` lets that work resolve. Any rejection, `Stopped` or `StoppedBeforeReply` included, fails.

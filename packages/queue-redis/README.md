@@ -9,7 +9,7 @@ const queue = new RedisQueue({ redis: 'redis://127.0.0.1:6379' });
 await queue.start();
 ```
 
-`start()` resolves when the commands client is ready. It connects a client made with `lazyConnect`. Connection errors go to the logger and do not reject, so an app that boots before Redis waits for it. Each error has a `connection` field, `commands` or `blocking`. A blocking connection's error also has its `topic`. `start()` rejects when the client ends. A later `start()` opens a new client. `stop()` rejects a pending `start()` and clears every timer this package sets, so the process can exit. Clients default to `disconnectTimeout: 100`, so `stop()` does not hold the process for 2 seconds when Redis is unreachable. Pass `disconnectTimeout` in the `redis` options to change it.
+`start()` resolves when the commands client is ready. It connects a client made with `lazyConnect`. Connection errors go to the logger and do not reject, so an app that boots before Redis waits for it. Each error has a `connection` field, `commands` or `blocking`. A blocking connection's error also has its `topic`. `start()` rejects when the client ends. A later `start()` opens a new client. `stop()` rejects a pending `start()` and clears every timer this package sets, so the process can exit. When Redis is unreachable, the process can stay alive for the ioredis `disconnectTimeout` after `stop()` resolves. That is 2 seconds by default. Set `disconnectTimeout` in the `redis` options to shorten it.
 
 `XADD` trims with `MAXLEN ~` only. Age trim is a separate `XTRIM MINID`. Both may delete entries that are still pending. An encode failure rejects `publish` and does not call `XADD`. A failed age trim still resolves `publish` with the stream id.
 

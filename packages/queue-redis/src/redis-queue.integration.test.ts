@@ -256,10 +256,12 @@ await queue.stop();
     await probe.del(`${prefix}codes`);
   });
 
-  it('lets the process exit soon after stop when Redis is unreachable', async () => {
+  it('lets the process exit soon after stop with a short disconnectTimeout when Redis is unreachable', async () => {
     const result = await runChild(
       `
-const queue = new RedisQueue({ redis: 'redis://127.0.0.1:1' });
+const queue = new RedisQueue({
+  redis: { host: '127.0.0.1', port: 1, disconnectTimeout: 100 },
+});
 const starting = queue.start().catch(() => undefined);
 await new Promise((resolve) => setTimeout(resolve, 300));
 await queue.stop();

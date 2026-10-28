@@ -4,6 +4,7 @@ import {
   Queue,
   type QueueDisposition,
   type QueueHandler,
+  type QueuePublishOptions,
   type QueueStartFrom,
   type QueueSubscribeOptions,
 } from '@hexok/queue';
@@ -95,9 +96,9 @@ async function settleWithin(
   }
 }
 
-function payloadField(fields: string[]): string | undefined {
+function fieldOf(fields: string[], name: string): string | undefined {
   for (let i = 0; i < fields.length - 1; i += 2) {
-    if (fields[i] === 'payload') return fields[i + 1];
+    if (fields[i] === name) return fields[i + 1];
   }
   return undefined;
 }
@@ -169,16 +170,23 @@ export class RedisQueue extends Adapter(Queue) {
     }, 60_000);
   }
 
-  async publish(topic: string, payload: unknown): Promise<string> {
+  async publish(
+    topic: string,
+    payload: unknown,
+    options: QueuePublishOptions = {},
+  ): Promise<string> {
     const commands = this.#requireCommands();
+    const parked = options.sensitive ? { sensitive: true } : payload;
     let encoded: string;
     try {
       encoded = this.#encode(payload);
     } catch (error) {
-      await this.#parkPublish(topic, payload, error);
+      await this.#parkPublish(topic, parked, error);
       throw error;
     }
     const key = this.#key(topic);
+    const fields = ['payload', encoded];
+    if (options.sensitive) fields.push('sensitive', '1');
     let id: string;
     try {
       const written = await commands.xadd(
@@ -187,15 +195,14 @@ export class RedisQueue extends Adapter(Queue) {
         '~',
         this.#maxLen,
         '*',
-        'payload',
-        encoded,
+        ...fields,
       );
       if (typeof written !== 'string') {
         throw new Error('queue: XADD did not return an id');
       }
       id = written;
     } catch (error) {
-      await this.#parkPublish(topic, payload, error);
+      await this.#parkPublish(topic, parked, error);
       throw error instanceof Error ? error : new Error('queue: XADD failed');
     }
     this.#topics.add(topic);
@@ -467,7 +474,7 @@ export class RedisQueue extends Adapter(Queue) {
     id: string,
     fields: string[],
   ): Promise<void> {
-    const raw = payloadField(fields);
+    const raw = fieldOf(fields, 'payload');
     if (raw === undefined) {
       await this.#parkDeliver(sub, id, {
         payload: { reason: 'missing-payload' },
@@ -480,13 +487,18 @@ export class RedisQueue extends Adapter(Queue) {
     try {
       payload = this.#decode(raw);
     } catch (error) {
+      // A decode error can quote the raw payload. A sensitive entry gets a generic one.
+      const sensitive = fieldOf(fields, 'sensitive') === '1';
+      const generic = new Error('queue: decode failed');
       this.#logger.error(
-        error instanceof Error ? error : new Error('queue: decode failed'),
+        !sensitive && error instanceof Error ? error : generic,
         { topic: sub.topic, id },
       );
       await this.#parkDeliver(sub, id, {
-        payload: { reason: 'decode-failed', raw },
-        error: parkedError(error),
+        payload: sensitive
+          ? { reason: 'decode-failed', sensitive: true }
+          : { reason: 'decode-failed', raw },
+        error: parkedError(sensitive ? generic : error),
       });
       await this.#settle(sub, id, 'drop', false);
       return;

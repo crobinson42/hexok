@@ -310,6 +310,100 @@ describe('RedisQueue commands', () => {
     await plain.stop();
   });
 
+  it('marks a sensitive entry and parks no payload when its publish fails', async () => {
+    const parked: ParkInput[] = [];
+    const logs = recordingLogger();
+    const queue = new RedisQueue({
+      redis: 'redis://127.0.0.1:6379',
+      logger: logs.sink,
+      quarantine: {
+        async park(input: ParkInput) {
+          parked.push(input);
+          return { id: 'q1' };
+        },
+      },
+    });
+    await queue.start();
+    const commands = FakeRedis.instances[0];
+    if (!commands) throw new Error('missing commands client');
+    const secret = { code: 'SECRET-4821' };
+    await queue.publish('codes', secret, { sensitive: true });
+    expect(commands.calls.find((call) => call[0] === 'xadd')).toEqual([
+      'xadd',
+      'hexok:queue:codes',
+      'MAXLEN',
+      '~',
+      10000,
+      '*',
+      'payload',
+      JSON.stringify(secret),
+      'sensitive',
+      '1',
+    ]);
+
+    commands.failXadd = true;
+    await expect(
+      queue.publish('codes', secret, { sensitive: true }),
+    ).rejects.toThrow('xadd failed');
+    expect(parked).toHaveLength(1);
+    expect(parked[0]).toMatchObject({
+      operation: 'publish',
+      subject: 'codes',
+      payload: { sensitive: true },
+    });
+    expect(textOf(parked)).not.toContain('SECRET-4821');
+    expect(textOf(logs.calls)).not.toContain('SECRET-4821');
+    await queue.stop();
+  });
+
+  it('parks and logs nothing from an undecodable sensitive entry', async () => {
+    vi.useFakeTimers();
+    const parked: ParkInput[] = [];
+    const logs = recordingLogger();
+    const queue = new RedisQueue({
+      redis: 'redis://127.0.0.1:6379',
+      logger: logs.sink,
+      quarantine: {
+        async park(input: ParkInput) {
+          parked.push(input);
+          return { id: 'q1' };
+        },
+      },
+    });
+    await queue.start();
+    await queue.subscribe('codes', {
+      consumerGroup: 'sms',
+      handler: async () => 'ack',
+    });
+    FakeRedis.instances[1]?.pending?.resolve([
+      [
+        'hexok:queue:codes',
+        [['5-1', ['payload', 'code=SECRET-4821', 'sensitive', '1']]],
+      ],
+    ]);
+    await vi.waitFor(() => {
+      expect(parked).toHaveLength(1);
+    });
+    expect(parked[0]).toMatchObject({
+      operation: 'deliver',
+      subject: 'codes:5-1',
+      payload: { reason: 'decode-failed', sensitive: true },
+      error: { name: 'Error', message: 'queue: decode failed' },
+    });
+    expect(parked[0]?.payload).toEqual({
+      reason: 'decode-failed',
+      sensitive: true,
+    });
+    expect(logs.calls).toContainEqual([
+      'error',
+      new Error('queue: decode failed'),
+      { topic: 'codes', id: '5-1' },
+    ]);
+    expect(textOf(parked)).not.toContain('SECRET-4821');
+    expect(textOf(logs.calls)).not.toContain('SECRET-4821');
+    await queue.stop();
+  });
+
   it('does not XCLAIM an empty snapshot and places JUSTID after ids', async () => {
     vi.useFakeTimers();
     const queue = new RedisQueue({
@@ -945,6 +1039,26 @@ describe('RedisQueue lifecycle', () => {
     expect(vi.getTimerCount()).toBe(0);
   });
 });
+
+function recordingLogger() {
+  const calls: unknown[][] = [];
+  const sink = {
+    debug: (...args: unknown[]) => calls.push(['debug', ...args]),
+    info: (...args: unknown[]) => calls.push(['info', ...args]),
+    warn: (...args: unknown[]) => calls.push(['warn', ...args]),
+    error: (...args: unknown[]) => calls.push(['error', ...args]),
+  };
+  return { calls, sink };
+}
+
+/** `JSON.stringify(new Error())` is `{}`, so errors expand to their message and stack. */
+function textOf(value: unknown): string {
+  return JSON.stringify(value, (_key, item: unknown) =>
+    item instanceof Error
+      ? { name: item.name, message: item.message, stack: item.stack }
+      : item,
+  );
+}
 
 const silentLogger = {
   debug() {},

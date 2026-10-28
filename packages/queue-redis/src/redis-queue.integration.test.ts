@@ -197,6 +197,36 @@ await queue.stop();
     expect(result.ms).toBeLessThan(3000);
   });
 
+  it('marks a sensitive entry and still delivers its payload', async () => {
+    const url = process.env.REDIS_URL ?? '';
+    const probe = new Redis(url);
+    open.push(probe);
+    const prefix = `hexok:queue:it:${randomUUID()}:`;
+    const queue = new RedisQueue({
+      redis: url,
+      keyPrefix: prefix,
+      blockMs: 200,
+    });
+    queues.push(queue);
+    await queue.start();
+    const seen: unknown[] = [];
+    await queue.subscribe('codes', {
+      consumerGroup: 'sms',
+      handler: async (message) => {
+        seen.push(message.payload);
+      },
+    });
+    await queue.publish('codes', { code: '4821' }, { sensitive: true });
+    await queue.publish('codes', { code: 'public' });
+    await waitFor(() => seen.length === 2);
+    expect(seen).toEqual([{ code: '4821' }, { code: 'public' }]);
+    const entries = await probe.xrange(`${prefix}codes`, '-', '+');
+    expect(entries.map(([, fields]) => fields)).toEqual([
+      ['payload', '{"code":"4821"}', 'sensitive', '1'],
+      ['payload', '{"code":"public"}'],
+    ]);
+  });
+
   it('removes the local consumer on unsubscribe and leaves the group', async () => {
     const url = process.env.REDIS_URL ?? '';
     const probe = new Redis(url);

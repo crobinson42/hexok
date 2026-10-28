@@ -4,6 +4,7 @@
     { "path": "packages/hexok" },
     { "path": "packages/typebox" },
     { "path": "packages/test-redis" },
+    { "path": "packages/ioredis-lifecycle" },
     { "path": "packages/logger" },
     { "path": "packages/logger-sentry" },
     { "path": "packages/logger-newrelic" },

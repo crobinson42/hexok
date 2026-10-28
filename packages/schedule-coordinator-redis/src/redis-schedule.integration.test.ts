@@ -8,7 +8,7 @@ import {
 import { Redis, type RedisOptions } from 'ioredis';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { CronScheduler } from './cron-scheduler.js';
-import { LifecycleError, type LogSink } from './index.js';
+import type { LogSink } from './index.js';
 import { RedisScheduleCoordinator } from './redis-schedule.js';
 
 if (process.env.CI && !process.env.REDIS_URL) {
@@ -62,8 +62,7 @@ function recorder(): LogSink & { errors: Logged[]; warnings: Warned[] } {
 /**
  * `register` is synchronous, and Redis work happens on a tick, which reports failures to the `LogSink` with the `job` field.
  * So `operate` registers a fresh job, fires its tick through the scheduler seam, and turns what was logged for that job into a rejection.
- * `register` throws `NotStarted`, `Starting`, and `Stopped`. A lock `SET` cut short by `stop()` is logged at `warn` with the
- * `StoppedBeforeReply` message, and a `LogSink` warning carries no error object, so `operate` restores the code from that message.
+ * `register` throws `NotStarted`, `Starting`, and `Stopped`. A lock `SET` cut short by `stop()` is logged at `warn` with `code: 'StoppedBeforeReply'`.
  */
 describeRedisLifecycle(
   'RedisScheduleCoordinator',
@@ -89,12 +88,12 @@ describeRedisLifecycle(
         const failed = logger.errors.find((item) => item.fields?.job === job);
         if (failed) throw failed.error;
         const warned = logger.warnings.find(
-          (item) =>
-            item.fields?.job === job &&
-            item.message.includes('stop() was called before Redis replied'),
+          (item) => item.fields?.job === job && item.fields.code !== undefined,
         );
         if (warned) {
-          throw LifecycleError.StoppedBeforeReply(warned.message);
+          throw Object.assign(new Error(warned.message), {
+            code: warned.fields?.code,
+          });
         }
       },
     };
@@ -473,7 +472,12 @@ describe.skipIf(!process.env.REDIS_URL)(
         message: expect.stringContaining(
           'stop() was called before Redis replied to acquire()',
         ),
-        fields: { adapter: 'schedule', connection: 'commands', job: 'queued' },
+        fields: {
+          adapter: 'schedule',
+          connection: 'commands',
+          job: 'queued',
+          code: 'StoppedBeforeReply',
+        },
       });
     });
 

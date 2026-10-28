@@ -328,13 +328,16 @@ export class RedisScheduleCoordinator extends Adapter(ScheduleCoordinator) {
   }
 
   /**
-   * Logs a failed lock command. `StoppedBeforeReply` means stop() cut it short, which is a warning.
+   * Logs a failed lock command. `StoppedBeforeReply` means stop() cut it short, which is a warning. It carries its `code`.
    * Other lifecycle errors mean the work came outside start() and stop(), and are not logged.
    */
   #logCommandFailure(error: unknown, fallback: string, job: string): void {
     if (LifecycleError.is(error)) {
       if (error.code === 'StoppedBeforeReply') {
-        this.#logger.warn(error.message, this.#redisFields(job));
+        this.#logger.warn(error.message, {
+          ...this.#redisFields(job),
+          code: error.code,
+        });
       }
       return;
     }

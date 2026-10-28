@@ -71,7 +71,7 @@ Import `LifecycleError` from this package, or match on `error.code`. Matching on
 | --- | --- | --- |
 | A connection error | `error` | `adapter`, `connection` |
 | A lock `SET`, renew, or release failed | `error` | `adapter`, `connection`, `job` |
-| `stop()` cut a lock command short (`StoppedBeforeReply`) | `warn` | `adapter`, `connection`, `job` |
+| `stop()` cut a lock command short | `warn` | `adapter`, `connection`, `job`, `code: 'StoppedBeforeReply'` |
 | The lock was not renewed in time, so the tick was aborted | `warn` | `adapter`, `connection`, `job` |
 | The lock was gone at renew, so the tick was aborted | `warn` | `adapter`, `job` |
 | `onTick` threw | `error` | `adapter`, `job` |
@@ -79,7 +79,7 @@ Import `LifecycleError` from this package, or match on `error.code`. Matching on
 | Another process holds the lock, so the tick was skipped | `debug` | `adapter`, `job` |
 | `QUIT` failed during `stop()` | `error` | `adapter` |
 
-`NotStarted`, `Starting`, and `Stopped` from background work are not logged. Errors thrown to the caller, from `start()` and `register()`, are not logged.
+A logged `LifecycleError` carries its `code`. `NotStarted`, `Starting`, and `Stopped` from background work are not logged. Errors thrown to the caller, from `start()` and `register()`, are not logged.
 
 ## When Redis is down
 

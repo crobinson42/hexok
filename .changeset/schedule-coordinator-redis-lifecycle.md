@@ -18,5 +18,5 @@ Upgrade notes:
 - Each acquisition writes its own random token as the lock value, instead of one id per coordinator. A late renew or release from an earlier tick no longer acts on a later lock.
 - `register()` throws a `LifecycleError` with code `NotStarted`, `Starting`, or `Stopped`. Branch on `code`, not on the message. The old message `schedule: start() was not called` is gone.
 - `stop()` forgets registered jobs. Register them again after the next `start()`. Before, registering the same name after a restart threw.
-- Log fields are `{ adapter: 'schedule', job }`. `connection: 'commands'` is added only when a Redis command or connection failed. The old `name` field is now `job`. A `StoppedBeforeReply` is logged at `warn`. Lock loss and an unrenewed lock are logged at `warn`.
+- Log fields are `{ adapter: 'schedule', job }`. `connection: 'commands'` is added only when a Redis command or connection failed. The old `name` field is now `job`. A `StoppedBeforeReply` is logged at `warn`, with `code: 'StoppedBeforeReply'` in its fields. Lock loss and an unrenewed lock are logged at `warn`.
 - `CronScheduler.stop()` may return a promise that resolves once a running tick has finished. `CronPackageScheduler` returns one. A custom scheduler that returns `void` still works.

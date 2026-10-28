@@ -1840,6 +1840,43 @@ describe('RedisQueue reliability', () => {
     ]);
   });
 
+  it('unsubscribe warns when it stops waiting for a handler and leaves the consumer', async () => {
+    vi.useFakeTimers();
+    const logs = recordingLogger();
+    const queue = new RedisQueue({
+      redis: 'redis://127.0.0.1:6379',
+      stopTimeoutMs: 500,
+      logger: logs.sink,
+    });
+    await queue.start();
+    await queue.subscribe('jobs', {
+      consumerGroup: 'billing',
+      handler: () => new Promise(() => {}),
+    });
+    FakeRedis.instances[1]?.pending?.resolve([
+      ['hexok:queue:jobs', [['4-1', ['payload', '{}']]]],
+    ]);
+    await vi.advanceTimersByTimeAsync(0);
+    const unsubscribing = queue.unsubscribe('jobs', {
+      consumerGroup: 'billing',
+    });
+    await vi.advanceTimersByTimeAsync(500);
+    await unsubscribing;
+    expect(logs.calls).toEqual([
+      [
+        'warn',
+        'queue: unsubscribe() stopped waiting for handlers after 500ms. The consumer is left for maintain().',
+        {
+          adapter: 'queue',
+          connection: 'commands',
+          topic: 'jobs',
+          group: 'billing',
+        },
+      ],
+    ]);
+    await queue.stop();
+  });
+
   it('a recovery tick is skipped while the previous one runs', async () => {
     vi.useFakeTimers();
     const queue = new RedisQueue({

@@ -389,7 +389,14 @@ export class RedisQueue extends Adapter(Queue) {
         await settledOrAborted(handlersOf(sub), deadline.signal);
       }
       sub.ack = undefined;
-      if (!deadline.signal.aborted) await this.#releaseConsumer(sub, run);
+      if (deadline.signal.aborted) {
+        this.#logger.warn(
+          `queue: unsubscribe() stopped waiting for handlers after ${this.#stopTimeoutMs}ms. The consumer is left for maintain().`,
+          this.#fields(sub, 'commands'),
+        );
+      } else {
+        await this.#releaseConsumer(sub, run);
+      }
     } finally {
       sub.ack = undefined;
       clearTimeout(timer);

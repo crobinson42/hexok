@@ -1605,6 +1605,54 @@ describe('RedisQueue reliability', () => {
     await queue.stop();
   });
 
+  it('a handler that unsubscribes its own subscription is not waited for', async () => {
+    vi.useFakeTimers();
+    const queue = new RedisQueue({
+      redis: 'redis://127.0.0.1:6379',
+      stopTimeoutMs: 3000,
+    });
+    await queue.start();
+    let finished = false;
+    await queue.subscribe('jobs', {
+      consumerGroup: 'billing',
+      handler: async () => {
+        await queue.unsubscribe('jobs', { consumerGroup: 'billing' });
+        finished = true;
+      },
+    });
+    FakeRedis.instances[1]?.pending?.resolve([
+      ['hexok:queue:jobs', [['4-1', ['payload', '{}']]]],
+    ]);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(finished).toBe(true);
+    const commands = FakeRedis.instances[0];
+    expect(commands?.calls.some((call) => call[0] === 'xack')).toBe(false);
+    await queue.stop();
+  });
+
+  it('a handler that calls stop is not waited for', async () => {
+    vi.useFakeTimers();
+    const queue = new RedisQueue({
+      redis: 'redis://127.0.0.1:6379',
+      stopTimeoutMs: 3000,
+    });
+    await queue.start();
+    let finished = false;
+    await queue.subscribe('jobs', {
+      consumerGroup: 'billing',
+      handler: async () => {
+        await queue.stop();
+        finished = true;
+      },
+    });
+    FakeRedis.instances[1]?.pending?.resolve([
+      ['hexok:queue:jobs', [['4-1', ['payload', '{}']]]],
+    ]);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(finished).toBe(true);
+    expect(queue.state).toBe('stopped');
+  });
+
   it('a recovery tick is skipped while the previous one runs', async () => {
     vi.useFakeTimers();
     const queue = new RedisQueue({

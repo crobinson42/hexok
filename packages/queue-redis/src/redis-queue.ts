@@ -1,3 +1,4 @@
+import { AsyncLocalStorage } from 'node:async_hooks';
 import { randomUUID } from 'node:crypto';
 import {
   LifecycleError,
@@ -191,6 +192,11 @@ export class RedisQueue extends Adapter(Queue) {
   #trimTimer: ReturnType<typeof setInterval> | undefined;
   readonly #topics = new Set<string>();
   readonly #subs = new Map<string, Subscription>();
+  /**
+   * The subscription whose handler is running. A handler that calls `unsubscribe` on its own subscription, or `stop()`,
+   * would otherwise wait for itself until `stopTimeoutMs`.
+   */
+  readonly #handling = new AsyncLocalStorage<Subscription>();
 
   constructor(config: RedisQueueConfig) {
     super();
@@ -372,7 +378,9 @@ export class RedisQueue extends Adapter(Queue) {
       this.#lifecycle.run('unsubscribe', command, { signal: deadline.signal });
     sub.ack = run;
     try {
-      await settledOrAborted(handlersOf(sub), deadline.signal);
+      if (this.#handling.getStore() !== sub) {
+        await settledOrAborted(handlersOf(sub), deadline.signal);
+      }
       sub.ack = undefined;
       if (!deadline.signal.aborted) await this.#releaseConsumer(sub, run);
     } finally {
@@ -410,7 +418,9 @@ export class RedisQueue extends Adapter(Queue) {
         sub.ack = stopRun;
       }
       // Handlers finish before consumers are released. `signal` aborts when stop() stops waiting.
-      await settledOrAborted(Promise.all(subs.map(handlersOf)), signal);
+      const caller = this.#handling.getStore();
+      const others = subs.filter((sub) => sub !== caller);
+      await settledOrAborted(Promise.all(others.map(handlersOf)), signal);
       for (const sub of subs) sub.ack = undefined;
       if (signal.aborted) return;
       await Promise.all(subs.map((sub) => this.#releaseConsumer(sub, stopRun)));
@@ -595,7 +605,9 @@ export class RedisQueue extends Adapter(Queue) {
     let thrown = false;
     let returned: QueueDisposition | void;
     try {
-      returned = await sub.handler({ id, topic: sub.topic, payload });
+      returned = await this.#handling.run(sub, () =>
+        sub.handler({ id, topic: sub.topic, payload }),
+      );
     } catch (error) {
       thrown = true;
       returned = undefined;

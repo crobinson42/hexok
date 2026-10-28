@@ -10,6 +10,7 @@ import {
   createPublishers,
   createRuntime,
 } from './composition.js';
+import { onShutdown } from './utils/shutdown.js';
 import {
   assertDistinctHandlerGroups,
   subscribeHandler,
@@ -68,11 +69,16 @@ export async function main(): Promise<void> {
   }
 
   runtime.logger.info('domain events queue subscriptions', { subscriptions });
+
+  onShutdown(runtime.logger, () => runtime.stop());
 }
 
 if (
   process.argv[1] !== undefined &&
   import.meta.url === pathToFileURL(process.argv[1]).href
 ) {
-  void main();
+  main().catch((error: unknown) => {
+    console.error(error);
+    process.exit(1);
+  });
 }

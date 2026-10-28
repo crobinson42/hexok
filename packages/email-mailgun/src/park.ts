@@ -98,17 +98,25 @@ export function emailParkInput(
   };
 }
 
+/** A sink's error can quote its input, so only its name is logged unless `expose` is set. */
 export async function courtesyPark(
   sink: ParkSink | undefined,
   input: ParkInput,
   logger: LogSink,
+  expose: boolean,
 ): Promise<void> {
   if (!sink) return;
   try {
     await sink.park(input);
   } catch (error) {
-    logger.error(
-      error instanceof Error ? error : new Error('quarantine: park failed'),
-    );
+    if (expose) {
+      logger.error(
+        error instanceof Error ? error : new Error('quarantine: park failed'),
+      );
+      return;
+    }
+    logger.error('quarantine: park failed', {
+      name: error instanceof Error ? error.name : 'Error',
+    });
   }
 }

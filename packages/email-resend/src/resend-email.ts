@@ -59,7 +59,7 @@ export interface ResendEmailSenderConfig {
   readonly logger?: LogSink;
   readonly retry?: Partial<RetrySettings>;
   readonly quarantine?: ParkSink;
-  /** Puts Resend's error text in `Rejected`. Off by default because it can hold the recipient. A `sensitive` message never exposes it. */
+  /** Puts Resend's error text in `Rejected` and logs a failed park's raw error. Off by default because both can hold the recipient. A `sensitive` message never exposes them. */
   readonly exposeProviderErrors?: boolean;
 }
 
@@ -234,6 +234,7 @@ export class ResendEmailSender extends Adapter(EmailSender) {
           this.#quarantine,
           emailParkInput(message, mapped, 'resend', attemptOf(error)),
           this.#logger,
+          expose,
         );
       }
       throw mapped;

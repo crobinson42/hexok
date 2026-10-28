@@ -65,7 +65,7 @@ async function stop(): Promise<void> {
 
 - Await `start()` on every adapter before the process serves traffic. It resolves once Redis is ready.
 - Await `subscribe()` before you rely on delivery. It resolves once Redis confirms the subscription. A broadcast `subscribe()` that is not awaited misses messages published right after it.
-- Stop in the reverse order of start, and await each `stop()`. `stop()` waits for in-flight work, and resolves within `stopTimeoutMs` even when Redis is unreachable.
+- Stop in the reverse order of start, and await each `stop()`. `stop()` waits for in-flight commands, and for the queue's handlers and the schedule's ticks, and resolves within `stopTimeoutMs` even when Redis is unreachable.
 - `state` is `ready` from `start()` until `stop()`, even while Redis is down. It says whether the adapter accepts calls, not whether Redis answers. Use it to gate traffic during startup and shutdown, not as a Redis health check.
 
 A call at the wrong time rejects or throws with an error whose `code` names the problem. Match on `error.code`, not on the message.

@@ -51,10 +51,16 @@ export type StopCleanup<Clients> = (
   context: StopContext<Clients>,
 ) => Promise<void> | void;
 
+interface LogFields {
+  readonly [field: string]: unknown;
+  readonly adapter: string;
+  readonly connection: string;
+}
+
 interface Session<Clients> {
   readonly clients: Clients;
-  /** Each open client, started or attached. */
-  readonly connections: Set<Redis>;
+  /** Each open client, started or attached, and the fields of every log about it. */
+  readonly connections: Map<Redis, LogFields>;
   /** Cancels the readiness wait. */
   readonly opening: AbortController;
   /** Rejects guarded commands that are still pending. `stop()` aborts it after cleanup. */
@@ -80,9 +86,9 @@ export class RedisLifecycle<
   #stopping: Promise<void> | undefined;
 
   constructor(options: RedisLifecycleOptions) {
-    assertDuration('stopTimeoutMs', options.stopTimeoutMs);
+    assertDuration(options.adapter, 'stopTimeoutMs', options.stopTimeoutMs);
     if (options.startTimeoutMs !== undefined) {
-      assertDuration('startTimeoutMs', options.startTimeoutMs);
+      assertDuration(options.adapter, 'startTimeoutMs', options.startTimeoutMs);
     }
     this.#adapter = options.adapter;
     this.#stopTimeoutMs = options.stopTimeoutMs;
@@ -155,6 +161,7 @@ export class RedisLifecycle<
     }
     const client = options.open();
     this.#listen(session, client, options.connection, options.fields);
+    this.#watchEnd(session, client);
     return client;
   }
 
@@ -203,7 +210,7 @@ export class RedisLifecycle<
     }
     const session: Session<Clients> = {
       clients,
-      connections: new Set(),
+      connections: new Map(),
       opening: new AbortController(),
       guard: new AbortController(),
       inflight: 0,
@@ -218,6 +225,9 @@ export class RedisLifecycle<
       // stop() can run after every client is ready and before this line.
       session.opening.signal.throwIfAborted();
       this.#state = 'ready';
+      for (const client of session.connections.keys()) {
+        this.#watchEnd(session, client);
+      }
       onReady?.(clients);
     } catch (error) {
       // Once stop() begins, it closes the clients itself.
@@ -264,7 +274,7 @@ export class RedisLifecycle<
   #discard(session: Session<Clients>): void {
     this.#session = undefined;
     this.#state = 'idle';
-    for (const client of session.connections) client.disconnect();
+    for (const client of session.connections.keys()) client.disconnect();
   }
 
   async #shutdown(
@@ -294,9 +304,10 @@ export class RedisLifecycle<
       LifecycleError.Stopped(messages.closing(this.#adapter)),
     );
     await Promise.all(
-      [...session.connections].map((client) => this.#close(client, remaining)),
+      [...session.connections].map(([client, fields]) =>
+        this.#close(client, fields, remaining),
+      ),
     );
-    session.connections.clear();
     if (this.#session === session) this.#session = undefined;
     this.#state = 'stopped';
   }
@@ -322,7 +333,11 @@ export class RedisLifecycle<
    * A client that is not ready would hold `QUIT` in its offline queue until Redis returns, so it is disconnected.
    * A ready client whose Redis stopped answering never settles `QUIT`, so `QUIT` is bounded.
    */
-  async #close(client: Redis, remaining: () => number): Promise<void> {
+  async #close(
+    client: Redis,
+    fields: LogFields,
+    remaining: () => number,
+  ): Promise<void> {
     if (client.status === 'ready' && remaining() > 0) {
       let closed = false;
       const quit = client.quit().then(
@@ -334,7 +349,7 @@ export class RedisLifecycle<
             error instanceof Error
               ? error
               : new Error(`${this.#adapter}: QUIT failed`),
-            { adapter: this.#adapter },
+            fields,
           );
         },
       );
@@ -350,16 +365,35 @@ export class RedisLifecycle<
     connection: string,
     fields: Record<string, unknown> | undefined,
   ): void {
+    const logFields: LogFields = {
+      ...fields,
+      adapter: this.#adapter,
+      connection,
+    };
     const onError = (error: Error) => {
-      this.#logger.error(error, {
-        ...fields,
-        adapter: this.#adapter,
-        connection,
-      });
+      this.#logger.error(error, logFields);
     };
     // This listener stays after stop(). ioredis can emit while a socket closes, and with no listener it prints "Unhandled error event".
     client.on('error', onError);
-    session.connections.add(client);
+    session.connections.set(client, logFields);
+  }
+
+  /**
+   * Logs a client that ends while the lifecycle is ready, such as when `retryStrategy` gives up.
+   * `state` stays `ready`, so the log is the only signal. Before ready, the readiness wait handles `end`.
+   * The listener stays on the client, so `stop()` needs no `off`. Once the client is detached or its session stops, it does nothing.
+   */
+  #watchEnd(session: Session<Clients>, client: Redis): void {
+    const onEnd = () => {
+      if (this.#session !== session || this.#state !== 'ready') return;
+      const fields = session.connections.get(client);
+      if (fields === undefined) return;
+      this.#logger.error(
+        messages.endedAfterReady(this.#adapter, fields.connection),
+        fields,
+      );
+    };
+    client.on('end', onEnd);
   }
 
   #guarded<T>(
@@ -435,10 +469,10 @@ export class RedisLifecycle<
   }
 }
 
-function assertDuration(name: string, ms: number): void {
+function assertDuration(adapter: string, name: string, ms: number): void {
   if (!Number.isFinite(ms) || ms < 0) {
     throw new RangeError(
-      `ioredis-lifecycle: ${name} must be a finite number of ms >= 0`,
+      `${adapter}: ${name} must be a finite number of ms >= 0`,
     );
   }
 }

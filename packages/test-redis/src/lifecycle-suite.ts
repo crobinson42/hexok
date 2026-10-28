@@ -8,6 +8,11 @@ export interface LifecycleSubject {
   stop(): Promise<void>;
   /** One guarded operation, such as `publish`. A lifecycle error must reach the caller with its `code`. */
   operate(): Promise<unknown>;
+  /**
+   * Optional. Starts work that is still running when `stop()` begins and finishes on its own within `stopTimeoutMs`, such as a handler that takes 100 ms.
+   * With it, the suite asserts that a healthy `stop()` lets that work settle without `StoppedBeforeReply`. Without it, that test is skipped.
+   */
+  inFlight?(): Promise<unknown>;
 }
 
 export interface LifecycleSubjectConfig {
@@ -221,14 +226,33 @@ export function describeRedisLifecycle(
       await expectNoHandles();
     });
 
-    it('start works again after stop', async () => {
+    it('start works again after stop, and repeated cycles leave no handles', async () => {
+      track();
       const made = subject();
+      for (let cycle = 0; cycle < 3; cycle += 1) {
+        await made.start();
+        await made.operate();
+        await made.stop();
+      }
+      await expectNoHandles();
+    });
+
+    it('a healthy stop lets in-flight work settle without StoppedBeforeReply', async (context) => {
+      const made = subject();
+      if (made.inFlight === undefined) {
+        context.skip('the factory has no inFlight');
+        return;
+      }
       await made.start();
-      await made.operate();
-      await made.stop();
-      await made.start();
-      await made.operate();
-      await made.stop();
+      const outcome = made.inFlight().then(
+        () => undefined,
+        (error: unknown) => error,
+      );
+      expect(await timedStop(made)).toBeLessThan(stopTimeoutMs + slackMs);
+      const error = await outcome;
+      expect((error as { code?: unknown } | undefined)?.code).not.toBe(
+        'StoppedBeforeReply',
+      );
     });
   });
 }

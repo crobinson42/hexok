@@ -32,6 +32,13 @@ class PingAdapter {
     return this.#lifecycle.run('ping', ({ commands }) => commands.ping());
   }
 
+  /** A guarded command that Redis answers after 150 ms. */
+  slowRead(): Promise<unknown> {
+    return this.#lifecycle.run('slowRead', ({ commands }) =>
+      commands.blpop(`hexok:lifecycle:it:${randomUUID()}`, 0.15),
+    );
+  }
+
   stop(): Promise<void> {
     return this.#lifecycle.stop();
   }
@@ -88,9 +95,11 @@ describeRedisLifecycle('PingAdapter', (config) => {
     start: () => adapter.start(),
     stop: () => adapter.stop(),
     operate: () => adapter.ping(),
+    inFlight: () => adapter.slowRead(),
   };
 });
 
+// No inFlight, so that test skips.
 describeRedisLifecycle('LockAdapter', (config) => {
   const adapter = new LockAdapter(config);
   return {

@@ -1,7 +1,7 @@
 import { SmsError } from '@hexok/sms';
 import { describe, expect, it } from 'vitest';
 import type { LogSink } from './log-sink.js';
-import type { ParkInput } from './park.js';
+import type { ParkInput, ParkSink } from './park.js';
 import {
   type TwilioLike,
   TwilioSmsSender,
@@ -104,7 +104,10 @@ function providerError(status: number, code: number): Error {
   );
 }
 
-/** `JSON.stringify(new Error())` is `{}`. This expands `message` and `stack`. */
+/**
+ * `JSON.stringify(new Error())` is `{}`. This expands `message`, `stack`, and
+ * the non-enumerable `cause`, and walks nested causes.
+ */
 function serialize(value: unknown): string {
   return JSON.stringify(value, (_key, item: unknown) => {
     if (item instanceof Error) {
@@ -141,7 +144,10 @@ function spySink(): { sink: LogSink; calls: unknown[][] } {
 async function failedSend(
   thrown: Error,
   sensitive: boolean,
-  options: Pick<TwilioSmsSenderConfig, 'exposeProviderErrors'> = {},
+  options: Pick<
+    TwilioSmsSenderConfig,
+    'exposeProviderErrors' | 'quarantine'
+  > = {},
 ): Promise<{ error: unknown; calls: unknown[][]; parked: ParkInput[] }> {
   const { sink, calls } = spySink();
   const parked: ParkInput[] = [];
@@ -265,6 +271,84 @@ describe('TwilioSmsSender provider errors', () => {
         expect(leaked).not.toContain(destination);
         expect(leaked).not.toContain(otp);
       }
+    }
+  });
+});
+
+function failingSink(thrown: unknown): ParkSink {
+  return {
+    async park() {
+      throw thrown;
+    },
+  };
+}
+
+function quotedInput(): Error {
+  return new Error(
+    `park failed {"payload":{"to":"${destination}","body":"Your code is ${otp}"}}`,
+  );
+}
+
+describe('TwilioSmsSender quarantine failures', () => {
+  const failures: Array<[string, () => unknown]> = [
+    ['an error that quotes its input', quotedInput],
+    [
+      'an error whose cause quotes its input',
+      () => new Error('park failed', { cause: quotedInput() }),
+    ],
+    ['a string that quotes its input', () => `${destination} ${otp}`],
+  ];
+
+  for (const sensitive of [false, true]) {
+    for (const [name, thrown] of failures) {
+      it(`keeps ${name} out of the logs (sensitive: ${sensitive})`, async () => {
+        const { calls } = await failedSend(
+          providerError(500, 20500),
+          sensitive,
+          {
+            quarantine: failingSink(thrown()),
+          },
+        );
+        expect(serialize(calls)).not.toContain(destination);
+        expect(serialize(calls)).not.toContain(otp);
+      });
+    }
+  }
+
+  it('logs the park failure name', async () => {
+    const cases: Array<[unknown, string]> = [
+      [new TypeError(`${destination} ${otp}`), 'TypeError'],
+      [`${destination} ${otp}`, 'Error'],
+    ];
+    for (const [thrown, name] of cases) {
+      const { calls } = await failedSend(providerError(500, 20500), false, {
+        quarantine: failingSink(thrown),
+      });
+      expect(calls).toContainEqual([
+        'error',
+        'quarantine: park failed',
+        { name },
+      ]);
+    }
+  });
+
+  it('logs the raw park failure with exposeProviderErrors', async () => {
+    const thrown = quotedInput();
+    const { calls } = await failedSend(providerError(500, 20500), false, {
+      exposeProviderErrors: true,
+      quarantine: failingSink(thrown),
+    });
+    expect(calls).toContainEqual(['error', thrown]);
+  });
+
+  it('keeps a sensitive park failure redacted with exposeProviderErrors', async () => {
+    for (const [, thrown] of failures) {
+      const { calls } = await failedSend(providerError(500, 20500), true, {
+        exposeProviderErrors: true,
+        quarantine: failingSink(thrown()),
+      });
+      expect(serialize(calls)).not.toContain(destination);
+      expect(serialize(calls)).not.toContain(otp);
     }
   });
 });

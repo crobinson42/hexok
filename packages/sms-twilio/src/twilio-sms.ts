@@ -90,6 +90,7 @@ export class TwilioSmsSender extends Adapter(SmsSender) {
           this.#quarantine,
           smsParkInput(message, mapped),
           this.#logger,
+          expose,
         );
         throw mapped;
       }
@@ -99,6 +100,7 @@ export class TwilioSmsSender extends Adapter(SmsSender) {
           this.#quarantine,
           smsParkInput(message, mapped),
           this.#logger,
+          expose,
         );
         throw mapped;
       }

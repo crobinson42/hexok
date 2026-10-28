@@ -472,9 +472,8 @@ describe.skipIf(!process.env.REDIS_URL)(
       // Connection errors are logged while Redis refuses. Nothing about the job is an error.
       expect(logger.errors.filter((item) => item.fields?.job)).toEqual([]);
       expect(logger.warnings).toContainEqual({
-        message: expect.stringContaining(
-          'stop() was called before Redis replied to acquire()',
-        ),
+        message:
+          'schedule: stop() stopped waiting before Redis replied to the lock SET. Redis may or may not have run it.',
         fields: {
           adapter: 'schedule',
           connection: 'commands',
@@ -482,6 +481,55 @@ describe.skipIf(!process.env.REDIS_URL)(
           code: 'StoppedBeforeReply',
         },
       });
+    });
+
+    it('a lock SET answered after the lock could expire releases the lock without running onTick', async () => {
+      const warnings: string[] = [];
+      const onWarning = (warning: Error) => warnings.push(warning.name);
+      process.on('warning', onWarning);
+      try {
+        const scheduler = seam();
+        const logger = recorder();
+        const made = new RedisScheduleCoordinator({
+          redis,
+          keyPrefix: prefix,
+          lockTtlSec: 2,
+          stopTimeoutMs,
+          scheduler,
+          logger,
+        });
+        coordinators.push(made);
+        await made.start();
+        await proxy.refuse();
+        proxy.drop();
+        let ran = false;
+        made.register({
+          name: 'late',
+          cron: '0 * * * *',
+          onTick: () => {
+            ran = true;
+          },
+        });
+        let settled = false;
+        const ticking = scheduler.jobs[0]?.fire().then(() => {
+          settled = true;
+        });
+        // The SET waits in the offline queue longer than the TTL less its margin of 500ms.
+        await new Promise((resolve) => setTimeout(resolve, 2500));
+        await proxy.restore();
+        await vi.waitFor(() => expect(settled).toBe(true), { timeout: 5000 });
+        await ticking;
+        expect(ran).toBe(false);
+        expect(await probe.get(`${prefix}lock:late`)).toBeNull();
+        expect(logger.warnings).toContainEqual({
+          message:
+            'schedule: the lock SET was answered too late to run the tick safely, so the lock was released.',
+          fields: { adapter: 'schedule', connection: 'commands', job: 'late' },
+        });
+        expect(warnings).not.toContain('TimeoutNegativeWarning');
+      } finally {
+        process.off('warning', onWarning);
+      }
     });
 
     it('state moves from idle through starting and ready to stopping and stopped', async () => {

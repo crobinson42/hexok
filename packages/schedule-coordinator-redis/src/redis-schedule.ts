@@ -206,7 +206,7 @@ export class RedisScheduleCoordinator extends Adapter(ScheduleCoordinator) {
       );
     } catch (error) {
       this.#held.delete(held);
-      this.#logCommandFailure(error, 'schedule: SET failed', job.name);
+      this.#logCommandFailure(error, 'lock SET', job.name);
       return;
     }
     if (acquired !== 'OK') {
@@ -217,6 +217,14 @@ export class RedisScheduleCoordinator extends Adapter(ScheduleCoordinator) {
     try {
       // stop() began while SET was in flight. The lock is released without running onTick.
       if (this.#lifecycle.state !== 'ready') return;
+      // The reply came so late, such as after an outage, that the lock may expire before a renew can land.
+      if (Date.now() >= this.#abortAt(sentAt)) {
+        this.#logger.warn(
+          'schedule: the lock SET was answered too late to run the tick safely, so the lock was released.',
+          this.#redisFields(job.name),
+        );
+        return;
+      }
       this.#extend(held, sentAt);
       held.renew = setInterval(
         () => {
@@ -272,7 +280,7 @@ export class RedisScheduleCoordinator extends Adapter(ScheduleCoordinator) {
       }
     } catch (error) {
       this.#lose(held);
-      this.#logCommandFailure(error, 'schedule: renew failed', held.job);
+      this.#logCommandFailure(error, 'lock renew', held.job);
     } finally {
       held.renewing = false;
     }
@@ -284,8 +292,6 @@ export class RedisScheduleCoordinator extends Adapter(ScheduleCoordinator) {
    * Renews go out every third of the TTL, so a healthy renew lands well before the abort.
    */
   #extend(held: HeldLock, sentAt: number): void {
-    const ttlMs = this.#lockTtlSec * 1000;
-    const marginMs = Math.min(1000, ttlMs / 4);
     clearTimeout(held.expiry);
     held.expiry = setTimeout(
       () => {
@@ -295,8 +301,14 @@ export class RedisScheduleCoordinator extends Adapter(ScheduleCoordinator) {
           this.#redisFields(held.job),
         );
       },
-      sentAt + ttlMs - marginMs - Date.now(),
+      Math.max(0, this.#abortAt(sentAt) - Date.now()),
     );
+  }
+
+  /** When a tick must stop if its lock was last set or renewed at `sentAt`: the TTL less a margin of `min(1000, TTL / 4)`. */
+  #abortAt(sentAt: number): number {
+    const ttlMs = this.#lockTtlSec * 1000;
+    return sentAt + ttlMs - Math.min(1000, ttlMs / 4);
   }
 
   /** The lock is gone or unconfirmed. The tick is told to stop, and nothing renews the lock again. */
@@ -315,7 +327,7 @@ export class RedisScheduleCoordinator extends Adapter(ScheduleCoordinator) {
         commands.eval(deleteScript, 1, held.key, held.token),
       );
     } catch (error) {
-      this.#logCommandFailure(error, 'schedule: release failed', held.job);
+      this.#logCommandFailure(error, 'lock release', held.job);
     }
   }
 
@@ -328,20 +340,23 @@ export class RedisScheduleCoordinator extends Adapter(ScheduleCoordinator) {
   }
 
   /**
-   * Logs a failed lock command. `StoppedBeforeReply` means stop() cut it short, which is a warning. It carries its `code`.
+   * Logs a failed lock command, such as `lock SET`. `StoppedBeforeReply` means stop() cut it short, which is a warning with its `code`.
    * Other lifecycle errors mean the work came outside start() and stop(), and are not logged.
    */
-  #logCommandFailure(error: unknown, fallback: string, job: string): void {
+  #logCommandFailure(error: unknown, command: string, job: string): void {
     if (LifecycleError.is(error)) {
       if (error.code === 'StoppedBeforeReply') {
-        this.#logger.warn(error.message, {
-          ...this.#redisFields(job),
-          code: error.code,
-        });
+        this.#logger.warn(
+          `schedule: stop() stopped waiting before Redis replied to the ${command}. Redis may or may not have run it.`,
+          { ...this.#redisFields(job), code: error.code },
+        );
       }
       return;
     }
-    this.#logger.error(asError(error, fallback), this.#redisFields(job));
+    this.#logger.error(
+      asError(error, `schedule: ${command} failed`),
+      this.#redisFields(job),
+    );
   }
 
   /** For a job event or a failure in `onTick`. */

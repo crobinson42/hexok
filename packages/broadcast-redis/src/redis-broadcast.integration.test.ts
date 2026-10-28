@@ -8,6 +8,15 @@ if (process.env.CI && !process.env.REDIS_URL) {
   throw new Error('REDIS_URL is required when CI is set');
 }
 
+function within(promise: Promise<void>, ms: number): Promise<void> {
+  return Promise.race([
+    promise,
+    new Promise<void>((_, reject) => {
+      setTimeout(() => reject(new Error(`still pending after ${ms}ms`)), ms);
+    }),
+  ]);
+}
+
 describe.skipIf(!process.env.REDIS_URL)('RedisBroadcast integration', () => {
   const buses: RedisBroadcast[] = [];
 
@@ -40,6 +49,26 @@ describe.skipIf(!process.env.REDIS_URL)('RedisBroadcast integration', () => {
       await new Promise((resolve) => setTimeout(resolve, 20));
     }
     expect(seen).toEqual([{ channel: 'news', payload: { n: 1 } }]);
+  });
+
+  it('rejects a pending start when stop is called while Redis is down', async () => {
+    const bus = new RedisBroadcast({ redis: 'redis://127.0.0.1:6399' });
+    const started = bus.start();
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    await bus.stop();
+    await expect(within(started, 1000)).rejects.toThrow(
+      'stop() was called before ready',
+    );
+  });
+
+  it('rejects start when stop follows it', async () => {
+    const url = process.env.REDIS_URL ?? '';
+    for (let run = 0; run < 50; run += 1) {
+      const bus = new RedisBroadcast({ redis: url });
+      const started = bus.start();
+      await bus.stop();
+      await expect(started).rejects.toThrow('stop() was called before ready');
+    }
   });
 
   async function startSubscribePublish(

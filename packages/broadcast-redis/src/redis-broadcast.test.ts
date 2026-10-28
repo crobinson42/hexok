@@ -28,15 +28,23 @@ class FakeRedis {
   }
 
   once(event: string, listener: Listener): this {
-    const wrapped: Listener = (...args) => {
-      this.off(event, wrapped);
-      listener(...args);
-    };
+    const wrapped = Object.assign(
+      (...args: unknown[]) => {
+        this.off(event, wrapped);
+        listener(...args);
+      },
+      { listener },
+    );
     return this.on(event, wrapped);
   }
 
   off(event: string, listener: Listener): this {
-    this.listeners.get(event)?.delete(listener);
+    const set = this.listeners.get(event);
+    if (!set) return this;
+    for (const entry of set) {
+      const original = (entry as { listener?: Listener }).listener;
+      if (entry === listener || original === listener) set.delete(entry);
+    }
     return this;
   }
 
@@ -244,6 +252,37 @@ describe('RedisBroadcast', () => {
       expect(nextSubscriber).not.toBe(subscriber);
       await bus.publish(news, { a: 1 });
       await bus.stop();
+    });
+
+    it('rejects a pending start on stop and removes its listeners', async () => {
+      FakeRedis.readyOnOpen = false;
+      const bus = new RedisBroadcast({ redis: 'redis://127.0.0.1:6379' });
+      const state = track(bus.start());
+      const [publisher, subscriber] = lastPair();
+      await bus.stop();
+      await tick();
+      expect(state.settled).toBe(true);
+      expect(String(state.error)).toContain('stop() was called before ready');
+      for (const redis of [publisher, subscriber]) {
+        expect(redis.disconnects).toBe(1);
+        expect(redis.listeners.get('ready')?.size ?? 0).toBe(0);
+        expect(redis.listeners.get('end')?.size ?? 0).toBe(0);
+      }
+    });
+
+    it('rejects start when stop is called after ready but before it resolves', async () => {
+      FakeRedis.readyOnOpen = false;
+      const bus = new RedisBroadcast({ redis: 'redis://127.0.0.1:6379' });
+      const started = bus.start();
+      const [publisher, subscriber] = lastPair();
+      publisher.emit('ready');
+      subscriber.emit('ready');
+      const stopped = bus.stop();
+      await expect(started).rejects.toThrow('stop() was called before ready');
+      await stopped;
+      await expect(bus.publish(news, { a: 1 })).rejects.toThrow(
+        'start() was not called',
+      );
     });
 
     it('connects a client created with lazyConnect', async () => {

@@ -5,7 +5,7 @@ import {
 } from '@hexok/broadcast';
 import { Adapter } from 'hexok';
 import type { Redis, RedisOptions } from 'ioredis';
-import { decodeJson, encodeJson, openRedis, waitForReady } from './codec.js';
+import { decodeJson, encodeJson, openRedis, untilReady } from './codec.js';
 import { type LogSink, noopSink } from './log-sink.js';
 
 export interface RedisBroadcastConfig {
@@ -25,6 +25,7 @@ export class RedisBroadcast extends Adapter(Broadcast) {
   #publisher: Redis | undefined;
   #subscriber: Redis | undefined;
   #started: Promise<void> | undefined;
+  #starting: AbortController | undefined;
   readonly #handlers = new Map<string, Set<BroadcastHandler<unknown>>>();
 
   constructor(config: RedisBroadcastConfig) {
@@ -75,48 +76,68 @@ export class RedisBroadcast extends Adapter(Broadcast) {
   }
 
   override async stop(): Promise<void> {
+    const publisher = this.#publisher;
+    const subscriber = this.#subscriber;
+    const starting = this.#starting;
     const channels = [...this.#handlers.keys()];
+    this.#publisher = undefined;
+    this.#subscriber = undefined;
+    this.#started = undefined;
+    this.#starting = undefined;
     this.#handlers.clear();
-    if (this.#subscriber && channels.length > 0) {
-      await this.#subscriber.unsubscribe(
+    if (starting) {
+      starting.abort(new Error('broadcast: stop() was called before ready'));
+      publisher?.disconnect();
+      subscriber?.disconnect();
+      return;
+    }
+    if (subscriber && channels.length > 0) {
+      await subscriber.unsubscribe(
         ...channels.map((channel) => this.#wire(channel)),
       );
     }
-    await this.#subscriber?.quit().catch((error: unknown) => {
+    await subscriber?.quit().catch((error: unknown) => {
       this.#logger.error(
         error instanceof Error ? error : new Error('broadcast: quit failed'),
       );
     });
-    await this.#publisher?.quit().catch((error: unknown) => {
+    await publisher?.quit().catch((error: unknown) => {
       this.#logger.error(
         error instanceof Error ? error : new Error('broadcast: quit failed'),
       );
     });
-    this.#subscriber = undefined;
-    this.#publisher = undefined;
-    this.#started = undefined;
   }
 
   async #open(): Promise<void> {
+    const starting = new AbortController();
     const publisher = this.#connect('publisher');
     const subscriber = this.#connect('subscriber');
+    this.#starting = starting;
     this.#publisher = publisher;
     this.#subscriber = subscriber;
     subscriber.on('message', (wire: string, raw: string) => {
       void this.#deliver(wire, raw);
     });
     try {
-      await Promise.all([waitForReady(publisher), waitForReady(subscriber)]);
+      await Promise.all([
+        untilReady(publisher, starting.signal),
+        untilReady(subscriber, starting.signal),
+      ]);
+      starting.signal.throwIfAborted();
     } catch (error) {
-      publisher.disconnect();
-      subscriber.disconnect();
-      if (this.#publisher === publisher) {
+      // stop() aborts and closes the clients itself. Otherwise a client ended.
+      if (this.#starting === starting) {
+        starting.abort(error);
         this.#publisher = undefined;
         this.#subscriber = undefined;
         this.#started = undefined;
+        this.#starting = undefined;
+        publisher.disconnect();
+        subscriber.disconnect();
       }
       throw error;
     }
+    this.#starting = undefined;
   }
 
   #connect(connection: 'publisher' | 'subscriber'): Redis {

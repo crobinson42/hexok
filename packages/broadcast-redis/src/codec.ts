@@ -15,23 +15,24 @@ export function openRedis(redis: string | RedisOptions): Redis {
   return new Redis({ maxRetriesPerRequest: null, ...redis });
 }
 
-export function waitForReady(redis: Redis): Promise<void> {
-  if (redis.status === 'ready') return Promise.resolve();
-  if (redis.status === 'end') {
-    return Promise.reject(new Error('broadcast: redis ended before ready'));
-  }
+/** Resolves on `ready`. Rejects on `end` or `signal`. Connects a `lazyConnect` client. ioredis retries through `error`. */
+export function untilReady(client: Redis, signal: AbortSignal): Promise<void> {
+  if (client.status === 'ready') return Promise.resolve();
   return new Promise((resolve, reject) => {
-    const onReady = () => {
-      redis.off('end', onEnd);
-      resolve();
+    const settle = (error?: unknown) => {
+      client.off('ready', onReady);
+      client.off('end', onEnd);
+      signal.removeEventListener('abort', onAbort);
+      if (error === undefined) resolve();
+      else reject(error);
     };
-    const onEnd = () => {
-      redis.off('ready', onReady);
-      reject(new Error('broadcast: redis ended before ready'));
-    };
-    redis.once('ready', onReady);
-    redis.once('end', onEnd);
-    // The events settle the promise. A connect failure also emits 'error'.
-    if (redis.status === 'wait') redis.connect().catch(() => {});
+    const onReady = () => settle();
+    const onEnd = () =>
+      settle(new Error('broadcast: redis connection ended before ready'));
+    const onAbort = () => settle(signal.reason);
+    client.once('ready', onReady);
+    client.once('end', onEnd);
+    signal.addEventListener('abort', onAbort);
+    if (client.status === 'wait') client.connect().catch(() => undefined);
   });
 }

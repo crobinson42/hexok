@@ -1797,6 +1797,49 @@ describe('RedisQueue reliability', () => {
     ]);
   });
 
+  it('stop armed on a timer inside a handler still waits for and acks a later handler', async () => {
+    // Real timers: a fake timer runs its callback outside the handler's async context.
+    const queue = new RedisQueue({ redis: 'redis://127.0.0.1:6379' });
+    await queue.start();
+    let release: (value: 'ack') => void = () => {};
+    let stopping: Promise<void> | undefined;
+    await queue.subscribe('jobs', {
+      consumerGroup: 'billing',
+      handler: async (message) => {
+        if (message.id === '4-1') {
+          setTimeout(() => {
+            stopping = queue.stop();
+          }, 50);
+          return 'ack';
+        }
+        return new Promise((resolve) => {
+          release = resolve;
+        });
+      },
+    });
+    FakeRedis.instances[1]?.pending?.resolve([
+      [
+        'hexok:queue:jobs',
+        [
+          ['4-1', ['payload', '{}']],
+          ['4-2', ['payload', '{}']],
+        ],
+      ],
+    ]);
+    await new Promise((resolve) => setTimeout(resolve, 150));
+    if (!stopping) throw new Error('stop was not called');
+    const stopped = settledFlag(stopping);
+    await new Promise((resolve) => setImmediate(resolve));
+    expect(stopped()).toBe(false);
+    release('ack');
+    await stopping;
+    const commands = FakeRedis.instances[0];
+    expect(commands?.calls.filter((call) => call[0] === 'xack')).toEqual([
+      ['xack', 'hexok:queue:jobs', 'billing', '4-1'],
+      ['xack', 'hexok:queue:jobs', 'billing', '4-2'],
+    ]);
+  });
+
   it('a recovery tick is skipped while the previous one runs', async () => {
     vi.useFakeTimers();
     const queue = new RedisQueue({

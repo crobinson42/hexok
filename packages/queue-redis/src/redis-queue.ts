@@ -90,6 +90,12 @@ interface Subscription {
   readonly finish: () => void;
 }
 
+/** One handler call. `active` turns false when the handler returns. */
+interface HandlerCall {
+  readonly sub: Subscription;
+  active: boolean;
+}
+
 type StreamEntry = [string, string[]];
 type StreamRead = [string, StreamEntry[]];
 
@@ -194,10 +200,10 @@ export class RedisQueue extends Adapter(Queue) {
   readonly #topics = new Set<string>();
   readonly #subs = new Map<string, Subscription>();
   /**
-   * The subscription whose handler is running. A handler that calls `unsubscribe` on its own subscription, or `stop()`,
-   * would otherwise wait for itself until `stopTimeoutMs`.
+   * The handler call running now. A handler that calls `unsubscribe` on its own subscription, or `stop()`, would otherwise wait for itself until `stopTimeoutMs`.
+   * The mark is per call and ends when the handler returns. Work it leaves behind, such as a timer, inherits the context, and must not count as the handler.
    */
-  readonly #handling = new AsyncLocalStorage<Subscription>();
+  readonly #handling = new AsyncLocalStorage<HandlerCall>();
 
   constructor(config: RedisQueueConfig) {
     super();
@@ -379,7 +385,7 @@ export class RedisQueue extends Adapter(Queue) {
       this.#lifecycle.run('unsubscribe', command, { signal: deadline.signal });
     sub.ack = run;
     try {
-      if (this.#handling.getStore() !== sub) {
+      if (!this.#calledFrom(sub)) {
         await settledOrAborted(handlersOf(sub), deadline.signal);
       }
       sub.ack = undefined;
@@ -419,8 +425,7 @@ export class RedisQueue extends Adapter(Queue) {
         sub.ack = stopRun;
       }
       // Handlers finish before consumers are released. `signal` aborts when stop() stops waiting.
-      const caller = this.#handling.getStore();
-      const others = subs.filter((sub) => sub !== caller);
+      const others = subs.filter((sub) => !this.#calledFrom(sub));
       await settledOrAborted(Promise.all(others.map(handlersOf)), signal);
       for (const sub of subs) sub.ack = undefined;
       if (signal.aborted) return;
@@ -606,9 +611,14 @@ export class RedisQueue extends Adapter(Queue) {
     let thrown = false;
     let returned: QueueDisposition | void;
     try {
-      returned = await this.#handling.run(sub, () =>
-        sub.handler({ id, topic: sub.topic, payload }),
-      );
+      const call: HandlerCall = { sub, active: true };
+      try {
+        returned = await this.#handling.run(call, () =>
+          sub.handler({ id, topic: sub.topic, payload }),
+        );
+      } finally {
+        call.active = false;
+      }
     } catch (error) {
       thrown = true;
       returned = undefined;
@@ -755,6 +765,12 @@ export class RedisQueue extends Adapter(Queue) {
     connection: 'commands' | 'blocking',
   ): Record<string, unknown> {
     return { adapter: ADAPTER, connection, topic: sub.topic, group: sub.group };
+  }
+
+  /** Whether a handler of `sub` is the caller and has not yet returned. */
+  #calledFrom(sub: Subscription): boolean {
+    const call = this.#handling.getStore();
+    return call?.active === true && call.sub === sub;
   }
 
   #key(topic: string): string {

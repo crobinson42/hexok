@@ -96,7 +96,7 @@ Use the HTTP library the application already depends on. Express, Hono, and Koa 
 
 The route builds the call context, calls `execute`, and maps failures to the reply. A missing entity is a 404. `CodedError` code `VALIDATION` is a 400 and `data.issues` names the fields. A catalog conflict, such as an already published post, is a 409. The catalog does not contain status codes.
 
-Construct adapters, call `start`, and construct use cases in the entry point (`new PublishPost({ posts, events })`). A use case instance is long-lived. Context is an argument to `execute`, not a field set per request.
+Construct adapters, await `start` on each, and construct use cases in the entry point (`new PublishPost({ posts, events })`). Serve traffic only after every `start` resolves. On shutdown, await `stop` in the reverse order. An adapter that holds a connection, such as the Redis adapters, follows the lifecycle in [references/adapter.md](references/adapter.md). A use case instance is long-lived. Context is an argument to `execute`, not a field set per request.
 
 ### 6. Where handlers run
 
@@ -104,7 +104,7 @@ Skip this step when there is no handler.
 
 Decide whether each handler shares the API process. Share it when the work is small, or when no adapter can publish in one process and subscribe in another.
 
-Add a background-worker entry point when the handler does heavy work and a distributed publish/subscribe adapter exists. The API entry publishes. The worker entry starts the subscription adapter, registers the handlers, and runs them. The two processes use the same catalog. The worker parses the wire message, then calls `handle`.
+Add a background-worker entry point when the handler does heavy work and a distributed publish/subscribe adapter exists. The API entry publishes. The worker entry awaits `start` on the subscription adapter, awaits `subscribe` for each handler, and runs them. A `subscribe` that is not awaited can miss the first messages. The two processes use the same catalog. The worker parses the wire message, then calls `handle`.
 
 Do not add a broker only to create a second process. Do not move the handler's work back into `execute`.
 

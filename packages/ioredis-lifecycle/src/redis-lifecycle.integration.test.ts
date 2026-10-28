@@ -75,6 +75,39 @@ describe.skipIf(!process.env.REDIS_URL)('RedisLifecycle integration', () => {
     expect(made.state).toBe('idle');
   });
 
+  it('a client that ends after ready is logged at error, state stays ready, and commands fail', async () => {
+    const logged: unknown[][] = [];
+    const made = new RedisLifecycle<{ main: Redis }>({
+      adapter: 'it',
+      stopTimeoutMs: 300,
+      logger: {
+        debug() {},
+        info() {},
+        warn() {},
+        error: (message, fields) => {
+          logged.push([message, fields]);
+        },
+      },
+    });
+    lifecycles.push(made as unknown as RedisLifecycle);
+    const client = openRedis({
+      ...redis,
+      retryStrategy: (times) => (times > 2 ? null : 10),
+    });
+    await made.start(() => ({ main: client }));
+    await proxy.refuse();
+    proxy.drop();
+    await until(() => client.status === 'end');
+    expect(made.state).toBe('ready');
+    expect(logged).toContainEqual([
+      'it: the main connection ended after start(). Commands fail until you call stop() and start() again.',
+      { adapter: 'it', connection: 'main' },
+    ]);
+    await expect(made.run('ping', ({ main }) => main.ping())).rejects.toThrow(
+      'Connection is closed.',
+    );
+  });
+
   it('start rejects with StartTimeout while Redis is blackholed', async () => {
     proxy.blackhole();
     const made = lifecycle({ startTimeoutMs: 300 });
@@ -194,7 +227,8 @@ describe.skipIf(!process.env.REDIS_URL)('RedisLifecycle integration', () => {
   it('the process exits soon after stop while Redis is blackholed', async () => {
     const running = runNode(
       `
-import { openRedis, RedisLifecycle, settleWithin } from ${JSON.stringify(entry)};
+import { openRedis, RedisLifecycle } from ${JSON.stringify(entry)};
+import { settleWithin } from '@hexok/test-redis';
 const lifecycle = new RedisLifecycle({ adapter: 'child', stopTimeoutMs: 300 });
 await lifecycle.start(() => ({
   main: openRedis({ host: '127.0.0.1', port: Number(process.env.PORT), disconnectTimeout: 200 }),

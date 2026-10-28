@@ -331,6 +331,8 @@ export class RedisQueue extends Adapter(Queue) {
       void this.#heartbeat(sub);
     }, heartbeatMs);
     sub.recovery = setInterval(() => {
+      // A slow run would otherwise overlap the next and claim the same entries twice.
+      if (sub.recovering.size > 0) return;
       const run = this.#recover(sub).finally(() => {
         sub.recovering.delete(run);
       });
@@ -488,12 +490,7 @@ export class RedisQueue extends Adapter(Queue) {
           continue;
         }
         if (!rows) continue;
-        for (const [, entries] of rows) {
-          for (const [id, fields] of entries) {
-            if (signal.aborted) break;
-            await this.#dispatch(sub, id, fields);
-          }
-        }
+        for (const [, entries] of rows) await this.#handleBatch(sub, entries);
       }
     } finally {
       sub.finish();
@@ -544,6 +541,18 @@ export class RedisQueue extends Adapter(Queue) {
     );
   }
 
+  /**
+   * Every entry of a batch joins the heartbeat when the batch arrives, not when its turn comes.
+   * Otherwise an entry waiting behind slow handlers goes idle, and `XAUTOCLAIM`, even this subscription's own, delivers it again.
+   */
+  async #handleBatch(sub: Subscription, entries: StreamEntry[]): Promise<void> {
+    for (const [id] of entries) sub.inflight.add(id);
+    for (const [id, fields] of entries) {
+      if (sub.abort.signal.aborted) sub.inflight.delete(id);
+      else await this.#dispatch(sub, id, fields);
+    }
+  }
+
   async #dispatch(
     sub: Subscription,
     id: string,
@@ -555,7 +564,7 @@ export class RedisQueue extends Adapter(Queue) {
         payload: { reason: 'missing-payload' },
         error: { name: 'Error', message: 'queue: missing payload' },
       });
-      await this.#settle(sub, id, 'drop', false);
+      await this.#settle(sub, id, 'drop');
       return;
     }
     let payload: unknown;
@@ -575,10 +584,9 @@ export class RedisQueue extends Adapter(Queue) {
           : { reason: 'decode-failed', raw },
         error: parkedError(sensitive ? generic : error),
       });
-      await this.#settle(sub, id, 'drop', false);
+      await this.#settle(sub, id, 'drop');
       return;
     }
-    sub.inflight.add(id);
     let thrown = false;
     let returned: QueueDisposition | void;
     try {
@@ -592,7 +600,7 @@ export class RedisQueue extends Adapter(Queue) {
       );
     }
     const disposition = dispositionOf(returned, thrown, sub.onError);
-    await this.#settle(sub, id, disposition, true);
+    await this.#settle(sub, id, disposition);
   }
 
   /** After `unsubscribe` or `stop()`, a handler that returns does not `XACK`. Its entry stays pending for another consumer. */
@@ -600,10 +608,9 @@ export class RedisQueue extends Adapter(Queue) {
     sub: Subscription,
     id: string,
     disposition: QueueDisposition,
-    tracked: boolean,
   ): Promise<void> {
     if (sub.abort.signal.aborted || disposition === 'retry') {
-      if (tracked) sub.inflight.delete(id);
+      sub.inflight.delete(id);
       return;
     }
     try {
@@ -618,7 +625,7 @@ export class RedisQueue extends Adapter(Queue) {
         });
       }
     }
-    if (tracked) sub.inflight.delete(id);
+    sub.inflight.delete(id);
   }
 
   async #heartbeat(sub: Subscription): Promise<void> {
@@ -660,11 +667,10 @@ export class RedisQueue extends Adapter(Queue) {
           ackDeleted(commands, sub.key, sub.group, sub.consumer),
         );
       }
-      for (const [id, fields] of entries) {
-        if (sub.abort.signal.aborted) return;
-        if (sub.inflight.has(id)) continue;
-        await this.#dispatch(sub, id, fields);
-      }
+      await this.#handleBatch(
+        sub,
+        entries.filter(([id]) => !sub.inflight.has(id)),
+      );
     } catch (error) {
       if (sub.abort.signal.aborted) return;
       if (isNoGroup(error)) {

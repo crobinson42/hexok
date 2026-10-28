@@ -142,8 +142,11 @@ class FakeRedis extends EventEmitter {
   /** Replies to each `XAUTOCLAIM` as is, such as a Redis 6.2 reply with `nil` for a deleted entry. */
   autoclaimReplies: unknown[][] = [];
 
+  holdAutoclaim = false;
+
   xautoclaim(...args: unknown[]): Promise<unknown[]> {
     this.calls.push(['xautoclaim', ...args]);
+    if (this.holdAutoclaim) return new Promise(() => {});
     if (this.failXautoclaim) return Promise.reject(this.failXautoclaim);
     const reply = this.autoclaimReplies.shift();
     if (reply) return Promise.resolve(reply);
@@ -1504,6 +1507,63 @@ describe('RedisQueue reliability', () => {
     ).toHaveLength(2);
     expect(logs.calls).toEqual([]);
     await queue.stop();
+  });
+
+  it('the heartbeat claims every entry of a read batch while the first is handled', async () => {
+    vi.useFakeTimers();
+    const queue = new RedisQueue({
+      redis: 'redis://127.0.0.1:6379',
+      visibilityMs: 300,
+    });
+    await queue.start();
+    let release: (value: 'ack') => void = () => {};
+    await queue.subscribe('jobs', {
+      consumerGroup: 'billing',
+      handler: () =>
+        new Promise((resolve) => {
+          release = resolve;
+        }),
+    });
+    FakeRedis.instances[1]?.pending?.resolve([
+      [
+        'hexok:queue:jobs',
+        [
+          ['4-1', ['payload', '{}']],
+          ['4-2', ['payload', '{}']],
+          ['4-3', ['payload', '{}']],
+        ],
+      ],
+    ]);
+    await vi.advanceTimersByTimeAsync(100);
+    const commands = FakeRedis.instances[0];
+    const claims = commands?.calls.filter((call) => call[0] === 'xclaim');
+    expect(claims?.[0]?.slice(5)).toEqual(['4-1', '4-2', '4-3', 'JUSTID']);
+    release('ack');
+    await queue.stop();
+  });
+
+  it('a recovery tick is skipped while the previous one runs', async () => {
+    vi.useFakeTimers();
+    const queue = new RedisQueue({
+      redis: 'redis://127.0.0.1:6379',
+      visibilityMs: 1000,
+      stopTimeoutMs: 100,
+    });
+    await queue.start();
+    const commands = FakeRedis.instances[0];
+    if (!commands) throw new Error('missing commands client');
+    commands.holdAutoclaim = true;
+    await queue.subscribe('jobs', {
+      consumerGroup: 'billing',
+      handler: async () => 'ack',
+    });
+    await vi.advanceTimersByTimeAsync(2000);
+    expect(
+      commands.calls.filter((call) => call[0] === 'xautoclaim'),
+    ).toHaveLength(1);
+    const stopping = queue.stop();
+    await vi.advanceTimersByTimeAsync(100);
+    await stopping;
   });
 
   it('recovery accepts the deleted ids Redis 7 returns as a third element', async () => {

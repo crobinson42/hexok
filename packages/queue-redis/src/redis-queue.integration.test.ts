@@ -448,6 +448,40 @@ console.log(JSON.stringify({ growth, total: count * payload.length }));
     expect(groups).toHaveLength(1);
     expect(await probe.exists(key)).toBe(1);
   });
+  it('handles each entry of a read batch once while the batch outlasts visibilityMs', async () => {
+    const keyPrefix = newPrefix();
+    const admin = probe();
+    for (let n = 0; n < 10; n += 1) {
+      await admin.xadd(`${keyPrefix}jobs`, '*', 'payload', String(n));
+    }
+    const queue = new RedisQueue({
+      redis: process.env.REDIS_URL ?? '',
+      keyPrefix,
+      visibilityMs: 1000,
+      blockMs: 200,
+      batch: 10,
+    });
+    queues.push(queue);
+    await queue.start();
+    const calls: string[] = [];
+    let running = 0;
+    let most = 0;
+    await queue.subscribe('jobs', {
+      consumerGroup: 'workers',
+      startFrom: 'earliest',
+      handler: async (message) => {
+        calls.push(message.id);
+        running += 1;
+        most = Math.max(most, running);
+        await new Promise((resolve) => setTimeout(resolve, 400));
+        running -= 1;
+      },
+    });
+    await waitFor(() => new Set(calls).size === 10);
+    await new Promise((resolve) => setTimeout(resolve, 600));
+    expect({ calls: calls.length, most }).toEqual({ calls: 10, most: 1 });
+  });
+
   it('a publish queued while Redis refuses connections rejects with StoppedBeforeReply on stop', async () => {
     const { queue, proxy } = await proxied(newPrefix(), 500);
     await proxy.refuse();

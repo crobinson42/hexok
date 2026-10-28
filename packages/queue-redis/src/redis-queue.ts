@@ -4,12 +4,13 @@ import {
   Queue,
   type QueueDisposition,
   type QueueHandler,
+  type QueuePublishOptions,
   type QueueStartFrom,
   type QueueSubscribeOptions,
 } from '@hexok/queue';
 import { Adapter } from 'hexok';
 import type { Redis, RedisOptions } from 'ioredis';
-import { decodeJson, encodeJson, openRedis } from './codec.js';
+import { decodeJson, encodeJson, openRedis, untilReady } from './codec.js';
 import { type LogSink, noopSink } from './log-sink.js';
 import {
   maintainStreams,
@@ -54,6 +55,9 @@ interface Subscription {
   blocking: Redis;
   heartbeat: ReturnType<typeof setInterval> | undefined;
   recovery: ReturnType<typeof setInterval> | undefined;
+  backoff:
+    | { timer: ReturnType<typeof setTimeout>; wake: () => void }
+    | undefined;
   done: Promise<void>;
   finish: () => void;
 }
@@ -76,9 +80,25 @@ function isBusyGroup(error: unknown): boolean {
   return error instanceof Error && error.message.includes('BUSYGROUP');
 }
 
-function payloadField(fields: string[]): string | undefined {
+/** Waits for `promise` or `ms`, whichever is first, and clears the timer. */
+async function settleWithin(
+  promise: Promise<unknown>,
+  ms: number,
+): Promise<void> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const deadline = new Promise<void>((resolve) => {
+    timer = setTimeout(resolve, ms);
+  });
+  try {
+    await Promise.race([promise, deadline]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+function fieldOf(fields: string[], name: string): string | undefined {
   for (let i = 0; i < fields.length - 1; i += 2) {
-    if (fields[i] === 'payload') return fields[i + 1];
+    if (fields[i] === name) return fields[i + 1];
   }
   return undefined;
 }
@@ -96,6 +116,9 @@ export class RedisQueue extends Adapter(Queue) {
   readonly #logger: LogSink;
   readonly #quarantine: ParkSink | undefined;
   #commands: Redis | undefined;
+  #starting:
+    | { client: Redis; ready: Promise<void>; abort: AbortController }
+    | undefined;
   #trimTimer: ReturnType<typeof setInterval> | undefined;
   readonly #topics = new Set<string>();
   readonly #subs = new Map<string, Subscription>();
@@ -117,22 +140,53 @@ export class RedisQueue extends Adapter(Queue) {
 
   async start(): Promise<void> {
     if (this.#commands) return;
-    this.#commands = openRedis(this.#redis);
+    if (!this.#starting) {
+      const client = openRedis(this.#redis);
+      client.on('error', (error: Error) => {
+        this.#logger.error(error);
+      });
+      const abort = new AbortController();
+      this.#starting = {
+        client,
+        ready: untilReady(client, abort.signal),
+        abort,
+      };
+    }
+    const { client, ready } = this.#starting;
+    try {
+      await ready;
+    } catch (error) {
+      if (this.#starting?.client === client) this.#starting = undefined;
+      throw error;
+    }
+    if (this.#commands) return;
+    if (this.#starting?.client !== client) {
+      throw new Error('queue: stop() was called before ready');
+    }
+    this.#starting = undefined;
+    this.#commands = client;
     this.#trimTimer = setInterval(() => {
       void this.#trimAll();
     }, 60_000);
   }
 
-  async publish(topic: string, payload: unknown): Promise<string> {
+  async publish(
+    topic: string,
+    payload: unknown,
+    options: QueuePublishOptions = {},
+  ): Promise<string> {
     const commands = this.#requireCommands();
+    const parked = options.sensitive ? { sensitive: true } : payload;
     let encoded: string;
     try {
       encoded = this.#encode(payload);
     } catch (error) {
-      await this.#parkPublish(topic, payload, error);
+      await this.#parkPublish(topic, parked, error);
       throw error;
     }
     const key = this.#key(topic);
+    const fields = ['payload', encoded];
+    if (options.sensitive) fields.push('sensitive', '1');
     let id: string;
     try {
       const written = await commands.xadd(
@@ -141,15 +195,14 @@ export class RedisQueue extends Adapter(Queue) {
         '~',
         this.#maxLen,
         '*',
-        'payload',
-        encoded,
+        ...fields,
       );
       if (typeof written !== 'string') {
         throw new Error('queue: XADD did not return an id');
       }
       id = written;
     } catch (error) {
-      await this.#parkPublish(topic, payload, error);
+      await this.#parkPublish(topic, parked, error);
       throw error instanceof Error ? error : new Error('queue: XADD failed');
     }
     this.#topics.add(topic);
@@ -196,6 +249,7 @@ export class RedisQueue extends Adapter(Queue) {
       blocking,
       heartbeat: undefined,
       recovery: undefined,
+      backoff: undefined,
       done,
       finish,
     };
@@ -241,6 +295,12 @@ export class RedisQueue extends Adapter(Queue) {
   }
 
   override async stop(): Promise<void> {
+    const starting = this.#starting;
+    this.#starting = undefined;
+    if (starting) {
+      starting.abort.abort(new Error('queue: stop() was called before ready'));
+      starting.client.disconnect();
+    }
     const idleSubs: Subscription[] = [];
     for (const sub of this.#subs.values()) {
       sub.aborted = true;
@@ -254,12 +314,10 @@ export class RedisQueue extends Adapter(Queue) {
     for (const sub of this.#subs.values()) {
       sub.blocking.disconnect();
     }
-    await Promise.race([
+    await settleWithin(
       Promise.all([...this.#subs.values()].map((sub) => sub.done)),
-      new Promise<void>((resolve) => {
-        setTimeout(resolve, this.#visibilityMs);
-      }),
-    ]);
+      this.#visibilityMs,
+    );
     for (const sub of idleSubs) {
       if (sub.inflight.size === 0) await this.#releaseConsumer(sub);
     }
@@ -299,14 +357,7 @@ export class RedisQueue extends Adapter(Queue) {
     sub.aborted = true;
     this.#clearSubTimers(sub);
     sub.blocking.disconnect();
-    if (wait) {
-      await Promise.race([
-        sub.done,
-        new Promise<void>((resolve) => {
-          setTimeout(resolve, this.#visibilityMs);
-        }),
-      ]);
-    }
+    if (wait) await settleWithin(sub.done, this.#visibilityMs);
     await sub.blocking.quit().catch(() => undefined);
   }
 
@@ -315,6 +366,11 @@ export class RedisQueue extends Adapter(Queue) {
     if (sub.recovery) clearInterval(sub.recovery);
     sub.heartbeat = undefined;
     sub.recovery = undefined;
+    if (sub.backoff) {
+      clearTimeout(sub.backoff.timer);
+      sub.backoff.wake();
+      sub.backoff = undefined;
+    }
   }
 
   async #readLoop(sub: Subscription): Promise<void> {
@@ -357,7 +413,7 @@ export class RedisQueue extends Adapter(Queue) {
               : new Error('queue: XREADGROUP failed'),
             { topic: sub.topic },
           );
-          await this.#backoff(failures);
+          await this.#backoff(sub, failures);
           continue;
         }
         if (!rows) continue;
@@ -418,7 +474,7 @@ export class RedisQueue extends Adapter(Queue) {
     id: string,
     fields: string[],
   ): Promise<void> {
-    const raw = payloadField(fields);
+    const raw = fieldOf(fields, 'payload');
     if (raw === undefined) {
       await this.#parkDeliver(sub, id, {
         payload: { reason: 'missing-payload' },
@@ -431,13 +487,18 @@ export class RedisQueue extends Adapter(Queue) {
     try {
       payload = this.#decode(raw);
     } catch (error) {
+      // A decode error can quote the raw payload. A sensitive entry gets a generic one.
+      const sensitive = fieldOf(fields, 'sensitive') === '1';
+      const generic = new Error('queue: decode failed');
       this.#logger.error(
-        error instanceof Error ? error : new Error('queue: decode failed'),
+        !sensitive && error instanceof Error ? error : generic,
         { topic: sub.topic, id },
       );
       await this.#parkDeliver(sub, id, {
-        payload: { reason: 'decode-failed', raw },
-        error: parkedError(error),
+        payload: sensitive
+          ? { reason: 'decode-failed', sensitive: true }
+          : { reason: 'decode-failed', raw },
+        error: parkedError(sensitive ? generic : error),
       });
       await this.#settle(sub, id, 'drop', false);
       return;
@@ -580,11 +641,14 @@ export class RedisQueue extends Adapter(Queue) {
     }
   }
 
-  async #backoff(failures: number): Promise<void> {
+  /** Sleeps before the next read. `#clearSubTimers` wakes it early. */
+  async #backoff(sub: Subscription, failures: number): Promise<void> {
+    if (sub.aborted) return;
     const ms = Math.min(1000 * failures, 5000);
     await new Promise<void>((resolve) => {
-      setTimeout(resolve, ms);
+      sub.backoff = { timer: setTimeout(resolve, ms), wake: resolve };
     });
+    sub.backoff = undefined;
   }
 
   #key(topic: string): string {

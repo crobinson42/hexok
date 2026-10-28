@@ -1,3 +1,4 @@
+import { spawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { Redis } from 'ioredis';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -14,6 +15,50 @@ async function waitFor(check: () => Promise<boolean> | boolean): Promise<void> {
     await new Promise((resolve) => setTimeout(resolve, 20));
   }
   throw new Error('timed out waiting for queue condition');
+}
+
+/** Runs `src` in a child Node. Node strips the types. The hook maps `./x.js` to `./x.ts`. */
+const childPrelude = `
+import { registerHooks } from 'node:module';
+registerHooks({
+  resolve(specifier, context, next) {
+    try {
+      return next(specifier, context);
+    } catch (error) {
+      if (!specifier.startsWith('.') || !specifier.endsWith('.js')) throw error;
+      return next(specifier.slice(0, -3) + '.ts', context);
+    }
+  },
+});
+const { RedisQueue } = await import(process.env.QUEUE_ENTRY);
+`;
+
+async function runChild(
+  body: string,
+  env: Record<string, string>,
+): Promise<{ code: number | null; ms: number; stderr: string }> {
+  const started = Date.now();
+  const child = spawn(
+    process.execPath,
+    ['--no-warnings', '--input-type=module', '-e', childPrelude + body],
+    {
+      env: {
+        ...process.env,
+        QUEUE_ENTRY: new URL('./redis-queue.ts', import.meta.url).href,
+        ...env,
+      },
+      stdio: ['ignore', 'ignore', 'pipe'],
+      timeout: 6000,
+    },
+  );
+  let stderr = '';
+  child.stderr.on('data', (chunk: Buffer) => {
+    stderr += chunk.toString();
+  });
+  const code = await new Promise<number | null>((resolve) => {
+    child.on('exit', resolve);
+  });
+  return { code, ms: Date.now() - started, stderr };
 }
 
 describe.skipIf(!process.env.REDIS_URL)('RedisQueue integration', () => {
@@ -132,6 +177,54 @@ describe.skipIf(!process.env.REDIS_URL)('RedisQueue integration', () => {
       'bad encode',
     );
     expect(await probe.xlen(`${prefix}encoded`)).toBe(before);
+  });
+
+  it('lets the process exit after stop with the default visibility', async () => {
+    const result = await runChild(
+      `
+const queue = new RedisQueue({
+  redis: process.env.REDIS_URL,
+  keyPrefix: process.env.KEY_PREFIX,
+});
+await queue.start();
+await queue.publish('jobs', { n: 1 });
+await queue.stop();
+`,
+      { KEY_PREFIX: `hexok:queue:it:${randomUUID()}:` },
+    );
+    expect(result.stderr).toBe('');
+    expect(result.code).toBe(0);
+    expect(result.ms).toBeLessThan(3000);
+  });
+
+  it('marks a sensitive entry and still delivers its payload', async () => {
+    const url = process.env.REDIS_URL ?? '';
+    const probe = new Redis(url);
+    open.push(probe);
+    const prefix = `hexok:queue:it:${randomUUID()}:`;
+    const queue = new RedisQueue({
+      redis: url,
+      keyPrefix: prefix,
+      blockMs: 200,
+    });
+    queues.push(queue);
+    await queue.start();
+    const seen: unknown[] = [];
+    await queue.subscribe('codes', {
+      consumerGroup: 'sms',
+      handler: async (message) => {
+        seen.push(message.payload);
+      },
+    });
+    await queue.publish('codes', { code: '4821' }, { sensitive: true });
+    await queue.publish('codes', { code: 'public' });
+    await waitFor(() => seen.length === 2);
+    expect(seen).toEqual([{ code: '4821' }, { code: 'public' }]);
+    const entries = await probe.xrange(`${prefix}codes`, '-', '+');
+    expect(entries.map(([, fields]) => fields)).toEqual([
+      ['payload', '{"code":"4821"}', 'sensitive', '1'],
+      ['payload', '{"code":"public"}'],
+    ]);
   });
 
   it('removes the local consumer on unsubscribe and leaves the group', async () => {

@@ -1,3 +1,4 @@
+import { EventEmitter } from 'node:events';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { ParkInput } from './park.js';
 
@@ -6,15 +7,29 @@ interface Pending {
   reject: (error: unknown) => void;
 }
 
-class FakeRedis {
+class FakeRedis extends EventEmitter {
   static instances: FakeRedis[] = [];
+  static initialStatus = 'ready';
   readonly calls: unknown[][] = [];
   pending: Pending | undefined;
   failTrim = false;
   failXadd = false;
+  status = FakeRedis.initialStatus;
 
   constructor(..._args: unknown[]) {
+    super();
     FakeRedis.instances.push(this);
+  }
+
+  connect(): Promise<void> {
+    this.calls.push(['connect']);
+    this.status = 'connecting';
+    return Promise.resolve();
+  }
+
+  becomeReady(): void {
+    this.status = 'ready';
+    this.emit('ready');
   }
 
   xadd(...args: unknown[]): Promise<string> {
@@ -84,6 +99,7 @@ class FakeRedis {
 
   disconnect(): void {
     this.calls.push(['disconnect']);
+    this.status = 'end';
     this.pending?.reject(new Error('Connection is closed'));
   }
 
@@ -292,6 +308,100 @@ describe('RedisQueue commands', () => {
     });
     expect(dropped).toHaveLength(0);
     await plain.stop();
+  });
+
+  it('marks a sensitive entry and parks no payload when its publish fails', async () => {
+    const parked: ParkInput[] = [];
+    const logs = recordingLogger();
+    const queue = new RedisQueue({
+      redis: 'redis://127.0.0.1:6379',
+      logger: logs.sink,
+      quarantine: {
+        async park(input: ParkInput) {
+          parked.push(input);
+          return { id: 'q1' };
+        },
+      },
+    });
+    await queue.start();
+    const commands = FakeRedis.instances[0];
+    if (!commands) throw new Error('missing commands client');
+    const secret = { code: 'SECRET-4821' };
+    await queue.publish('codes', secret, { sensitive: true });
+    expect(commands.calls.find((call) => call[0] === 'xadd')).toEqual([
+      'xadd',
+      'hexok:queue:codes',
+      'MAXLEN',
+      '~',
+      10000,
+      '*',
+      'payload',
+      JSON.stringify(secret),
+      'sensitive',
+      '1',
+    ]);
+
+    commands.failXadd = true;
+    await expect(
+      queue.publish('codes', secret, { sensitive: true }),
+    ).rejects.toThrow('xadd failed');
+    expect(parked).toHaveLength(1);
+    expect(parked[0]).toMatchObject({
+      operation: 'publish',
+      subject: 'codes',
+      payload: { sensitive: true },
+    });
+    expect(textOf(parked)).not.toContain('SECRET-4821');
+    expect(textOf(logs.calls)).not.toContain('SECRET-4821');
+    await queue.stop();
+  });
+
+  it('parks and logs nothing from an undecodable sensitive entry', async () => {
+    vi.useFakeTimers();
+    const parked: ParkInput[] = [];
+    const logs = recordingLogger();
+    const queue = new RedisQueue({
+      redis: 'redis://127.0.0.1:6379',
+      logger: logs.sink,
+      quarantine: {
+        async park(input: ParkInput) {
+          parked.push(input);
+          return { id: 'q1' };
+        },
+      },
+    });
+    await queue.start();
+    await queue.subscribe('codes', {
+      consumerGroup: 'sms',
+      handler: async () => 'ack',
+    });
+    FakeRedis.instances[1]?.pending?.resolve([
+      [
+        'hexok:queue:codes',
+        [['5-1', ['payload', 'code=SECRET-4821', 'sensitive', '1']]],
+      ],
+    ]);
+    await vi.waitFor(() => {
+      expect(parked).toHaveLength(1);
+    });
+    expect(parked[0]).toMatchObject({
+      operation: 'deliver',
+      subject: 'codes:5-1',
+      payload: { reason: 'decode-failed', sensitive: true },
+      error: { name: 'Error', message: 'queue: decode failed' },
+    });
+    expect(parked[0]?.payload).toEqual({
+      reason: 'decode-failed',
+      sensitive: true,
+    });
+    expect(logs.calls).toContainEqual([
+      'error',
+      new Error('queue: decode failed'),
+      { topic: 'codes', id: '5-1' },
+    ]);
+    expect(textOf(parked)).not.toContain('SECRET-4821');
+    expect(textOf(logs.calls)).not.toContain('SECRET-4821');
+    await queue.stop();
   });
 
   it('does not XCLAIM an empty snapshot and places JUSTID after ids', async () => {
@@ -795,6 +905,180 @@ describe('RedisQueue commands', () => {
     );
   });
 });
+
+describe('RedisQueue lifecycle', () => {
+  afterEach(() => {
+    vi.useRealTimers();
+    FakeRedis.instances.length = 0;
+    FakeRedis.initialStatus = 'ready';
+  });
+
+  it('start waits for the commands client to be ready', async () => {
+    FakeRedis.initialStatus = 'connecting';
+    const queue = new RedisQueue({ redis: 'redis://127.0.0.1:6379' });
+    const starting = queue.start();
+    const settled = settledFlag(starting);
+    await new Promise((resolve) => setImmediate(resolve));
+    expect(settled()).toBe(false);
+    const commands = FakeRedis.instances[0];
+    if (!commands) throw new Error('missing commands client');
+    expect(commands.calls).toEqual([]);
+    commands.becomeReady();
+    await starting;
+    await expect(queue.publish('jobs', { n: 1 })).resolves.toBe('1-0');
+    await queue.stop();
+  });
+
+  it('start connects a lazy client', async () => {
+    FakeRedis.initialStatus = 'wait';
+    const queue = new RedisQueue({
+      redis: { host: '127.0.0.1', lazyConnect: true },
+    });
+    const starting = queue.start();
+    const commands = FakeRedis.instances[0];
+    if (!commands) throw new Error('missing commands client');
+    expect(commands.calls).toEqual([['connect']]);
+    commands.becomeReady();
+    await starting;
+    await queue.stop();
+  });
+
+  it('start logs an error before ready and keeps waiting', async () => {
+    FakeRedis.initialStatus = 'connecting';
+    const logged: unknown[] = [];
+    const queue = new RedisQueue({
+      redis: 'redis://127.0.0.1:6379',
+      logger: { ...silentLogger, error: (message) => logged.push(message) },
+    });
+    const starting = queue.start();
+    const settled = settledFlag(starting);
+    const commands = FakeRedis.instances[0];
+    if (!commands) throw new Error('missing commands client');
+    const refused = new Error('connect ECONNREFUSED 127.0.0.1:6379');
+    commands.emit('error', refused);
+    await new Promise((resolve) => setImmediate(resolve));
+    expect(settled()).toBe(false);
+    expect(logged).toEqual([refused]);
+    commands.becomeReady();
+    await starting;
+    const later = new Error('read ECONNRESET');
+    commands.emit('error', later);
+    expect(logged).toEqual([refused, later]);
+    await queue.stop();
+  });
+
+  it('stop rejects a pending start and closes its client', async () => {
+    FakeRedis.initialStatus = 'connecting';
+    const queue = new RedisQueue({ redis: 'redis://127.0.0.1:6379' });
+    const starting = queue.start();
+    const commands = FakeRedis.instances[0];
+    if (!commands) throw new Error('missing commands client');
+    await queue.stop();
+    await expect(starting).rejects.toThrow('stop() was called before ready');
+    expect(commands.calls).toContainEqual(['disconnect']);
+    expect(commands.listenerCount('ready')).toBe(0);
+  });
+
+  it('start rejects on end and can start again', async () => {
+    FakeRedis.initialStatus = 'connecting';
+    const queue = new RedisQueue({ redis: 'redis://127.0.0.1:6379' });
+    const starting = queue.start();
+    const first = FakeRedis.instances[0];
+    if (!first) throw new Error('missing commands client');
+    first.emit('end');
+    await expect(starting).rejects.toThrow('ended before ready');
+    expect(first.listenerCount('end')).toBe(0);
+    await expect(queue.publish('jobs', 1)).rejects.toThrow(
+      'queue: start() was not called',
+    );
+
+    FakeRedis.initialStatus = 'ready';
+    await queue.start();
+    expect(FakeRedis.instances).toHaveLength(2);
+    expect(FakeRedis.instances[1]?.listenerCount('error')).toBe(1);
+    await expect(queue.publish('jobs', 1)).resolves.toBe('1-0');
+    await queue.stop();
+  });
+
+  it('stop leaves no timer behind without subscriptions', async () => {
+    vi.useFakeTimers();
+    const queue = new RedisQueue({ redis: 'redis://127.0.0.1:6379' });
+    await queue.start();
+    await queue.publish('jobs', { n: 1 });
+    await queue.stop();
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it('stop leaves no timer behind with a subscription', async () => {
+    vi.useFakeTimers();
+    const queue = new RedisQueue({ redis: 'redis://127.0.0.1:6379' });
+    await queue.start();
+    await queue.subscribe('jobs', {
+      consumerGroup: 'billing',
+      handler: async () => 'ack',
+    });
+    await queue.stop();
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it('stop cancels a read loop backoff', async () => {
+    vi.useFakeTimers();
+    const queue = new RedisQueue({ redis: 'redis://127.0.0.1:6379' });
+    await queue.start();
+    await queue.subscribe('jobs', {
+      consumerGroup: 'billing',
+      handler: async () => 'ack',
+    });
+    const blocking = FakeRedis.instances[1];
+    if (!blocking) throw new Error('missing blocking client');
+    blocking.pending?.reject(new Error('LOADING'));
+    await vi.advanceTimersByTimeAsync(0);
+    const stopping = queue.stop().then(() => 'stopped');
+    const waited = vi.advanceTimersByTimeAsync(500).then(() => 'waiting');
+    await expect(Promise.race([stopping, waited])).resolves.toBe('stopped');
+    expect(vi.getTimerCount()).toBe(0);
+  });
+});
+
+function recordingLogger() {
+  const calls: unknown[][] = [];
+  const sink = {
+    debug: (...args: unknown[]) => calls.push(['debug', ...args]),
+    info: (...args: unknown[]) => calls.push(['info', ...args]),
+    warn: (...args: unknown[]) => calls.push(['warn', ...args]),
+    error: (...args: unknown[]) => calls.push(['error', ...args]),
+  };
+  return { calls, sink };
+}
+
+/** `JSON.stringify(new Error())` is `{}`, so errors expand to their message and stack. */
+function textOf(value: unknown): string {
+  return JSON.stringify(value, (_key, item: unknown) =>
+    item instanceof Error
+      ? { name: item.name, message: item.message, stack: item.stack }
+      : item,
+  );
+}
+
+const silentLogger = {
+  debug() {},
+  info() {},
+  warn() {},
+  error() {},
+};
+
+function settledFlag(promise: Promise<unknown>): () => boolean {
+  let settled = false;
+  promise.then(
+    () => {
+      settled = true;
+    },
+    () => {
+      settled = true;
+    },
+  );
+  return () => settled;
+}
 
 function callsOf(
   commands: { calls: unknown[][] } | undefined,

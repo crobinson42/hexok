@@ -1,5 +1,13 @@
 # hexok
 
+## 2.2.1
+
+### Patch Changes
+
+- [#9](https://github.com/crobinson42/hexok/pull/9) [`45b26c8`](https://github.com/crobinson42/hexok/commit/45b26c83eb06e4b1320f294e6f8fc430d432c992) Thanks [@crobinson42](https://github.com/crobinson42)! - The event catalog skill reference describes the app template with one catalog, `DomainEvents`. The template no longer has client events.
+
+- [#9](https://github.com/crobinson42/hexok/pull/9) [`ef5febe`](https://github.com/crobinson42/hexok/commit/ef5febef9cdb084c346ac4f34953f72cd030592d) Thanks [@crobinson42](https://github.com/crobinson42)! - The skill's adapter reference covers the Redis adapters' shared lifecycle: await `start()` and `subscribe()`, stop in reverse order, and match on the lifecycle error `code`. It explains `state`, each error code and when to retry, `startTimeoutMs`, and how every adapter's `stopTimeoutMs` must fit in the Kubernetes grace period.
+
 ## 2.2.0
 
 ### Minor Changes

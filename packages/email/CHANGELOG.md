@@ -1,5 +1,16 @@
 # @hexok/email
 
+## 0.2.0
+
+### Minor Changes
+
+- [#9](https://github.com/crobinson42/hexok/pull/9) [`a2ef655`](https://github.com/crobinson42/hexok/commit/a2ef655e3219fc91ae783f8f662107359e1bc253) Thanks [@crobinson42](https://github.com/crobinson42)! - `SmsMessage` and `EmailMessage` take `sensitive`. `Queue.publish` takes `{ sensitive }` as a third argument. An adapter keeps a sensitive message's content out of quarantine and logs.
+
+### Patch Changes
+
+- Updated dependencies [[`45b26c8`](https://github.com/crobinson42/hexok/commit/45b26c83eb06e4b1320f294e6f8fc430d432c992), [`ef5febe`](https://github.com/crobinson42/hexok/commit/ef5febef9cdb084c346ac4f34953f72cd030592d)]:
+  - hexok@2.2.1
+
 ## 0.1.0
 
 ### Minor Changes

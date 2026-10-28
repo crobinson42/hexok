@@ -1,6 +1,6 @@
 {
   "name": "@hexok/email-mailgun",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Mailgun adapter for the hexok EmailSender port.",
   "type": "module",
   "license": "MIT",
@@ -41,8 +41,8 @@
     "clean": "rm -rf dist *.tsbuildinfo"
   },
   "dependencies": {
-    "@hexok/email": "^0.1.0",
-    "hexok": "^2.2.0"
+    "@hexok/email": "^0.2.0",
+    "hexok": "^2.2.1"
   },
   "peerDependencies": {
     "mailgun.js": "^12"

@@ -52,6 +52,8 @@ A tick whose `SET` was still in flight does not run `onTick`, and its lock is re
 
 ### Errors
 
+`register()` and `start()` throw or reject with a `LifecycleError`. Branch on `code`, not on the message. Message text can change in any release.
+
 | Code | When |
 | --- | --- |
 | `NotStarted` | `register()` before `start()`, or after a failed start. |
@@ -67,42 +69,44 @@ Import `LifecycleError` from this package, or match on `error.code`. Matching on
 
 ### Logs
 
+Every log carries `adapter: 'schedule'`. `connection` is `commands`, and appears only on a connection error or a failed Redis command. `job` is the job name. `code` is the `LifecycleError` code.
+
 | Event | Level | Fields |
 | --- | --- | --- |
-| A connection error, such as a failed connection attempt | `error` | `adapter`, `connection` |
-| The connection ends after `start()` | `error` | `adapter`, `connection` |
+| A connection error, or a connection that ended after `start()` | `error` | `adapter`, `connection` |
 | A lock `SET`, renew, or release failed | `error` | `adapter`, `connection`, `job` |
-| `stop()` cut a lock command short | `warn` | `adapter`, `connection`, `job`, `code: 'StoppedBeforeReply'` |
+| A lock command that `stop()` cut short | `warn` | `adapter`, `connection`, `job`, `code` |
+| The lock `SET` was answered too late to run the tick, so the lock was released | `warn` | `adapter`, `connection`, `job` |
 | The lock was not renewed in time, so the tick was aborted | `warn` | `adapter`, `connection`, `job` |
 | The lock was gone at renew, so the tick was aborted | `warn` | `adapter`, `job` |
-| `onTick` threw | `error` | `adapter`, `job` |
-| A tick ran longer than `warnAfterMs` | `warn` | `adapter`, `job`, `warnAfterMs` |
+| `onTick` throws | `error` | `adapter`, `job` |
+| A tick runs longer than `warnAfterMs` | `warn` | `adapter`, `job`, `warnAfterMs` |
 | Another process holds the lock, so the tick was skipped | `debug` | `adapter`, `job` |
-| `QUIT` failed during `stop()` | `error` | `adapter`, `connection` |
-| The stop cleanup threw | `error` | `adapter` |
+| `QUIT` fails during `stop()` | `error` | `adapter`, `connection` |
+| The stop cleanup throws | `error` | `adapter` |
 
-A logged `LifecycleError` carries its `code`. `NotStarted`, `Starting`, and `Stopped` from background work are not logged. Errors thrown to the caller, from `start()` and `register()`, are not logged.
+`NotStarted`, `Starting`, and `Stopped` from background work are not logged. Errors thrown to the caller, from `start()` and `register()`, are not logged.
 
 ## When Redis is down
 
 - During `start()`, ioredis retries, and each failed attempt is logged. Without `startTimeoutMs`, `start()` waits until Redis returns.
-- During an outage, a tick's `SET` waits in the ioredis offline queue. The tick runs if it gets the lock once Redis answers.
+- If `retryStrategy` gives up after `start()`, the connection ends and is logged at `error`. `state` stays `ready` and commands fail until `stop()` and `start()`. The default `retryStrategy` never gives up.
+- During an outage, a tick's `SET` waits in the ioredis offline queue. When Redis answers, the tick runs only if it got the lock and the lock is still valid with its margin. A `SET` answered later than the TTL less the margin releases the lock and skips the tick.
 - A tick whose renews do not answer aborts before its lock can expire, because another process may take the lock then.
 - `stop()` resolves within `stopTimeoutMs` while Redis refuses connections, stops answering, or the client is reconnecting. Commands still pending are logged with `StoppedBeforeReply`.
 - A lock that `stop()` could not release expires after `lockTtlSec`. That is safe. The lock only holds other processes off this job until then. It never makes a job run twice, and the next tick after it expires runs normally.
 - A Redis that accepts connections and does not answer never replies to `QUIT`. `QUIT` gets only the time left, and then the connection is dropped.
 - After `stop()` resolves, ioredis can keep the process alive for `disconnectTimeout`, 2 seconds by default, while it closes the socket. Set `disconnectTimeout` in the redis options to let the process exit sooner.
-- If `retryStrategy` gives up after `start()`, the connection ends and is logged at `error`. `state` stays `ready` and commands fail until `stop()` and `start()`. The default `retryStrategy` never gives up.
 
 ## Configuration
 
 | Option | Default | Why |
 | --- | --- | --- |
 | `redis` | required | A URL or ioredis options. `maxRetriesPerRequest` is `null` unless you set it, so a command waits through an outage instead of failing after 20 retries. |
+| `stopTimeoutMs` | `5000` | Releasing locks takes a few round trips, and a lock left behind expires after `lockTtlSec` anyway. Most of it goes to running ticks, so they can finish while they hold their locks. |
+| `startTimeoutMs` | unset | Unset, `start()` waits for Redis. Set it under an orchestrator, so `start()` rejects with `StartTimeout` and the process restarts. |
 | `keyPrefix` | `hexok:sched:` | The lock key is `<keyPrefix>lock:<name>`. Processes that share a prefix share locks. |
 | `lockTtlSec` | `60` | How long a lock outlives a process that dies or loses Redis. Shorter frees a lock sooner. Longer tolerates longer stalls. |
-| `stopTimeoutMs` | `5000` | Releasing locks takes a few round trips, and a lock left behind expires after `lockTtlSec` anyway. Most of it goes to running ticks, so they can finish while they hold their locks. |
-| `startTimeoutMs` | unset | `start()` rejects with `StartTimeout` when Redis is not ready in time. |
 | `logger` | no-op | A structural `LogSink`. `@hexok/logger` and `console` fit it. |
 | `scheduler` | `CronPackageScheduler` | Runs the cron. Its `stop()` resolves once a running tick has finished. Pass your own to fire ticks by hand in tests. |
 

@@ -386,6 +386,29 @@ describe('RedisBroadcast', () => {
   });
 
   describe('stop', () => {
+    afterEach(() => {
+      vi.useRealTimers();
+    });
+
+    it('disconnects a ready client whose QUIT does not settle', async () => {
+      const bus = new RedisBroadcast({ redis: 'redis://127.0.0.1:6379' });
+      await bus.start();
+      await bus.subscribe(news, () => {});
+      const [publisher, subscriber] = lastPair();
+      vi.useFakeTimers();
+      for (const redis of [publisher, subscriber]) redis.stalled = true;
+      const stopped = track(bus.stop());
+      await vi.advanceTimersByTimeAsync(999);
+      expect(stopped.settled).toBe(false);
+      await vi.advanceTimersByTimeAsync(1);
+      expect(stopped).toEqual({ settled: true, error: undefined });
+      for (const redis of [publisher, subscriber]) {
+        expect(redis.quits).toBe(1);
+        expect(redis.disconnects).toBe(1);
+      }
+      expect(vi.getTimerCount()).toBe(0);
+    });
+
     it('disconnects clients that are not ready without waiting on Redis', async () => {
       const bus = new RedisBroadcast({ redis: 'redis://127.0.0.1:6379' });
       await bus.start();
@@ -413,9 +436,9 @@ describe('RedisBroadcast', () => {
       await bus.subscribe(news, () => {});
       const [publisher, subscriber] = lastPair();
       subscriber.hangUnsubscribe = true;
-      const stopped = track(bus.stop());
-      await tick();
-      expect(stopped).toEqual({ settled: true, error: undefined });
+      vi.useFakeTimers();
+      await bus.stop();
+      expect(vi.getTimerCount()).toBe(0);
       expect(subscriber.commands).toEqual([
         ['subscribe', 'hexok:broadcast:news'],
       ]);

@@ -466,24 +466,39 @@ describe('RedisBroadcast', () => {
       expect(vi.getTimerCount()).toBe(0);
     });
 
-    it('rejects an UNSUBSCRIBE still pending on stop with StoppedBeforeReply', async () => {
+    it('resolves an unsubscribe whose UNSUBSCRIBE is still pending on stop', async () => {
       const bus = new RedisBroadcast({ redis: 'redis://127.0.0.1:6379' });
       await bus.start();
       const handler = () => {};
       await bus.subscribe(news, handler);
       const [, subscriber] = lastPair();
       subscriber.hangUnsubscribe = true;
-      const unsubscribing = bus
-        .unsubscribe(news, handler)
-        .catch((error: unknown) => error);
+      const unsubscribing = track(bus.unsubscribe(news, handler));
       vi.useFakeTimers();
       const stopped = bus.stop();
       await vi.advanceTimersByTimeAsync(1000);
       await stopped;
-      expect(await unsubscribing).toMatchObject({
-        code: 'StoppedBeforeReply',
-      });
+      expect(unsubscribing).toEqual({ settled: true, error: undefined });
       expect(vi.getTimerCount()).toBe(0);
+    });
+
+    it('resolves an unsubscribe that races a subscribe rejected with Starting', async () => {
+      FakeRedis.readyOnOpen = false;
+      try {
+        const bus = new RedisBroadcast({ redis: 'redis://127.0.0.1:6379' });
+        const starting = bus.start();
+        const handler = () => {};
+        const subscribing = bus
+          .subscribe(news, handler)
+          .catch((error: unknown) => error);
+        await expect(bus.unsubscribe(news, handler)).resolves.toBeUndefined();
+        expect(await subscribing).toMatchObject({ code: 'Starting' });
+        for (const redis of lastPair()) redis.emit('ready');
+        await starting;
+        await bus.stop();
+      } finally {
+        FakeRedis.readyOnOpen = true;
+      }
     });
   });
 
@@ -545,7 +560,7 @@ describe('RedisBroadcast', () => {
       }
     });
 
-    it('logs a handler failure with adapter, connection, and channel', async () => {
+    it('logs a handler failure with adapter and channel, and no connection', async () => {
       const errors: unknown[] = [];
       const bus = new RedisBroadcast({
         redis: 'redis://127.0.0.1:6379',
@@ -561,11 +576,31 @@ describe('RedisBroadcast', () => {
         expect(errors).toEqual([
           {
             message: failure,
-            fields: {
-              adapter: 'broadcast',
-              connection: 'subscriber',
-              channel: 'news',
-            },
+            fields: { adapter: 'broadcast', channel: 'news' },
+          },
+        ]);
+      });
+      await bus.stop();
+    });
+
+    it('logs a decode failure with adapter and channel, and no connection', async () => {
+      const errors: unknown[] = [];
+      const failure = new Error('bad decode');
+      const bus = new RedisBroadcast({
+        redis: 'redis://127.0.0.1:6379',
+        decode: () => {
+          throw failure;
+        },
+        logger: sink(errors),
+      });
+      await bus.start();
+      await bus.subscribe(news, () => {});
+      await bus.publish(news, { a: 1 });
+      await vi.waitFor(() => {
+        expect(errors).toEqual([
+          {
+            message: failure,
+            fields: { adapter: 'broadcast', channel: 'news' },
           },
         ]);
       });

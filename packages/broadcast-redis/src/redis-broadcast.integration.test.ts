@@ -170,6 +170,26 @@ describe.skipIf(!process.env.REDIS_URL)('RedisBroadcast integration', () => {
     });
   });
 
+  it('resolves an unsubscribe queued during an outage on stop', async () => {
+    const proxy = await proxied();
+    const bus = new RedisBroadcast({
+      redis: { host: proxy.host, port: proxy.port },
+      channelPrefix: prefix(),
+      stopTimeoutMs: 200,
+    });
+    buses.push(bus);
+    await bus.start();
+    const news = channel('news');
+    const handler = () => {};
+    await bus.subscribe(news, handler);
+    await proxy.refuse();
+    proxy.drop();
+    await delay(100);
+    const unsubscribing = bus.unsubscribe(news, handler);
+    await within(bus.stop(), 1000);
+    await expect(within(unsubscribing, 1000)).resolves.toBeUndefined();
+  });
+
   async function startSubscribePublish(
     redis: string | RedisOptions,
   ): Promise<void> {

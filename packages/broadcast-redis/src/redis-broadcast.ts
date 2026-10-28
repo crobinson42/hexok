@@ -5,7 +5,7 @@ import {
 } from '@hexok/broadcast';
 import { Adapter } from 'hexok';
 import type { Redis, RedisOptions } from 'ioredis';
-import { decodeJson, encodeJson, openRedis } from './codec.js';
+import { decodeJson, encodeJson, openRedis, waitForReady } from './codec.js';
 import { type LogSink, noopSink } from './log-sink.js';
 
 export interface RedisBroadcastConfig {
@@ -24,6 +24,7 @@ export class RedisBroadcast extends Adapter(Broadcast) {
   readonly #logger: LogSink;
   #publisher: Redis | undefined;
   #subscriber: Redis | undefined;
+  #started: Promise<void> | undefined;
   readonly #handlers = new Map<string, Set<BroadcastHandler<unknown>>>();
 
   constructor(config: RedisBroadcastConfig) {
@@ -35,13 +36,9 @@ export class RedisBroadcast extends Adapter(Broadcast) {
     this.#logger = config.logger ?? noopSink;
   }
 
-  async start(): Promise<void> {
-    if (this.#publisher) return;
-    this.#publisher = openRedis(this.#redis);
-    this.#subscriber = openRedis(this.#redis);
-    this.#subscriber.on('message', (wire: string, raw: string) => {
-      void this.#deliver(wire, raw);
-    });
+  start(): Promise<void> {
+    this.#started ??= this.#open();
+    return this.#started;
   }
 
   async publish<Name extends string, T>(
@@ -97,6 +94,37 @@ export class RedisBroadcast extends Adapter(Broadcast) {
     });
     this.#subscriber = undefined;
     this.#publisher = undefined;
+    this.#started = undefined;
+  }
+
+  async #open(): Promise<void> {
+    const publisher = this.#connect('publisher');
+    const subscriber = this.#connect('subscriber');
+    this.#publisher = publisher;
+    this.#subscriber = subscriber;
+    subscriber.on('message', (wire: string, raw: string) => {
+      void this.#deliver(wire, raw);
+    });
+    try {
+      await Promise.all([waitForReady(publisher), waitForReady(subscriber)]);
+    } catch (error) {
+      publisher.disconnect();
+      subscriber.disconnect();
+      if (this.#publisher === publisher) {
+        this.#publisher = undefined;
+        this.#subscriber = undefined;
+        this.#started = undefined;
+      }
+      throw error;
+    }
+  }
+
+  #connect(connection: 'publisher' | 'subscriber'): Redis {
+    const redis = openRedis(this.#redis);
+    redis.on('error', (error: Error) => {
+      this.#logger.error(error, { connection });
+    });
+    return redis;
   }
 
   async #deliver(wire: string, raw: string): Promise<void> {

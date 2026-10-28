@@ -12,4 +12,6 @@ await bus.start();
 await bus.publish(news, { ok: true });
 ```
 
-`publish` awaits `PUBLISH`. An encode failure rejects and does not publish. Delivery is at-most-once. A handler throw or rejection is logged and siblings still run. `publish` does not wait on handlers. The default channel prefix is `hexok:broadcast:` because Redis pub/sub ignores the DB index. `stop()` closes the subscriber and the publisher. This package does not depend on `@hexok/logger`.
+`start()` opens a publisher and a subscriber connection and resolves once both are ready. It calls `connect()` on a client created with `lazyConnect`. A connection error is logged to `logger` and `start()` keeps waiting, so an app can boot before Redis is up. `start()` rejects only when a connection ends, which means ioredis stopped reconnecting. It then closes both connections, and a later `start()` tries again.
+
+A message published after `subscribe` resolves is delivered while the subscriber stays connected. `publish` awaits `PUBLISH`. An encode failure rejects and does not publish. Delivery is at-most-once. A handler throw or rejection is logged and siblings still run. `publish` does not wait on handlers. The default channel prefix is `hexok:broadcast:` because Redis pub/sub ignores the DB index. `stop()` closes the subscriber and the publisher. This package does not depend on `@hexok/logger`.

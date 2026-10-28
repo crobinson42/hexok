@@ -233,7 +233,10 @@ describe('RedisBroadcast', () => {
       await tick();
       expect(state.settled).toBe(false);
       expect(errors).toEqual([
-        { message: refused, fields: { connection: 'subscriber' } },
+        {
+          message: refused,
+          fields: { adapter: 'broadcast', connection: 'subscriber' },
+        },
       ]);
       publisher.emit('ready');
       subscriber.emit('ready');
@@ -248,12 +251,12 @@ describe('RedisBroadcast', () => {
       const first = bus.start();
       const [publisher, subscriber] = lastPair();
       publisher.emit('end');
-      await expect(first).rejects.toThrow('ended before ready');
+      await expect(first).rejects.toMatchObject({ code: 'EndedBeforeReady' });
       expect(publisher.disconnects).toBe(1);
       expect(subscriber.disconnects).toBe(1);
-      await expect(bus.publish(news, { a: 1 })).rejects.toThrow(
-        'start() was not called',
-      );
+      await expect(bus.publish(news, { a: 1 })).rejects.toMatchObject({
+        code: 'NotStarted',
+      });
 
       FakeRedis.readyOnOpen = true;
       await bus.start();
@@ -272,7 +275,7 @@ describe('RedisBroadcast', () => {
       await bus.stop();
       await tick();
       expect(state.settled).toBe(true);
-      expect(String(state.error)).toContain('stop() was called before ready');
+      expect(state.error).toMatchObject({ code: 'Stopped' });
       for (const redis of [publisher, subscriber]) {
         expect(redis.disconnects).toBe(1);
         expect(redis.listeners.get('ready')?.size ?? 0).toBe(0);
@@ -288,11 +291,11 @@ describe('RedisBroadcast', () => {
       publisher.emit('ready');
       subscriber.emit('ready');
       const stopped = bus.stop();
-      await expect(started).rejects.toThrow('stop() was called before ready');
+      await expect(started).rejects.toMatchObject({ code: 'Stopped' });
       await stopped;
-      await expect(bus.publish(news, { a: 1 })).rejects.toThrow(
-        'start() was not called',
-      );
+      await expect(bus.publish(news, { a: 1 })).rejects.toMatchObject({
+        code: 'Stopped',
+      });
     });
 
     it('connects a client created with lazyConnect', async () => {
@@ -444,6 +447,129 @@ describe('RedisBroadcast', () => {
       ]);
       expect(publisher.quits).toBe(1);
       expect(subscriber.quits).toBe(1);
+    });
+
+    it('bounds stop by stopTimeoutMs', async () => {
+      const bus = new RedisBroadcast({
+        redis: 'redis://127.0.0.1:6379',
+        stopTimeoutMs: 300,
+      });
+      await bus.start();
+      const [publisher, subscriber] = lastPair();
+      vi.useFakeTimers();
+      for (const redis of [publisher, subscriber]) redis.stalled = true;
+      const stopped = track(bus.stop());
+      await vi.advanceTimersByTimeAsync(299);
+      expect(stopped.settled).toBe(false);
+      await vi.advanceTimersByTimeAsync(1);
+      expect(stopped).toEqual({ settled: true, error: undefined });
+      expect(vi.getTimerCount()).toBe(0);
+    });
+
+    it('rejects an UNSUBSCRIBE still pending on stop with StoppedBeforeReply', async () => {
+      const bus = new RedisBroadcast({ redis: 'redis://127.0.0.1:6379' });
+      await bus.start();
+      const handler = () => {};
+      await bus.subscribe(news, handler);
+      const [, subscriber] = lastPair();
+      subscriber.hangUnsubscribe = true;
+      const unsubscribing = bus
+        .unsubscribe(news, handler)
+        .catch((error: unknown) => error);
+      vi.useFakeTimers();
+      const stopped = bus.stop();
+      await vi.advanceTimersByTimeAsync(1000);
+      await stopped;
+      expect(await unsubscribing).toMatchObject({
+        code: 'StoppedBeforeReply',
+      });
+      expect(vi.getTimerCount()).toBe(0);
+    });
+  });
+
+  describe('lifecycle', () => {
+    it('reports state from idle through stopped', async () => {
+      FakeRedis.readyOnOpen = false;
+      try {
+        const bus = new RedisBroadcast({ redis: 'redis://127.0.0.1:6379' });
+        expect(bus.state).toBe('idle');
+        const starting = bus.start();
+        expect(bus.state).toBe('starting');
+        const [publisher, subscriber] = lastPair();
+        publisher.emit('ready');
+        subscriber.emit('ready');
+        await starting;
+        expect(bus.state).toBe('ready');
+        vi.useFakeTimers();
+        for (const redis of [publisher, subscriber]) redis.stalled = true;
+        const stopped = bus.stop();
+        expect(bus.state).toBe('stopping');
+        await vi.advanceTimersByTimeAsync(1000);
+        await stopped;
+        expect(bus.state).toBe('stopped');
+      } finally {
+        vi.useRealTimers();
+        FakeRedis.readyOnOpen = true;
+      }
+    });
+
+    it('rejects subscribe with the lifecycle code outside start and stop', async () => {
+      const bus = new RedisBroadcast({ redis: 'redis://127.0.0.1:6379' });
+      await expect(bus.subscribe(news, () => {})).rejects.toMatchObject({
+        code: 'NotStarted',
+      });
+      await bus.start();
+      await bus.stop();
+      await expect(bus.subscribe(news, () => {})).rejects.toMatchObject({
+        code: 'Stopped',
+      });
+      expect(lastPair()[1].commands).toEqual([]);
+    });
+
+    it('rejects publish and subscribe with Starting while start is pending', async () => {
+      FakeRedis.readyOnOpen = false;
+      try {
+        const bus = new RedisBroadcast({ redis: 'redis://127.0.0.1:6379' });
+        const starting = bus.start();
+        await expect(bus.publish(news, { a: 1 })).rejects.toMatchObject({
+          code: 'Starting',
+        });
+        await expect(bus.subscribe(news, () => {})).rejects.toMatchObject({
+          code: 'Starting',
+        });
+        for (const redis of lastPair()) redis.emit('ready');
+        await starting;
+        await bus.stop();
+      } finally {
+        FakeRedis.readyOnOpen = true;
+      }
+    });
+
+    it('logs a handler failure with adapter, connection, and channel', async () => {
+      const errors: unknown[] = [];
+      const bus = new RedisBroadcast({
+        redis: 'redis://127.0.0.1:6379',
+        logger: sink(errors),
+      });
+      await bus.start();
+      const failure = new Error('handler');
+      await bus.subscribe(news, () => {
+        throw failure;
+      });
+      await bus.publish(news, { a: 1 });
+      await vi.waitFor(() => {
+        expect(errors).toEqual([
+          {
+            message: failure,
+            fields: {
+              adapter: 'broadcast',
+              connection: 'subscriber',
+              channel: 'news',
+            },
+          },
+        ]);
+      });
+      await bus.stop();
     });
   });
 });

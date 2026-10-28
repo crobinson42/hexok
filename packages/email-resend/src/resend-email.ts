@@ -216,12 +216,13 @@ export class ResendEmailSender extends Adapter(EmailSender) {
         },
         {
           ...retryOptions(this.#retry),
-          onFailedAttempt: (error) => {
-            if (error instanceof AbortError) return;
+          onFailedAttempt: ({ error, attemptNumber }) => {
+            // p-retry 8 rejects with the original error. Park reads attemptNumber from it.
+            Object.assign(error, { attemptNumber });
             this.#logger.warn('email: resend attempt failed', {
               idempotencyKey: message.idempotencyKey,
               status: statusOf(error),
-              attempt: error.attemptNumber,
+              attempt: attemptNumber,
             });
           },
         },

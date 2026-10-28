@@ -40,13 +40,14 @@ jobs:
 
       - name: Create release pull request or publish to npm
         id: changesets
-        uses: changesets/action@v1
+        uses: changesets/action@v2
         with:
-          version: npm run version-packages
-          publish: bash scripts/ci-publish.sh
-          title: Version Packages
-          commit: "chore: version packages"
-          createGithubReleases: true
+          version-script: npm run version-packages
+          publish-script: bash scripts/ci-publish.sh
+          pr-title: Version Packages
+          commit-message: "chore: version packages"
+          create-github-releases: true
+          github-token: ${{ secrets.GITHUB_TOKEN }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           NPM_TOKEN: ${{ secrets.NPM_TOKEN }}

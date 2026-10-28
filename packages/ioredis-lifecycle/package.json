@@ -44,10 +44,10 @@
     "hexok": "^2.2.1"
   },
   "peerDependencies": {
-    "ioredis": "^5"
+    "ioredis": "^6"
   },
   "devDependencies": {
     "@hexok/test-redis": "0.0.0",
-    "ioredis": "^5"
+    "ioredis": "^6"
   }
 }

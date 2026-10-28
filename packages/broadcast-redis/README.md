@@ -1,6 +1,6 @@
 # @hexok/broadcast-redis
 
-Redis pub/sub adapter for `@hexok/broadcast`. Install with `npm i @hexok/broadcast-redis`. This package does not depend on `@hexok/logger`.
+Redis pub/sub adapter for `@hexok/broadcast`. Install with `npm i @hexok/broadcast-redis`. Requires `ioredis` 6. Connections negotiate RESP3 and keep v5 reply shapes. This package does not depend on `@hexok/logger`.
 
 ```ts
 import { channel } from '@hexok/broadcast';

@@ -1,6 +1,6 @@
 # @hexok/queue-redis
 
-Redis Streams adapter for `@hexok/queue`. Install with `npm i @hexok/queue-redis`. Requires Redis 6.2 or newer and `ioredis` 5. Pass a structural logger and quarantine sink. This package does not depend on `@hexok/logger` or `@hexok/quarantine`.
+Redis Streams adapter for `@hexok/queue`. Install with `npm i @hexok/queue-redis`. Requires Redis 6.2 or newer and `ioredis` 6. Connections negotiate RESP3 and keep v5 reply shapes. Pass a structural logger and quarantine sink. This package does not depend on `@hexok/logger` or `@hexok/quarantine`.
 
 ```ts
 import { RedisQueue } from '@hexok/queue-redis';

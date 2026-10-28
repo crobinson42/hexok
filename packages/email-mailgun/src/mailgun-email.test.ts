@@ -1,4 +1,5 @@
 import { EmailError, type EmailMessage } from '@hexok/email';
+import Mailgun from 'mailgun.js';
 import { describe, expect, it } from 'vitest';
 import type { LogSink } from './log-sink.js';
 import { MailgunEmailSender, type MailgunLike } from './mailgun-email.js';
@@ -295,5 +296,13 @@ describe('MailgunEmailSender', () => {
         expect(serialize(logger.calls)).not.toContain(leaked);
       }
     }
+  });
+
+  it('accepts the mailgun.js 14 client without a cast', () => {
+    const sender = new MailgunEmailSender({
+      client: new Mailgun(FormData).client({ username: 'api', key: 'key' }),
+      domain: 'mg.example',
+    });
+    expect(sender).toBeInstanceOf(MailgunEmailSender);
   });
 });

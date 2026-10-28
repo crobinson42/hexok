@@ -44,7 +44,7 @@
     "@hexok/ioredis-lifecycle": "^0.1.0",
     "@hexok/queue": "^0.2.0",
     "hexok": "^2.2.1",
-    "ioredis": "^5"
+    "ioredis": "^6"
   },
   "devDependencies": {
     "@hexok/test-redis": "0.0.0"

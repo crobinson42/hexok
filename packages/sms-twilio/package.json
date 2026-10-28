@@ -45,11 +45,14 @@
     "hexok": "^2.2.1"
   },
   "peerDependencies": {
-    "twilio": "^5"
+    "twilio": "^5 || ^6"
   },
   "peerDependenciesMeta": {
     "twilio": {
       "optional": true
     }
+  },
+  "devDependencies": {
+    "twilio": "^6.2.0"
   }
 }

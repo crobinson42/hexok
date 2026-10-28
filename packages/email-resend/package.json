@@ -22,6 +22,9 @@
   "publishConfig": {
     "access": "public"
   },
+  "engines": {
+    "node": ">=22"
+  },
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",
@@ -43,7 +46,7 @@
   "dependencies": {
     "@hexok/email": "^0.2.0",
     "hexok": "^2.2.1",
-    "p-retry": "^6.2.0"
+    "p-retry": "^8.0.1"
   },
   "peerDependencies": {
     "resend": "^6.10.0"

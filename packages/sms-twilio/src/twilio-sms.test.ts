@@ -1,4 +1,5 @@
 import { SmsError } from '@hexok/sms';
+import twilio from 'twilio';
 import { describe, expect, it } from 'vitest';
 import type { LogSink } from './log-sink.js';
 import type { ParkInput, ParkSink } from './park.js';
@@ -350,5 +351,13 @@ describe('TwilioSmsSender quarantine failures', () => {
       expect(serialize(calls)).not.toContain(destination);
       expect(serialize(calls)).not.toContain(otp);
     }
+  });
+
+  it('accepts the twilio 6 client without a cast', () => {
+    const sender = new TwilioSmsSender({
+      client: twilio('ACxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx', 'token'),
+      from: '+15550001111',
+    });
+    expect(sender).toBeInstanceOf(TwilioSmsSender);
   });
 });

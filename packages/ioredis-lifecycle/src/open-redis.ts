@@ -8,5 +8,9 @@ export function openRedis(redis: string | RedisOptions): Redis {
   if (typeof redis === 'string') {
     return new Redis(redis, { maxRetriesPerRequest: null });
   }
-  return new Redis({ maxRetriesPerRequest: null, ...redis });
+  // ioredis 6's constructor drops `| undefined` from `replyMapping`. A spread of `RedisOptions` still has it.
+  return new Redis({
+    maxRetriesPerRequest: null,
+    ...redis,
+  } as RedisOptions & { replyMapping?: 'legacy' | 'resp3' });
 }

@@ -45,11 +45,14 @@
     "hexok": "^2.2.1"
   },
   "peerDependencies": {
-    "mailgun.js": "^12"
+    "mailgun.js": "^12 || ^13 || ^14"
   },
   "peerDependenciesMeta": {
     "mailgun.js": {
       "optional": true
     }
+  },
+  "devDependencies": {
+    "mailgun.js": "^14.1.0"
   }
 }

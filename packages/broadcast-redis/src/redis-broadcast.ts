@@ -16,9 +16,26 @@ export interface RedisBroadcastConfig {
   readonly logger?: LogSink;
 }
 
+const QUIT_TIMEOUT_MS = 1000;
+
 interface Listening {
   readonly handlers: Set<BroadcastHandler<unknown>>;
   readonly subscribed: Promise<void>;
+}
+
+async function settledWithin(
+  promise: Promise<unknown>,
+  ms: number,
+): Promise<boolean> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const deadline = new Promise<boolean>((resolve) => {
+    timer = setTimeout(() => resolve(false), ms);
+  });
+  try {
+    return await Promise.race([promise.then(() => true), deadline]);
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 export class RedisBroadcast extends Adapter(Broadcast) {
@@ -95,22 +112,22 @@ export class RedisBroadcast extends Adapter(Broadcast) {
       subscriber?.disconnect();
       return;
     }
-    await this.#close(subscriber);
-    await this.#close(publisher);
+    await Promise.all([this.#close(subscriber), this.#close(publisher)]);
   }
 
-  // A client that is not ready would queue QUIT until Redis comes back.
+  // A client that is not ready would queue QUIT until Redis comes back. A
+  // ready client gets QUIT_TIMEOUT_MS before it is disconnected.
   async #close(client: Redis | undefined): Promise<void> {
     if (!client) return;
-    if (client.status !== 'ready') {
-      client.disconnect();
-      return;
+    if (client.status === 'ready') {
+      const quit = client.quit().catch((error: unknown) => {
+        this.#logger.error(
+          error instanceof Error ? error : new Error('broadcast: quit failed'),
+        );
+      });
+      if (await settledWithin(quit, QUIT_TIMEOUT_MS)) return;
     }
-    await client.quit().catch((error: unknown) => {
-      this.#logger.error(
-        error instanceof Error ? error : new Error('broadcast: quit failed'),
-      );
-    });
+    client.disconnect();
   }
 
   async #open(): Promise<void> {

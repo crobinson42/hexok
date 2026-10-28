@@ -1,3 +1,4 @@
+import { EventEmitter } from 'node:events';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { ParkInput } from './park.js';
 
@@ -6,15 +7,29 @@ interface Pending {
   reject: (error: unknown) => void;
 }
 
-class FakeRedis {
+class FakeRedis extends EventEmitter {
   static instances: FakeRedis[] = [];
+  static initialStatus = 'ready';
   readonly calls: unknown[][] = [];
   pending: Pending | undefined;
   failTrim = false;
   failXadd = false;
+  status = FakeRedis.initialStatus;
 
   constructor(..._args: unknown[]) {
+    super();
     FakeRedis.instances.push(this);
+  }
+
+  connect(): Promise<void> {
+    this.calls.push(['connect']);
+    this.status = 'connecting';
+    return Promise.resolve();
+  }
+
+  becomeReady(): void {
+    this.status = 'ready';
+    this.emit('ready');
   }
 
   xadd(...args: unknown[]): Promise<string> {
@@ -84,6 +99,7 @@ class FakeRedis {
 
   disconnect(): void {
     this.calls.push(['disconnect']);
+    this.status = 'end';
     this.pending?.reject(new Error('Connection is closed'));
   }
 
@@ -800,6 +816,94 @@ describe('RedisQueue lifecycle', () => {
   afterEach(() => {
     vi.useRealTimers();
     FakeRedis.instances.length = 0;
+    FakeRedis.initialStatus = 'ready';
+  });
+
+  it('start waits for the commands client to be ready', async () => {
+    FakeRedis.initialStatus = 'connecting';
+    const queue = new RedisQueue({ redis: 'redis://127.0.0.1:6379' });
+    const starting = queue.start();
+    const settled = settledFlag(starting);
+    await new Promise((resolve) => setImmediate(resolve));
+    expect(settled()).toBe(false);
+    const commands = FakeRedis.instances[0];
+    if (!commands) throw new Error('missing commands client');
+    expect(commands.calls).toEqual([]);
+    commands.becomeReady();
+    await starting;
+    await expect(queue.publish('jobs', { n: 1 })).resolves.toBe('1-0');
+    await queue.stop();
+  });
+
+  it('start connects a lazy client', async () => {
+    FakeRedis.initialStatus = 'wait';
+    const queue = new RedisQueue({
+      redis: { host: '127.0.0.1', lazyConnect: true },
+    });
+    const starting = queue.start();
+    const commands = FakeRedis.instances[0];
+    if (!commands) throw new Error('missing commands client');
+    expect(commands.calls).toEqual([['connect']]);
+    commands.becomeReady();
+    await starting;
+    await queue.stop();
+  });
+
+  it('start logs an error before ready and keeps waiting', async () => {
+    FakeRedis.initialStatus = 'connecting';
+    const logged: unknown[] = [];
+    const queue = new RedisQueue({
+      redis: 'redis://127.0.0.1:6379',
+      logger: { ...silentLogger, error: (message) => logged.push(message) },
+    });
+    const starting = queue.start();
+    const settled = settledFlag(starting);
+    const commands = FakeRedis.instances[0];
+    if (!commands) throw new Error('missing commands client');
+    const refused = new Error('connect ECONNREFUSED 127.0.0.1:6379');
+    commands.emit('error', refused);
+    await new Promise((resolve) => setImmediate(resolve));
+    expect(settled()).toBe(false);
+    expect(logged).toEqual([refused]);
+    commands.becomeReady();
+    await starting;
+    const later = new Error('read ECONNRESET');
+    commands.emit('error', later);
+    expect(logged).toEqual([refused, later]);
+    await queue.stop();
+  });
+
+  it('stop rejects a pending start and closes its client', async () => {
+    FakeRedis.initialStatus = 'connecting';
+    const queue = new RedisQueue({ redis: 'redis://127.0.0.1:6379' });
+    const starting = queue.start();
+    const commands = FakeRedis.instances[0];
+    if (!commands) throw new Error('missing commands client');
+    await queue.stop();
+    await expect(starting).rejects.toThrow('stop() was called before ready');
+    expect(commands.calls).toContainEqual(['disconnect']);
+    expect(commands.listenerCount('ready')).toBe(0);
+  });
+
+  it('start rejects on end and can start again', async () => {
+    FakeRedis.initialStatus = 'connecting';
+    const queue = new RedisQueue({ redis: 'redis://127.0.0.1:6379' });
+    const starting = queue.start();
+    const first = FakeRedis.instances[0];
+    if (!first) throw new Error('missing commands client');
+    first.emit('end');
+    await expect(starting).rejects.toThrow('ended before ready');
+    expect(first.listenerCount('end')).toBe(0);
+    await expect(queue.publish('jobs', 1)).rejects.toThrow(
+      'queue: start() was not called',
+    );
+
+    FakeRedis.initialStatus = 'ready';
+    await queue.start();
+    expect(FakeRedis.instances).toHaveLength(2);
+    expect(FakeRedis.instances[1]?.listenerCount('error')).toBe(1);
+    await expect(queue.publish('jobs', 1)).resolves.toBe('1-0');
+    await queue.stop();
   });
 
   it('stop leaves no timer behind without subscriptions', async () => {
@@ -841,6 +945,26 @@ describe('RedisQueue lifecycle', () => {
     expect(vi.getTimerCount()).toBe(0);
   });
 });
+
+const silentLogger = {
+  debug() {},
+  info() {},
+  warn() {},
+  error() {},
+};
+
+function settledFlag(promise: Promise<unknown>): () => boolean {
+  let settled = false;
+  promise.then(
+    () => {
+      settled = true;
+    },
+    () => {
+      settled = true;
+    },
+  );
+  return () => settled;
+}
 
 function callsOf(
   commands: { calls: unknown[][] } | undefined,

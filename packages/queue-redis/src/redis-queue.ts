@@ -9,7 +9,7 @@ import {
 } from '@hexok/queue';
 import { Adapter } from 'hexok';
 import type { Redis, RedisOptions } from 'ioredis';
-import { decodeJson, encodeJson, openRedis } from './codec.js';
+import { decodeJson, encodeJson, openRedis, untilReady } from './codec.js';
 import { type LogSink, noopSink } from './log-sink.js';
 import {
   maintainStreams,
@@ -115,6 +115,9 @@ export class RedisQueue extends Adapter(Queue) {
   readonly #logger: LogSink;
   readonly #quarantine: ParkSink | undefined;
   #commands: Redis | undefined;
+  #starting:
+    | { client: Redis; ready: Promise<void>; abort: AbortController }
+    | undefined;
   #trimTimer: ReturnType<typeof setInterval> | undefined;
   readonly #topics = new Set<string>();
   readonly #subs = new Map<string, Subscription>();
@@ -136,7 +139,31 @@ export class RedisQueue extends Adapter(Queue) {
 
   async start(): Promise<void> {
     if (this.#commands) return;
-    this.#commands = openRedis(this.#redis);
+    if (!this.#starting) {
+      const client = openRedis(this.#redis);
+      client.on('error', (error: Error) => {
+        this.#logger.error(error);
+      });
+      const abort = new AbortController();
+      this.#starting = {
+        client,
+        ready: untilReady(client, abort.signal),
+        abort,
+      };
+    }
+    const { client, ready } = this.#starting;
+    try {
+      await ready;
+    } catch (error) {
+      if (this.#starting?.client === client) this.#starting = undefined;
+      throw error;
+    }
+    if (this.#commands) return;
+    if (this.#starting?.client !== client) {
+      throw new Error('queue: stop() was called before ready');
+    }
+    this.#starting = undefined;
+    this.#commands = client;
     this.#trimTimer = setInterval(() => {
       void this.#trimAll();
     }, 60_000);
@@ -261,6 +288,12 @@ export class RedisQueue extends Adapter(Queue) {
   }
 
   override async stop(): Promise<void> {
+    const starting = this.#starting;
+    this.#starting = undefined;
+    if (starting) {
+      starting.abort.abort(new Error('queue: stop() was called before ready'));
+      starting.client.disconnect();
+    }
     const idleSubs: Subscription[] = [];
     for (const sub of this.#subs.values()) {
       sub.aborted = true;

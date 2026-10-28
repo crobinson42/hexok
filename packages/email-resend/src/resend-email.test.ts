@@ -94,6 +94,30 @@ describe('ResendEmailSender', () => {
     expect(options).toEqual({ idempotencyKey: 'key-1' });
   });
 
+  it('sends attachments', async () => {
+    let payload: unknown;
+    const client: ResendLike = {
+      emails: {
+        async send(body) {
+          payload = body;
+          return { data: { id: 'email_3' }, error: null };
+        },
+      },
+    };
+    const data = Buffer.from('report');
+    await new ResendEmailSender({ client }).send({
+      ...base,
+      attachments: [
+        { data, filename: 'report.txt', contentType: 'text/plain' },
+      ],
+    });
+    expect(payload).toMatchObject({
+      attachments: [
+        { content: data, filename: 'report.txt', contentType: 'text/plain' },
+      ],
+    });
+  });
+
   it('parks an exhausted outage once and does not park a rejection', async () => {
     const parked: ParkInput[] = [];
     const quarantine = {

@@ -23,8 +23,9 @@ interface ResendEmailFields {
   replyTo?: string;
   subject: string;
   attachments?: Array<{
-    content: string;
+    content: string | Buffer;
     filename: string;
+    contentType?: string;
   }>;
   tags?: Array<{ name: string; value: string }>;
 }
@@ -164,6 +165,13 @@ export class ResendEmailSender extends Adapter(EmailSender) {
     if (cc) payload.cc = cc;
     if (bcc) payload.bcc = bcc;
     if (message.replyTo) payload.replyTo = message.replyTo;
+    if (message.attachments) {
+      payload.attachments = message.attachments.map((attachment) => ({
+        content: attachment.data,
+        filename: attachment.filename,
+        contentType: attachment.contentType,
+      }));
+    }
     if (message.tags) {
       payload.tags = Object.entries(message.tags).map(([name, value]) => ({
         name,

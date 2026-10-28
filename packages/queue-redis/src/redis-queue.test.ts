@@ -57,6 +57,7 @@ class FakeRedis extends EventEmitter {
 
   xadd(...args: unknown[]): Promise<string> {
     this.calls.push(['xadd', ...args]);
+    if (this.#stuck()) return new Promise(() => {});
     if (this.failXadd) {
       // ioredis puts the command and its args on a ReplyError.
       const error = Object.assign(new Error('xadd failed'), {
@@ -1651,6 +1652,46 @@ describe('RedisQueue reliability', () => {
     await vi.advanceTimersByTimeAsync(0);
     expect(finished).toBe(true);
     expect(queue.state).toBe('stopped');
+  });
+
+  it('parks a publish cut short by stop with outcome unknown', async () => {
+    vi.useFakeTimers();
+    const parked: ParkInput[] = [];
+    const quarantine = {
+      async park(input: ParkInput) {
+        parked.push(input);
+        return { id: 'q1' };
+      },
+    };
+    const queue = new RedisQueue({
+      redis: 'redis://127.0.0.1:6379',
+      stopTimeoutMs: 500,
+      quarantine,
+    });
+    await queue.start();
+    const commands = FakeRedis.instances[0];
+    if (!commands) throw new Error('missing commands client');
+    commands.failXadd = true;
+    await queue.publish('jobs', { n: 0 }).catch(() => undefined);
+    commands.failXadd = false;
+    commands.stalled = true;
+    const publishing = queue.publish('jobs', { n: 1 });
+    publishing.catch(() => undefined);
+    const stopping = queue.stop();
+    await vi.advanceTimersByTimeAsync(500);
+    await stopping;
+    await expect(publishing).rejects.toMatchObject({
+      code: 'StoppedBeforeReply',
+    });
+    expect(parked.map((item) => item.context)).toEqual([
+      { adapter: 'redis' },
+      { adapter: 'redis', outcome: 'unknown' },
+    ]);
+    expect(parked[1]).toMatchObject({
+      operation: 'publish',
+      payload: { n: 1 },
+      error: { code: 'StoppedBeforeReply' },
+    });
   });
 
   it('a recovery tick is skipped while the previous one runs', async () => {

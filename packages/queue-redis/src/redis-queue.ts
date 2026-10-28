@@ -530,7 +530,11 @@ export class RedisQueue extends Adapter(Queue) {
           options.sensitive ? scrubbed(error, options.generic) : error,
         ),
         occurredAt: new Date(),
-        context: { adapter: 'redis' },
+        // Redis may have stored it, so a replay from quarantine can duplicate it.
+        context:
+          LifecycleError.is(error) && error.code === 'StoppedBeforeReply'
+            ? { adapter: 'redis', outcome: 'unknown' }
+            : { adapter: 'redis' },
       },
       this.#logger,
     );

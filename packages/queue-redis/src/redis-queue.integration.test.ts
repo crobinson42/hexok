@@ -227,6 +227,51 @@ await queue.stop();
     ]);
   });
 
+  it('throws a sensitive XADD failure without the command args', async () => {
+    const url = process.env.REDIS_URL ?? '';
+    const probe = new Redis(url);
+    open.push(probe);
+    const prefix = `hexok:queue:it:${randomUUID()}:`;
+    await probe.set(`${prefix}codes`, 'not a stream');
+    const queue = new RedisQueue({ redis: url, keyPrefix: prefix });
+    queues.push(queue);
+    await queue.start();
+    const secret = { code: 'SECRET-9999' };
+
+    const sensitive = await queue
+      .publish('codes', secret, { sensitive: true })
+      .catch((error: unknown) => error);
+    expect(sensitive).toBeInstanceOf(Error);
+    expect(sensitive).toMatchObject({
+      name: 'ReplyError',
+      message: expect.stringMatching(/^WRONGTYPE/),
+    });
+    expect(sensitive).not.toHaveProperty('command');
+    expect(JSON.stringify(sensitive)).not.toContain('SECRET-9999');
+
+    const plain = await queue
+      .publish('codes', secret)
+      .catch((error: unknown) => error);
+    expect(plain).toHaveProperty('command.name', 'xadd');
+    await probe.del(`${prefix}codes`);
+  });
+
+  it('lets the process exit soon after stop when Redis is unreachable', async () => {
+    const result = await runChild(
+      `
+const queue = new RedisQueue({ redis: 'redis://127.0.0.1:1' });
+const starting = queue.start().catch(() => undefined);
+await new Promise((resolve) => setTimeout(resolve, 300));
+await queue.stop();
+await starting;
+`,
+      {},
+    );
+    expect(result.stderr).toBe('');
+    expect(result.code).toBe(0);
+    expect(result.ms).toBeLessThan(1500);
+  });
+
   it('removes the local consumer on unsubscribe and leaves the group', async () => {
     const url = process.env.REDIS_URL ?? '';
     const probe = new Redis(url);

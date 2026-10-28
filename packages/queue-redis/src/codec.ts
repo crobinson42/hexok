@@ -8,11 +8,15 @@ export function decodeJson(raw: string): unknown {
   return JSON.parse(raw);
 }
 
+/**
+ * ioredis waits `disconnectTimeout` for a closed socket that never emits `close` again, which holds the process after `stop()`.
+ * A live socket closes well within 100ms.
+ */
+const defaults = { maxRetriesPerRequest: null, disconnectTimeout: 100 };
+
 export function openRedis(redis: string | RedisOptions): Redis {
-  if (typeof redis === 'string') {
-    return new Redis(redis, { maxRetriesPerRequest: null });
-  }
-  return new Redis({ maxRetriesPerRequest: null, ...redis });
+  if (typeof redis === 'string') return new Redis(redis, { ...defaults });
+  return new Redis({ ...defaults, ...redis });
 }
 
 /** Resolves on `ready`. Rejects on `end` or `signal`. Connects a `lazyConnect` client. ioredis retries through `error`. */

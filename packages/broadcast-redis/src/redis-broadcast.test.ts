@@ -14,6 +14,9 @@ class FakeRedis {
   status: string;
   connects = 0;
   disconnects = 0;
+  quits = 0;
+  stalled = false;
+  failUnsubscribe = false;
 
   constructor(...args: unknown[]) {
     const options = args.at(-1) as { lazyConnect?: boolean } | undefined;
@@ -93,9 +96,13 @@ class FakeRedis {
 
   async unsubscribe(...channels: string[]): Promise<void> {
     this.commands.push(['unsubscribe', ...channels]);
+    if (this.stalled) await new Promise(() => {});
+    if (this.failUnsubscribe) throw new Error('unsubscribe failed');
   }
 
   async quit(): Promise<string> {
+    this.quits += 1;
+    if (this.stalled) await new Promise(() => {});
     return 'OK';
   }
 }
@@ -377,6 +384,40 @@ describe('RedisBroadcast', () => {
       await bus.publish(news, { n: 2 });
       expect(seen).toEqual([{ n: 2 }]);
       await bus.stop();
+    });
+  });
+
+  describe('stop', () => {
+    it('disconnects clients that are not ready without waiting on Redis', async () => {
+      const bus = new RedisBroadcast({ redis: 'redis://127.0.0.1:6379' });
+      await bus.start();
+      await bus.subscribe(news, () => {});
+      const [publisher, subscriber] = lastPair();
+      for (const redis of [publisher, subscriber]) {
+        redis.status = 'reconnecting';
+        redis.stalled = true;
+      }
+      const stopped = track(bus.stop());
+      await tick();
+      expect(stopped).toEqual({ settled: true, error: undefined });
+      expect(subscriber.commands).toEqual([
+        ['subscribe', 'hexok:broadcast:news'],
+      ]);
+      for (const redis of [publisher, subscriber]) {
+        expect(redis.disconnects).toBe(1);
+        expect(redis.quits).toBe(0);
+      }
+    });
+
+    it('closes both clients when UNSUBSCRIBE rejects', async () => {
+      const bus = new RedisBroadcast({ redis: 'redis://127.0.0.1:6379' });
+      await bus.start();
+      await bus.subscribe(news, () => {});
+      const [publisher, subscriber] = lastPair();
+      subscriber.failUnsubscribe = true;
+      await expect(bus.stop()).rejects.toThrow('unsubscribe failed');
+      expect(publisher.quits).toBe(1);
+      expect(subscriber.quits).toBe(1);
     });
   });
 });

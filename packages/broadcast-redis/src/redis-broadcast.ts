@@ -96,17 +96,26 @@ export class RedisBroadcast extends Adapter(Broadcast) {
       subscriber?.disconnect();
       return;
     }
-    if (subscriber && channels.length > 0) {
-      await subscriber.unsubscribe(
-        ...channels.map((channel) => this.#wire(channel)),
-      );
+    try {
+      if (subscriber?.status === 'ready' && channels.length > 0) {
+        await subscriber.unsubscribe(
+          ...channels.map((channel) => this.#wire(channel)),
+        );
+      }
+    } finally {
+      await this.#close(subscriber);
+      await this.#close(publisher);
     }
-    await subscriber?.quit().catch((error: unknown) => {
-      this.#logger.error(
-        error instanceof Error ? error : new Error('broadcast: quit failed'),
-      );
-    });
-    await publisher?.quit().catch((error: unknown) => {
+  }
+
+  // A client that is not ready would queue QUIT until Redis comes back.
+  async #close(client: Redis | undefined): Promise<void> {
+    if (!client) return;
+    if (client.status !== 'ready') {
+      client.disconnect();
+      return;
+    }
+    await client.quit().catch((error: unknown) => {
       this.#logger.error(
         error instanceof Error ? error : new Error('broadcast: quit failed'),
       );

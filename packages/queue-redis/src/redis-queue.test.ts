@@ -1,6 +1,7 @@
 import { EventEmitter } from 'node:events';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { ParkInput } from './park.js';
+import { releaseConsumer, releaseConsumerScript } from './release-consumer.js';
 
 interface Pending {
   resolve: (value: unknown) => void;
@@ -109,6 +110,17 @@ class FakeRedis extends EventEmitter {
     return Promise.resolve(reply);
   }
 
+  /** Runs the consumer release script with this fake's own XPENDING and DELCONSUMER, as Redis would. */
+  async eval(script: unknown, ...args: unknown[]): Promise<unknown> {
+    this.calls.push(['eval', ...args]);
+    if (script !== releaseConsumerScript) throw new Error('unknown script');
+    const [, key, group, consumer] = args;
+    const owned = await this.xpending(key, group, '-', '+', 1, consumer);
+    if (owned.length > 0) return 0;
+    await this.xgroup('DELCONSUMER', key, group, consumer);
+    return 1;
+  }
+
   xack(...args: unknown[]): Promise<number> {
     this.calls.push(['xack', ...args]);
     return Promise.resolve(1);
@@ -139,6 +151,7 @@ class FakeRedis extends EventEmitter {
 
   xinfo(...args: unknown[]): Promise<unknown> {
     this.calls.push(['xinfo', ...args]);
+    if (this.#stuck()) return new Promise(() => {});
     const key = String(args[1]);
     const failure = this.failXinfo.get(key);
     if (failure) return Promise.reject(failure);
@@ -169,6 +182,7 @@ class FakeRedis extends EventEmitter {
 vi.mock('ioredis', () => ({ Redis: FakeRedis, default: FakeRedis }));
 
 const { RedisQueue } = await import('./redis-queue.js');
+const { LifecycleError } = await import('./index.js');
 
 describe('RedisQueue commands', () => {
   afterEach(async () => {
@@ -493,7 +507,16 @@ describe('RedisQueue commands', () => {
     const reset = new Error('read ECONNRESET');
     blocking.emit('error', reset);
     expect(logs.calls).toEqual([
-      ['error', reset, { topic: 'jobs', connection: 'blocking' }],
+      [
+        'error',
+        reset,
+        {
+          adapter: 'queue',
+          connection: 'blocking',
+          topic: 'jobs',
+          group: 'billing',
+        },
+      ],
     ]);
     await queue.stop();
   });
@@ -539,7 +562,7 @@ describe('RedisQueue commands', () => {
     expect(logs.calls).toContainEqual([
       'error',
       new Error('queue: decode failed'),
-      { topic: 'codes', id: '5-1' },
+      { adapter: 'queue', topic: 'codes', group: 'sms', id: '5-1' },
     ]);
     expect(textOf(parked)).not.toContain('SECRET-4821');
     expect(textOf(logs.calls)).not.toContain('SECRET-4821');
@@ -624,8 +647,11 @@ describe('RedisQueue commands', () => {
       ['hexok:queue:jobs', [['4-1', ['payload', '{}']]]],
     ]);
     await vi.advanceTimersByTimeAsync(0);
-    await queue.unsubscribe('jobs', { consumerGroup: 'billing' });
+    const unsubscribing = queue.unsubscribe('jobs', {
+      consumerGroup: 'billing',
+    });
     release('ack');
+    await unsubscribing;
     await vi.waitFor(() => {
       const commands = FakeRedis.instances[0];
       expect(commands?.calls.some((call) => call[0] === 'xack')).toBe(false);
@@ -1080,9 +1106,9 @@ describe('RedisQueue commands', () => {
 
   it('maintain before start throws', async () => {
     const queue = new RedisQueue({ redis: 'redis://127.0.0.1:6379' });
-    await expect(queue.maintain()).rejects.toThrow(
-      'queue: start() was not called',
-    );
+    await expect(queue.maintain()).rejects.toMatchObject({
+      code: 'NotStarted',
+    });
   });
 });
 
@@ -1154,7 +1180,7 @@ describe('RedisQueue lifecycle', () => {
     const commands = FakeRedis.instances[0];
     if (!commands) throw new Error('missing commands client');
     await queue.stop();
-    await expect(starting).rejects.toThrow('stop() was called before ready');
+    await expect(starting).rejects.toMatchObject({ code: 'Stopped' });
     expect(commands.calls).toContainEqual(['disconnect']);
     expect(commands.listenerCount('ready')).toBe(0);
   });
@@ -1166,11 +1192,11 @@ describe('RedisQueue lifecycle', () => {
     const first = FakeRedis.instances[0];
     if (!first) throw new Error('missing commands client');
     first.emit('end');
-    await expect(starting).rejects.toThrow('ended before ready');
+    await expect(starting).rejects.toMatchObject({ code: 'EndedBeforeReady' });
     expect(first.listenerCount('end')).toBe(0);
-    await expect(queue.publish('jobs', 1)).rejects.toThrow(
-      'queue: start() was not called',
-    );
+    await expect(queue.publish('jobs', 1)).rejects.toMatchObject({
+      code: 'NotStarted',
+    });
 
     FakeRedis.initialStatus = 'ready';
     await queue.start();
@@ -1245,11 +1271,10 @@ describe('RedisQueue lifecycle', () => {
       handler: async () => 'ack',
     });
     subscribing.catch(() => undefined);
-    await queue.stop();
+    const stopping = queue.stop();
     commands.heldCreate?.resolve(undefined);
-    await expect(subscribing).rejects.toThrow(
-      'queue: stop() was called during subscribe',
-    );
+    await stopping;
+    await expect(subscribing).rejects.toMatchObject({ code: 'Stopped' });
     expect(FakeRedis.instances).toHaveLength(1);
     expect(vi.getTimerCount()).toBe(0);
   });
@@ -1273,7 +1298,18 @@ describe('RedisQueue lifecycle', () => {
     commands.failCreate = wrongType;
     blocking.pending?.reject(new Error('NOGROUP No such key'));
     await vi.advanceTimersByTimeAsync(0);
-    expect(logs.calls).toEqual([['error', wrongType, { topic: 'jobs' }]]);
+    expect(logs.calls).toEqual([
+      [
+        'error',
+        wrongType,
+        {
+          adapter: 'queue',
+          connection: 'commands',
+          topic: 'jobs',
+          group: 'billing',
+        },
+      ],
+    ]);
     const reads = () =>
       blocking.calls.filter((call) => call[0] === 'xreadgroup');
     expect(reads()).toHaveLength(1);
@@ -1301,7 +1337,18 @@ describe('RedisQueue lifecycle', () => {
     commands.failXautoclaim = new Error('NOGROUP No such key');
     commands.failCreate = wrongType;
     await vi.advanceTimersByTimeAsync(500);
-    expect(logs.calls).toEqual([['error', wrongType, { topic: 'jobs' }]]);
+    expect(logs.calls).toEqual([
+      [
+        'error',
+        wrongType,
+        {
+          adapter: 'queue',
+          connection: 'commands',
+          topic: 'jobs',
+          group: 'billing',
+        },
+      ],
+    ]);
     await queue.stop();
   });
 
@@ -1338,7 +1385,11 @@ describe('RedisQueue lifecycle', () => {
   });
 
   it('unsubscribe leaves a newer subscription for the same group alone', async () => {
-    const queue = new RedisQueue({ redis: 'redis://127.0.0.1:6379' });
+    // stop() waits for the held release until stopTimeoutMs.
+    const queue = new RedisQueue({
+      redis: 'redis://127.0.0.1:6379',
+      stopTimeoutMs: 100,
+    });
     const options = {
       consumerGroup: 'billing',
       handler: async () => 'ack' as const,
@@ -1400,6 +1451,255 @@ describe('RedisQueue lifecycle', () => {
     const waited = vi.advanceTimersByTimeAsync(500).then(() => 'waiting');
     await expect(Promise.race([stopping, waited])).resolves.toBe('stopped');
     expect(vi.getTimerCount()).toBe(0);
+  });
+});
+
+describe('RedisQueue reliability', () => {
+  afterEach(() => {
+    vi.useRealTimers();
+    FakeRedis.instances.length = 0;
+    FakeRedis.initialStatus = 'ready';
+  });
+
+  it('state follows start and stop, and a failed start returns to idle', async () => {
+    FakeRedis.initialStatus = 'connecting';
+    const queue = new RedisQueue({ redis: 'redis://127.0.0.1:6379' });
+    expect(queue.state).toBe('idle');
+    const starting = queue.start();
+    expect(queue.state).toBe('starting');
+    FakeRedis.instances[0]?.becomeReady();
+    await starting;
+    expect(queue.state).toBe('ready');
+    const stopping = queue.stop();
+    expect(queue.state).toBe('stopping');
+    await stopping;
+    expect(queue.state).toBe('stopped');
+
+    const failed = queue.start();
+    FakeRedis.instances[1]?.emit('end');
+    await expect(failed).rejects.toMatchObject({ code: 'EndedBeforeReady' });
+    expect(queue.state).toBe('idle');
+  });
+
+  it('a call while start is pending says start has not finished', async () => {
+    FakeRedis.initialStatus = 'connecting';
+    const queue = new RedisQueue({ redis: 'redis://127.0.0.1:6379' });
+    const starting = queue.start();
+    const publishing = queue.publish('jobs', { n: 1 });
+    await expect(publishing).rejects.toBeInstanceOf(LifecycleError);
+    await expect(publishing).rejects.toMatchObject({
+      code: 'Starting',
+      message: expect.stringContaining('start() has not finished'),
+    });
+    await expect(queue.maintain()).rejects.toMatchObject({ code: 'Starting' });
+    FakeRedis.instances[0]?.becomeReady();
+    await starting;
+    await queue.stop();
+  });
+
+  it('subscribe rejects with StoppedBeforeReply when its group create never settles', async () => {
+    vi.useFakeTimers();
+    const queue = new RedisQueue({
+      redis: 'redis://127.0.0.1:6379',
+      stopTimeoutMs: 500,
+    });
+    await queue.start();
+    const commands = FakeRedis.instances[0];
+    if (!commands) throw new Error('missing commands client');
+    commands.holdCreate = true;
+    const subscribing = queue.subscribe('jobs', {
+      consumerGroup: 'billing',
+      handler: async () => 'ack',
+    });
+    subscribing.catch(() => undefined);
+    const stopped = settledFlag(queue.stop());
+    await vi.advanceTimersByTimeAsync(500);
+    expect(stopped()).toBe(true);
+    await expect(subscribing).rejects.toMatchObject({
+      code: 'StoppedBeforeReply',
+    });
+    expect(FakeRedis.instances).toHaveLength(1);
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it('unsubscribe resolves within stopTimeoutMs when Redis stops answering the release', async () => {
+    vi.useFakeTimers();
+    const logs = recordingLogger();
+    const queue = new RedisQueue({
+      redis: 'redis://127.0.0.1:6379',
+      stopTimeoutMs: 500,
+      logger: logs.sink,
+    });
+    await queue.start();
+    // The age trim interval belongs to the started queue.
+    const timers = vi.getTimerCount();
+    await queue.subscribe('jobs', {
+      consumerGroup: 'billing',
+      handler: async () => 'ack',
+    });
+    const commands = FakeRedis.instances[0];
+    if (!commands) throw new Error('missing commands client');
+    commands.stalled = true;
+    const unsubscribed = settledFlag(
+      queue.unsubscribe('jobs', { consumerGroup: 'billing' }),
+    );
+    await vi.advanceTimersByTimeAsync(499);
+    expect(unsubscribed()).toBe(false);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(unsubscribed()).toBe(true);
+    expect(callsOf(commands, 'DELCONSUMER')).toHaveLength(1);
+    expect(logs.calls).toEqual([
+      [
+        'error',
+        expect.objectContaining({
+          message: expect.stringContaining('stopped waiting for Redis'),
+        }),
+        {
+          adapter: 'queue',
+          connection: 'commands',
+          topic: 'jobs',
+          group: 'billing',
+        },
+      ],
+    ]);
+    expect(vi.getTimerCount()).toBe(timers);
+    commands.stalled = false;
+    await queue.stop();
+  });
+
+  it('unsubscribe resolves within stopTimeoutMs while a handler never returns, and keeps the consumer', async () => {
+    vi.useFakeTimers();
+    const queue = new RedisQueue({
+      redis: 'redis://127.0.0.1:6379',
+      stopTimeoutMs: 500,
+    });
+    await queue.start();
+    const timers = vi.getTimerCount();
+    await queue.subscribe('jobs', {
+      consumerGroup: 'billing',
+      handler: () => new Promise(() => {}),
+    });
+    FakeRedis.instances[1]?.pending?.resolve([
+      ['hexok:queue:jobs', [['4-1', ['payload', '{}']]]],
+    ]);
+    await vi.advanceTimersByTimeAsync(0);
+    const unsubscribed = settledFlag(
+      queue.unsubscribe('jobs', { consumerGroup: 'billing' }),
+    );
+    await vi.advanceTimersByTimeAsync(500);
+    expect(unsubscribed()).toBe(true);
+    const commands = FakeRedis.instances[0];
+    expect(commands?.calls.some((call) => call[0] === 'eval')).toBe(false);
+    expect(vi.getTimerCount()).toBe(timers);
+    await queue.stop();
+  });
+
+  it('unsubscribe ends a read on a reconnecting blocking client', async () => {
+    const queue = new RedisQueue({ redis: 'redis://127.0.0.1:6379' });
+    await queue.start();
+    await queue.subscribe('jobs', {
+      consumerGroup: 'billing',
+      handler: async () => 'ack',
+    });
+    const blocking = FakeRedis.instances[1];
+    if (!blocking) throw new Error('missing blocking client');
+    blocking.pending?.resolve(null);
+    blocking.goOffline();
+    await new Promise((resolve) => setImmediate(resolve));
+    await expect(
+      promptly(queue.unsubscribe('jobs', { consumerGroup: 'billing' })),
+    ).resolves.toBe('settled');
+    expect(callsOf(FakeRedis.instances[0], 'DELCONSUMER')).toHaveLength(1);
+    await queue.stop();
+  });
+
+  it('the release script reply means deleted, kept, or a failure', async () => {
+    const replies: unknown[] = [1, 0, 'OK'];
+    const commands = {
+      eval: async () => replies.shift(),
+    } as unknown as import('ioredis').Redis;
+    await expect(releaseConsumer(commands, 'k', 'g', 'c')).resolves.toBe(true);
+    await expect(releaseConsumer(commands, 'k', 'g', 'c')).resolves.toBe(false);
+    await expect(releaseConsumer(commands, 'k', 'g', 'c')).rejects.toThrow(
+      'queue: the consumer release script replied unexpectedly',
+    );
+  });
+
+  it('maintain keeps and does not report a consumer that took a pending entry after XINFO', async () => {
+    const now = Date.now();
+    const old = `${now - 60_000}-0`;
+    const queue = new RedisQueue({ redis: 'redis://127.0.0.1:6379' });
+    await queue.start();
+    const commands = FakeRedis.instances[0];
+    if (!commands) throw new Error('missing commands client');
+    scriptStream(commands, 'hexok:queue:jobs', {
+      length: 1,
+      lastGeneratedId: old,
+      groups: 1,
+      firstId: old,
+    });
+    scriptGroup(commands, 'hexok:queue:jobs', {
+      name: 'billing',
+      consumers: 1,
+      pending: 0,
+      lastDeliveredId: old,
+    });
+    scriptConsumer(commands, 'hexok:queue:jobs', 'billing', {
+      name: 'hexok:1:abc',
+      pending: 0,
+      idle: 50_000,
+    });
+    commands.pendingByConsumer.set('hexok:1:abc', [
+      ['7-1', 'hexok:1:abc', 1, 1],
+    ]);
+
+    const report = await queue.maintain({
+      dryRun: false,
+      topics: ['jobs'],
+      idleConsumerMs: 1000,
+      dropIdleGroups: { idleMs: 1000 },
+      dropIdleStreams: { idleMs: 1000 },
+    });
+
+    expect(commands.calls).toContainEqual([
+      'eval',
+      1,
+      'hexok:queue:jobs',
+      'billing',
+      'hexok:1:abc',
+    ]);
+    expect(callsOf(commands, 'DELCONSUMER')).toHaveLength(0);
+    expect(report.consumersRemoved).toEqual([]);
+    expect(report.groupsDestroyed).toEqual([]);
+    expect(report.streamsDeleted).toEqual([]);
+    expect(callsOf(commands, 'DESTROY')).toHaveLength(0);
+    await queue.stop();
+  });
+
+  it('maintain rejects with StoppedBeforeReply when stop cuts it short, and logs nothing', async () => {
+    vi.useFakeTimers();
+    const logs = recordingLogger();
+    const queue = new RedisQueue({
+      redis: 'redis://127.0.0.1:6379',
+      stopTimeoutMs: 500,
+      logger: logs.sink,
+    });
+    await queue.start();
+    const commands = FakeRedis.instances[0];
+    if (!commands) throw new Error('missing commands client');
+    commands.stalled = true;
+    const maintaining = queue.maintain({ topics: ['jobs', 'other'] });
+    maintaining.catch(() => undefined);
+    const stopping = queue.stop();
+    await vi.advanceTimersByTimeAsync(500);
+    await stopping;
+    await expect(maintaining).rejects.toMatchObject({
+      code: 'StoppedBeforeReply',
+    });
+    expect(commands.calls.filter((call) => call[0] === 'xinfo')).toHaveLength(
+      1,
+    );
+    expect(logs.calls).toEqual([]);
   });
 });
 

@@ -1,5 +1,9 @@
+export {
+  LifecycleError,
+  type LifecycleState,
+  type LogSink,
+} from '@hexok/ioredis-lifecycle';
 export { decodeJson, encodeJson } from './codec.js';
-export type { LogSink } from './log-sink.js';
 export type { ParkSink } from './park.js';
 export {
   RedisQueue,

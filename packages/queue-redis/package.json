@@ -41,8 +41,12 @@
     "clean": "rm -rf dist *.tsbuildinfo"
   },
   "dependencies": {
+    "@hexok/ioredis-lifecycle": "^0.0.0",
     "@hexok/queue": "^0.1.0",
     "hexok": "^2.2.0",
     "ioredis": "^5"
+  },
+  "devDependencies": {
+    "@hexok/test-redis": "0.0.0"
   }
 }

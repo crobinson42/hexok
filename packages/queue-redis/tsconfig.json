@@ -4,7 +4,12 @@
     "rootDir": "src",
     "outDir": "dist"
   },
-  "references": [{ "path": "../hexok" }, { "path": "../queue" }],
+  "references": [
+    { "path": "../hexok" },
+    { "path": "../queue" },
+    { "path": "../ioredis-lifecycle" },
+    { "path": "../test-redis" }
+  ],
   "include": ["src"],
   "exclude": ["src/**/*.test.ts"]
 }

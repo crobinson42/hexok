@@ -1,4 +1,4 @@
-import type { LogSink } from './log-sink.js';
+import type { LogSink } from '@hexok/ioredis-lifecycle';
 
 /** Structurally `Quarantine.park`. This package does not import `@hexok/quarantine`. */
 export interface ParkedError {
@@ -56,6 +56,7 @@ export async function courtesyPark(
   } catch (error) {
     logger.error(
       error instanceof Error ? error : new Error('quarantine: park failed'),
+      { adapter: 'queue' },
     );
   }
 }

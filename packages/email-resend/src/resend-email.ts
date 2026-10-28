@@ -59,11 +59,13 @@ export interface ResendEmailSenderConfig {
   readonly logger?: LogSink;
   readonly retry?: Partial<RetrySettings>;
   readonly quarantine?: ParkSink;
+  /** Puts Resend's error text in `Rejected`. Off by default because it can hold the recipient. A `sensitive` message never exposes it. */
+  readonly exposeProviderErrors?: boolean;
 }
 
 function terminal(
   kind: 'rejected' | 'unavailable',
-  message: string,
+  message?: string,
 ): AbortError {
   const error = new Error(message);
   Object.assign(error, { emailKind: kind });
@@ -115,9 +117,9 @@ function shouldRetry(error: {
 function mapSendError(error: unknown) {
   const kind = emailKind(error);
   if (kind === 'rejected') {
-    return EmailError.Rejected(
-      error instanceof Error ? error.message : 'Email was rejected',
-    );
+    return error instanceof Error && error.message !== ''
+      ? EmailError.Rejected(error.message)
+      : EmailError.Rejected();
   }
   if (kind === 'unavailable') return EmailError.Unavailable();
   const status = statusOf(error);
@@ -142,6 +144,7 @@ export class ResendEmailSender extends Adapter(EmailSender) {
   readonly #logger: LogSink;
   readonly #retry: Partial<RetrySettings> | undefined;
   readonly #quarantine: ParkSink | undefined;
+  readonly #exposeProviderErrors: boolean;
 
   constructor(config: ResendEmailSenderConfig) {
     super();
@@ -150,6 +153,7 @@ export class ResendEmailSender extends Adapter(EmailSender) {
     this.#logger = config.logger ?? noopSink;
     this.#retry = config.retry;
     this.#quarantine = config.quarantine;
+    this.#exposeProviderErrors = config.exposeProviderErrors ?? false;
   }
 
   async send(message: EmailMessage): Promise<{ id: string }> {
@@ -178,6 +182,7 @@ export class ResendEmailSender extends Adapter(EmailSender) {
         value,
       }));
     }
+    const expose = this.#exposeProviderErrors && !message.sensitive;
     const options = message.idempotencyKey
       ? { idempotencyKey: message.idempotencyKey }
       : undefined;
@@ -192,7 +197,7 @@ export class ResendEmailSender extends Adapter(EmailSender) {
           }
           if (result.error) {
             if (shouldRetry(result.error)) {
-              const retryable = new Error(result.error.message);
+              const retryable = new Error('email: resend attempt failed');
               retryable.name = result.error.name;
               if (result.error.statusCode !== null) {
                 Object.assign(retryable, {
@@ -201,7 +206,10 @@ export class ResendEmailSender extends Adapter(EmailSender) {
               }
               throw retryable;
             }
-            throw terminal('rejected', result.error.message);
+            throw terminal(
+              'rejected',
+              expose ? result.error.message : undefined,
+            );
           }
           if (!result.data?.id) throw terminal('unavailable', 'missing id');
           return result.data.id;

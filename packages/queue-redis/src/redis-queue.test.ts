@@ -1305,6 +1305,64 @@ describe('RedisQueue lifecycle', () => {
     await queue.stop();
   });
 
+  it('stop waits for a handler that XAUTOCLAIM dispatched', async () => {
+    vi.useFakeTimers();
+    const queue = new RedisQueue({
+      redis: 'redis://127.0.0.1:6379',
+      visibilityMs: 1000,
+    });
+    await queue.start();
+    const commands = FakeRedis.instances[0];
+    if (!commands) throw new Error('missing commands client');
+    commands.autoclaimEntries = [['3-1', ['payload', '{}']]];
+    let release: (value: 'ack') => void = () => {};
+    let started = false;
+    await queue.subscribe('jobs', {
+      consumerGroup: 'billing',
+      handler: () => {
+        started = true;
+        return new Promise((resolve) => {
+          release = resolve;
+        });
+      },
+    });
+    await vi.advanceTimersByTimeAsync(500);
+    expect(started).toBe(true);
+    const stopped = settledFlag(queue.stop());
+    await vi.advanceTimersByTimeAsync(100);
+    expect(stopped()).toBe(false);
+    release('ack');
+    await vi.advanceTimersByTimeAsync(0);
+    expect(stopped()).toBe(true);
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it('unsubscribe leaves a newer subscription for the same group alone', async () => {
+    const queue = new RedisQueue({ redis: 'redis://127.0.0.1:6379' });
+    const options = {
+      consumerGroup: 'billing',
+      handler: async () => 'ack' as const,
+    };
+    await queue.start();
+    await queue.subscribe('jobs', options);
+    const first = FakeRedis.instances[0];
+    if (!first) throw new Error('missing commands client');
+    first.holdXpending = true;
+    const unsubscribing = queue.unsubscribe('jobs', {
+      consumerGroup: 'billing',
+    });
+    await new Promise((resolve) => setImmediate(resolve));
+    await queue.stop();
+    await queue.start();
+    await queue.subscribe('jobs', options);
+    first.heldXpending?.resolve(undefined);
+    await unsubscribing;
+    await expect(queue.subscribe('jobs', options)).rejects.toThrow(
+      'queue: already subscribed to jobs group billing',
+    );
+    await queue.stop();
+  });
+
   it('stop leaves no timer behind without subscriptions', async () => {
     vi.useFakeTimers();
     const queue = new RedisQueue({ redis: 'redis://127.0.0.1:6379' });

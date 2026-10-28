@@ -57,6 +57,8 @@ interface Subscription {
   recovery: ReturnType<typeof setInterval> | undefined;
   /** Ends the read loop's current wait. Set only during that wait, so it cannot pin a settled read. */
   wake: (() => void) | undefined;
+  /** `XAUTOCLAIM` runs, which can dispatch handlers. */
+  recovering: Set<Promise<void>>;
   done: Promise<void>;
   finish: () => void;
 }
@@ -273,6 +275,7 @@ export class RedisQueue extends Adapter(Queue) {
       heartbeat: undefined,
       recovery: undefined,
       wake: undefined,
+      recovering: new Set(),
       done,
       finish,
     };
@@ -284,7 +287,10 @@ export class RedisQueue extends Adapter(Queue) {
       void this.#heartbeat(sub);
     }, heartbeatMs);
     sub.recovery = setInterval(() => {
-      void this.#recover(sub);
+      const run = this.#recover(sub).finally(() => {
+        sub.recovering.delete(run);
+      });
+      sub.recovering.add(run);
     }, recoveryMs);
     void this.#readLoop(sub);
   }
@@ -300,7 +306,7 @@ export class RedisQueue extends Adapter(Queue) {
     await this.#closeSub(sub, false);
     const commands = this.#commands;
     if (commands && idle) await this.#releaseConsumer(commands, sub);
-    this.#subs.delete(mapKey);
+    if (this.#subs.get(mapKey) === sub) this.#subs.delete(mapKey);
   }
 
   async maintain(
@@ -338,7 +344,10 @@ export class RedisQueue extends Adapter(Queue) {
     }
     const deadline = Date.now() + this.#visibilityMs;
     const remaining = () => Math.max(0, deadline - Date.now());
-    await settleWithin(Promise.all(subs.map((sub) => sub.done)), remaining());
+    await settleWithin(
+      Promise.all(subs.flatMap((sub) => [sub.done, ...sub.recovering])),
+      remaining(),
+    );
     if (commands) {
       await settleWithin(
         Promise.all(

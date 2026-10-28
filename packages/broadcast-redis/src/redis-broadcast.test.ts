@@ -1,21 +1,62 @@
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 const published: unknown[][] = [];
 const subs = new Map<string, Set<(channel: string, message: string) => void>>();
 
+type Listener = (...args: unknown[]) => void;
+
 class FakeRedis {
   static instances: FakeRedis[] = [];
-  readonly listeners = new Map<string, Set<(...args: unknown[]) => void>>();
+  static readyOnOpen = true;
+  readonly listeners = new Map<string, Set<Listener>>();
+  status: string;
+  connects = 0;
+  disconnects = 0;
 
-  constructor(..._args: unknown[]) {
+  constructor(...args: unknown[]) {
+    const options = args.at(-1) as { lazyConnect?: boolean } | undefined;
+    if (options?.lazyConnect) this.status = 'wait';
+    else this.status = FakeRedis.readyOnOpen ? 'ready' : 'connecting';
     FakeRedis.instances.push(this);
   }
 
-  on(event: string, listener: (...args: unknown[]) => void): this {
+  on(event: string, listener: Listener): this {
     const set = this.listeners.get(event) ?? new Set();
     set.add(listener);
     this.listeners.set(event, set);
     return this;
+  }
+
+  once(event: string, listener: Listener): this {
+    const wrapped: Listener = (...args) => {
+      this.off(event, wrapped);
+      listener(...args);
+    };
+    return this.on(event, wrapped);
+  }
+
+  off(event: string, listener: Listener): this {
+    this.listeners.get(event)?.delete(listener);
+    return this;
+  }
+
+  emit(event: string, ...args: unknown[]): boolean {
+    if (event === 'ready' || event === 'end') this.status = event;
+    const set = this.listeners.get(event);
+    if (!set) return false;
+    for (const listener of [...set]) listener(...args);
+    return true;
+  }
+
+  async connect(): Promise<void> {
+    this.connects += 1;
+    this.status = 'connecting';
+    queueMicrotask(() => this.emit('ready'));
+  }
+
+  disconnect(): void {
+    this.disconnects += 1;
+    this.status = 'end';
   }
 
   async publish(channel: string, message: string): Promise<number> {
@@ -48,6 +89,39 @@ class FakeRedis {
 }
 
 vi.mock('ioredis', () => ({ Redis: FakeRedis, default: FakeRedis }));
+
+const tick = () => new Promise((resolve) => setTimeout(resolve, 0));
+
+function track(promise: Promise<void>) {
+  const state = { settled: false, error: undefined as unknown };
+  promise.then(
+    () => {
+      state.settled = true;
+    },
+    (error: unknown) => {
+      state.settled = true;
+      state.error = error;
+    },
+  );
+  return state;
+}
+
+function lastPair(): [FakeRedis, FakeRedis] {
+  const [publisher, subscriber] = FakeRedis.instances.slice(-2);
+  if (!publisher || !subscriber) throw new Error('no redis clients opened');
+  return [publisher, subscriber];
+}
+
+function sink(errors: unknown[]) {
+  return {
+    debug() {},
+    info() {},
+    warn() {},
+    error(message: string | Error, fields?: Record<string, unknown>) {
+      errors.push({ message, fields });
+    },
+  };
+}
 
 const { RedisBroadcast } = await import('./redis-broadcast.js');
 const { channel } = await import('@hexok/broadcast');
@@ -104,5 +178,83 @@ describe('RedisBroadcast', () => {
     expect(published[0]?.[0]).toBe('hexok:broadcast:news');
     await bus.stop();
     await live.stop();
+  });
+
+  describe('start', () => {
+    afterEach(() => {
+      FakeRedis.readyOnOpen = true;
+    });
+
+    it('stays pending until both connections are ready', async () => {
+      FakeRedis.readyOnOpen = false;
+      const bus = new RedisBroadcast({ redis: 'redis://127.0.0.1:6379' });
+      const state = track(bus.start());
+      const [publisher, subscriber] = lastPair();
+      await tick();
+      expect(state.settled).toBe(false);
+      publisher.emit('ready');
+      await tick();
+      expect(state.settled).toBe(false);
+      subscriber.emit('ready');
+      await tick();
+      expect(state).toEqual({ settled: true, error: undefined });
+      await bus.stop();
+    });
+
+    it('logs an error before ready and keeps waiting', async () => {
+      FakeRedis.readyOnOpen = false;
+      const errors: unknown[] = [];
+      const bus = new RedisBroadcast({
+        redis: 'redis://127.0.0.1:6379',
+        logger: sink(errors),
+      });
+      const state = track(bus.start());
+      const [publisher, subscriber] = lastPair();
+      const refused = new Error('connect ECONNREFUSED');
+      subscriber.emit('error', refused);
+      await tick();
+      expect(state.settled).toBe(false);
+      expect(errors).toEqual([
+        { message: refused, fields: { connection: 'subscriber' } },
+      ]);
+      publisher.emit('ready');
+      subscriber.emit('ready');
+      await tick();
+      expect(state).toEqual({ settled: true, error: undefined });
+      await bus.stop();
+    });
+
+    it('rejects on end, closes both clients, and can start again', async () => {
+      FakeRedis.readyOnOpen = false;
+      const bus = new RedisBroadcast({ redis: 'redis://127.0.0.1:6379' });
+      const first = bus.start();
+      const [publisher, subscriber] = lastPair();
+      publisher.emit('end');
+      await expect(first).rejects.toThrow('ended before ready');
+      expect(publisher.disconnects).toBe(1);
+      expect(subscriber.disconnects).toBe(1);
+      await expect(bus.publish(news, { a: 1 })).rejects.toThrow(
+        'start() was not called',
+      );
+
+      FakeRedis.readyOnOpen = true;
+      await bus.start();
+      const [nextPublisher, nextSubscriber] = lastPair();
+      expect(nextPublisher).not.toBe(publisher);
+      expect(nextSubscriber).not.toBe(subscriber);
+      await bus.publish(news, { a: 1 });
+      await bus.stop();
+    });
+
+    it('connects a client created with lazyConnect', async () => {
+      const bus = new RedisBroadcast({
+        redis: { host: '127.0.0.1', lazyConnect: true },
+      });
+      await bus.start();
+      const [publisher, subscriber] = lastPair();
+      expect(publisher.connects).toBe(1);
+      expect(subscriber.connects).toBe(1);
+      await bus.stop();
+    });
   });
 });

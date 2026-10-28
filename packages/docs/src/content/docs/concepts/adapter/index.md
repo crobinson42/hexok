@@ -46,6 +46,39 @@ The defaults of `start` and `stop` resolve immediately, so this adapter can leav
 
 When the stored document is not the post, the database adapter uses a [mapper](/hexok/concepts/adapter/mapper/) to translate between them.
 
+## Adapters that own a connection
+
+[`@hexok/queue-redis`](/hexok/packages/queue-redis/), [`@hexok/broadcast-redis`](/hexok/packages/broadcast-redis/), and [`@hexok/schedule-coordinator-redis`](/hexok/packages/schedule-coordinator-redis/) each hold their own Redis connections. They share one lifecycle.
+
+```ts
+await queue.start()
+await broadcast.start()
+await broadcast.subscribe(PostChanged, onPostChanged)
+const server = app.listen(port)
+
+async function stop(): Promise<void> {
+  await new Promise((resolve) => server.close(resolve))
+  await broadcast.stop()
+  await queue.stop()
+}
+```
+
+- Await `start()` on every adapter before the process serves traffic. It resolves once Redis is ready.
+- Await `subscribe()` before you rely on delivery. It resolves once Redis confirms the subscription. A broadcast `subscribe()` that is not awaited misses messages published right after it.
+- Stop in the reverse order of start, and await each `stop()`. `stop()` waits for in-flight work, and resolves within `stopTimeoutMs` even when Redis is unreachable.
+- `state` is `ready` from `start()` until `stop()`, even while Redis is down. It says whether the adapter accepts calls, not whether Redis answers. Use it to gate traffic during startup and shutdown, not as a Redis health check.
+
+A call at the wrong time rejects or throws with an error whose `code` names the problem. Match on `error.code`, not on the message.
+
+| Code | Meaning |
+| --- | --- |
+| `NotStarted`, `Starting` | The call came before `start()` resolved. Fix the call order. |
+| `Stopped` | The call came after `stop()` began. Fix the call order. |
+| `StoppedBeforeReply` | The command was still pending when `stop()` stopped waiting, after `stopTimeoutMs`. Redis may or may not have run it. Do not retry on the stopping adapter. |
+| `StartTimeout`, `EndedBeforeReady` | `start()` failed and closed every connection. Call `start()` again, or exit and let the orchestrator restart the process. |
+
+Each package page lists its own timeouts and logs.
+
 ## API
 
 `Adapter(PortClass)` returns an abstract class that extends that port. Implement the port's methods. The compiler reports a missing one on the class.

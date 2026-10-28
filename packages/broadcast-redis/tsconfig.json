@@ -4,8 +4,7 @@
   "references": [
     { "path": "../hexok" },
     { "path": "../broadcast" },
-    { "path": "../ioredis-lifecycle" },
-    { "path": "../test-redis" }
+    { "path": "../ioredis-lifecycle" }
   ],
   "include": ["src"],
   "exclude": ["src/**/*.test.ts"]

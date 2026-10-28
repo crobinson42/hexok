@@ -5,18 +5,12 @@
   "description": "Test utilities for hexok Redis adapters: an outage proxy, a child Node runner, and a lifecycle conformance suite.",
   "type": "module",
   "license": "MIT",
-  "sideEffects": false,
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",
-      "import": "./dist/index.js",
       "default": "./dist/index.js"
-    },
-    "./package.json": "./package.json"
+    }
   },
-  "files": [
-    "dist"
-  ],
   "scripts": {
     "build": "tsc -b",
     "test": "vitest run",

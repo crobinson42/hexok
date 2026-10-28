@@ -54,6 +54,9 @@ interface Subscription {
   blocking: Redis;
   heartbeat: ReturnType<typeof setInterval> | undefined;
   recovery: ReturnType<typeof setInterval> | undefined;
+  backoff:
+    | { timer: ReturnType<typeof setTimeout>; wake: () => void }
+    | undefined;
   done: Promise<void>;
   finish: () => void;
 }
@@ -74,6 +77,22 @@ function isNoGroup(error: unknown): boolean {
 
 function isBusyGroup(error: unknown): boolean {
   return error instanceof Error && error.message.includes('BUSYGROUP');
+}
+
+/** Waits for `promise` or `ms`, whichever is first, and clears the timer. */
+async function settleWithin(
+  promise: Promise<unknown>,
+  ms: number,
+): Promise<void> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const deadline = new Promise<void>((resolve) => {
+    timer = setTimeout(resolve, ms);
+  });
+  try {
+    await Promise.race([promise, deadline]);
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 function payloadField(fields: string[]): string | undefined {
@@ -196,6 +215,7 @@ export class RedisQueue extends Adapter(Queue) {
       blocking,
       heartbeat: undefined,
       recovery: undefined,
+      backoff: undefined,
       done,
       finish,
     };
@@ -254,12 +274,10 @@ export class RedisQueue extends Adapter(Queue) {
     for (const sub of this.#subs.values()) {
       sub.blocking.disconnect();
     }
-    await Promise.race([
+    await settleWithin(
       Promise.all([...this.#subs.values()].map((sub) => sub.done)),
-      new Promise<void>((resolve) => {
-        setTimeout(resolve, this.#visibilityMs);
-      }),
-    ]);
+      this.#visibilityMs,
+    );
     for (const sub of idleSubs) {
       if (sub.inflight.size === 0) await this.#releaseConsumer(sub);
     }
@@ -299,14 +317,7 @@ export class RedisQueue extends Adapter(Queue) {
     sub.aborted = true;
     this.#clearSubTimers(sub);
     sub.blocking.disconnect();
-    if (wait) {
-      await Promise.race([
-        sub.done,
-        new Promise<void>((resolve) => {
-          setTimeout(resolve, this.#visibilityMs);
-        }),
-      ]);
-    }
+    if (wait) await settleWithin(sub.done, this.#visibilityMs);
     await sub.blocking.quit().catch(() => undefined);
   }
 
@@ -315,6 +326,11 @@ export class RedisQueue extends Adapter(Queue) {
     if (sub.recovery) clearInterval(sub.recovery);
     sub.heartbeat = undefined;
     sub.recovery = undefined;
+    if (sub.backoff) {
+      clearTimeout(sub.backoff.timer);
+      sub.backoff.wake();
+      sub.backoff = undefined;
+    }
   }
 
   async #readLoop(sub: Subscription): Promise<void> {
@@ -357,7 +373,7 @@ export class RedisQueue extends Adapter(Queue) {
               : new Error('queue: XREADGROUP failed'),
             { topic: sub.topic },
           );
-          await this.#backoff(failures);
+          await this.#backoff(sub, failures);
           continue;
         }
         if (!rows) continue;
@@ -580,11 +596,14 @@ export class RedisQueue extends Adapter(Queue) {
     }
   }
 
-  async #backoff(failures: number): Promise<void> {
+  /** Sleeps before the next read. `#clearSubTimers` wakes it early. */
+  async #backoff(sub: Subscription, failures: number): Promise<void> {
+    if (sub.aborted) return;
     const ms = Math.min(1000 * failures, 5000);
     await new Promise<void>((resolve) => {
-      setTimeout(resolve, ms);
+      sub.backoff = { timer: setTimeout(resolve, ms), wake: resolve };
     });
+    sub.backoff = undefined;
   }
 
   #key(topic: string): string {

@@ -796,6 +796,52 @@ describe('RedisQueue commands', () => {
   });
 });
 
+describe('RedisQueue lifecycle', () => {
+  afterEach(() => {
+    vi.useRealTimers();
+    FakeRedis.instances.length = 0;
+  });
+
+  it('stop leaves no timer behind without subscriptions', async () => {
+    vi.useFakeTimers();
+    const queue = new RedisQueue({ redis: 'redis://127.0.0.1:6379' });
+    await queue.start();
+    await queue.publish('jobs', { n: 1 });
+    await queue.stop();
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it('stop leaves no timer behind with a subscription', async () => {
+    vi.useFakeTimers();
+    const queue = new RedisQueue({ redis: 'redis://127.0.0.1:6379' });
+    await queue.start();
+    await queue.subscribe('jobs', {
+      consumerGroup: 'billing',
+      handler: async () => 'ack',
+    });
+    await queue.stop();
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it('stop cancels a read loop backoff', async () => {
+    vi.useFakeTimers();
+    const queue = new RedisQueue({ redis: 'redis://127.0.0.1:6379' });
+    await queue.start();
+    await queue.subscribe('jobs', {
+      consumerGroup: 'billing',
+      handler: async () => 'ack',
+    });
+    const blocking = FakeRedis.instances[1];
+    if (!blocking) throw new Error('missing blocking client');
+    blocking.pending?.reject(new Error('LOADING'));
+    await vi.advanceTimersByTimeAsync(0);
+    const stopping = queue.stop().then(() => 'stopped');
+    const waited = vi.advanceTimersByTimeAsync(500).then(() => 'waiting');
+    await expect(Promise.race([stopping, waited])).resolves.toBe('stopped');
+    expect(vi.getTimerCount()).toBe(0);
+  });
+});
+
 function callsOf(
   commands: { calls: unknown[][] } | undefined,
   subcommand: string,

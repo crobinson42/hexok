@@ -52,6 +52,45 @@ A publisher adapter accepts the catalog instance and, on a real transport, sends
 
 One adapter implements one port. A second port is a second class.
 
+## Adapters that own a connection
+
+`@hexok/queue-redis`, `@hexok/broadcast-redis`, and `@hexok/schedule-coordinator-redis` each hold their own Redis connections. They share one lifecycle. A new adapter that holds an ioredis connection builds on `@hexok/ioredis-lifecycle`.
+
+```ts
+await queue.start();
+await broadcast.start();
+await broadcast.subscribe(PostChanged, onPostChanged);
+const server = app.listen(port);
+
+async function stop(): Promise<void> {
+  await new Promise((resolve) => server.close(resolve));
+  await broadcast.stop();
+  await queue.stop();
+}
+```
+
+- **Start.** Await `start()` before the adapter is used. It resolves once Redis is ready. Start every adapter before the process serves traffic or subscribes handlers. A call made before `start()` resolves rejects with code `NotStarted` or `Starting`.
+- **Subscribe.** Await `subscribe()` before you rely on delivery. It resolves once Redis confirms the subscription. Redis pub/sub keeps no history, so a broadcast `subscribe()` that is not awaited misses messages published right after it. Its failure is also unhandled.
+- **Stop.** Stop in the reverse order of start, and await each `stop()`. Close the gateway first so no new work arrives. `stop()` resolves within `stopTimeoutMs`, even when Redis is unreachable. A call after `stop()` rejects with code `Stopped`.
+- **Unknown outcome.** A command still pending when `stop()` runs rejects with code `StoppedBeforeReply`. Redis may or may not have run it. Retry it when a duplicate is safe: an at-least-once queue whose handlers are idempotent. Do not retry it blindly when a duplicate does harm, such as a second one-time code or a broadcast that must arrive at most once. Treat it as possibly done, or check state first. Retry on a started adapter, never on the stopped one.
+- **Wrong time.** `NotStarted`, `Starting`, and `Stopped` mean the call came outside `start()` and `stop()`. Fix the order. Do not retry them.
+- **Start timeout.** `startTimeoutMs` makes `start()` reject when Redis is not ready in time. Without it, `start()` waits. Set it under an orchestrator such as Kubernetes: the process exits, and the orchestrator reports the failure and restarts it. Leave it unset for compose-style boot, where Redis can come up after the application.
+- **Stop timeout.** Keep `stopTimeoutMs` below the orchestrator's grace period, such as Kubernetes `terminationGracePeriodSeconds`, so `stop()` finishes before the process is killed.
+
+Branch on `code`, not on the message. Message text can change in any release.
+
+```ts
+try {
+  await queue.publish('post.published', payload);
+} catch (error) {
+  const code = error instanceof Error && 'code' in error ? error.code : undefined;
+  if (code === 'StoppedBeforeReply') {
+    // Redis may have stored it. Retry only when a duplicate is safe.
+  }
+  throw error;
+}
+```
+
 ## API
 
 `Adapter(PortClass)` returns an abstract class that extends that port. Implement the port's methods. The compiler reports a missing one on the class.

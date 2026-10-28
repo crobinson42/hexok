@@ -69,7 +69,8 @@ Import `LifecycleError` from this package, or match on `error.code`. Matching on
 
 | Event | Level | Fields |
 | --- | --- | --- |
-| A connection error | `error` | `adapter`, `connection` |
+| A connection error, such as a failed connection attempt | `error` | `adapter`, `connection` |
+| The connection ends after `start()` | `error` | `adapter`, `connection` |
 | A lock `SET`, renew, or release failed | `error` | `adapter`, `connection`, `job` |
 | `stop()` cut a lock command short | `warn` | `adapter`, `connection`, `job`, `code: 'StoppedBeforeReply'` |
 | The lock was not renewed in time, so the tick was aborted | `warn` | `adapter`, `connection`, `job` |
@@ -77,7 +78,8 @@ Import `LifecycleError` from this package, or match on `error.code`. Matching on
 | `onTick` threw | `error` | `adapter`, `job` |
 | A tick ran longer than `warnAfterMs` | `warn` | `adapter`, `job`, `warnAfterMs` |
 | Another process holds the lock, so the tick was skipped | `debug` | `adapter`, `job` |
-| `QUIT` failed during `stop()` | `error` | `adapter` |
+| `QUIT` failed during `stop()` | `error` | `adapter`, `connection` |
+| The stop cleanup threw | `error` | `adapter` |
 
 A logged `LifecycleError` carries its `code`. `NotStarted`, `Starting`, and `Stopped` from background work are not logged. Errors thrown to the caller, from `start()` and `register()`, are not logged.
 

@@ -1,6 +1,10 @@
 import { randomUUID } from 'node:crypto';
-import { settleWithin } from '@hexok/ioredis-lifecycle';
-import { describeRedisLifecycle, RedisProxy, runNode } from '@hexok/test-redis';
+import {
+  describeRedisLifecycle,
+  RedisProxy,
+  runNode,
+  settleWithin,
+} from '@hexok/test-redis';
 import { Redis, type RedisOptions } from 'ioredis';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { CronScheduler } from './cron-scheduler.js';

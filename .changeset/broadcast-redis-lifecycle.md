@@ -8,6 +8,7 @@
 - `startTimeoutMs` makes `start()` reject with `StartTimeout` when Redis is not ready in time. It is unset by default, so `start()` waits.
 - A `publish`, `subscribe`, or `unsubscribe` queued during an outage rejects with `StoppedBeforeReply` on `stop()`. Before, it never settled.
 - `LifecycleError` and the `LifecycleState` type are exported from this package.
+- `state` returns the lifecycle state, such as `ready`, for a readiness or health check.
 
 Upgrade notes:
 

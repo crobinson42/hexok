@@ -488,6 +488,31 @@ describe('RedisBroadcast', () => {
   });
 
   describe('lifecycle', () => {
+    it('reports state from idle through stopped', async () => {
+      FakeRedis.readyOnOpen = false;
+      try {
+        const bus = new RedisBroadcast({ redis: 'redis://127.0.0.1:6379' });
+        expect(bus.state).toBe('idle');
+        const starting = bus.start();
+        expect(bus.state).toBe('starting');
+        const [publisher, subscriber] = lastPair();
+        publisher.emit('ready');
+        subscriber.emit('ready');
+        await starting;
+        expect(bus.state).toBe('ready');
+        vi.useFakeTimers();
+        for (const redis of [publisher, subscriber]) redis.stalled = true;
+        const stopped = bus.stop();
+        expect(bus.state).toBe('stopping');
+        await vi.advanceTimersByTimeAsync(1000);
+        await stopped;
+        expect(bus.state).toBe('stopped');
+      } finally {
+        vi.useRealTimers();
+        FakeRedis.readyOnOpen = true;
+      }
+    });
+
     it('rejects subscribe with the lifecycle code outside start and stop', async () => {
       const bus = new RedisBroadcast({ redis: 'redis://127.0.0.1:6379' });
       await expect(bus.subscribe(news, () => {})).rejects.toMatchObject({

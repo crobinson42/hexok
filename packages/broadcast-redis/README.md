@@ -29,6 +29,8 @@ await bus.stop();
 
 `start()` opens a publisher and a subscriber connection and resolves once both are ready. It calls `connect()` on a client created with `lazyConnect`. A `start()` during a pending start joins it. A `start()` after `stop()` opens new connections.
 
+`bus.state` is `idle`, `starting`, `ready`, `stopping`, or `stopped`. A failed start returns to `idle`. Read it in a readiness or health check, or add it to logs.
+
 `stop()` rejects a pending `start()` with `Stopped`. It drops every handler, so subscribe again after the next `start()`. It sends no `UNSUBSCRIBE`, because `QUIT` ends the subscriptions. It closes the subscriber and the publisher together. Each ready connection gets `QUIT`, and is disconnected if `QUIT` does not settle within `stopTimeoutMs`. A connection that is not ready is disconnected instead of waiting for Redis. `stop()` always resolves.
 
 `publish()` and `subscribe()` reject with a `LifecycleError` when called outside `start()` and `stop()`. Import it from this package and branch on `code`, not on the message.

@@ -4,6 +4,7 @@ import {
   type Channel,
 } from '@hexok/broadcast';
 import {
+  type LifecycleState,
   type LogSink,
   openRedis,
   RedisLifecycle,
@@ -62,6 +63,11 @@ export class RedisBroadcast extends Adapter(Broadcast) {
       startTimeoutMs: config.startTimeoutMs,
       logger: this.#logger,
     });
+  }
+
+  /** The lifecycle state. It suits a readiness or health check. */
+  get state(): LifecycleState {
+    return this.#lifecycle.state;
   }
 
   start(): Promise<void> {

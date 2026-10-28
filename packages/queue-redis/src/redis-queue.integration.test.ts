@@ -1,12 +1,22 @@
-import { spawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
+import { describeRedisLifecycle, RedisProxy, runNode } from '@hexok/test-redis';
 import { Redis } from 'ioredis';
 import { afterEach, describe, expect, it } from 'vitest';
 import { RedisQueue } from './redis-queue.js';
+import { releaseConsumer } from './release-consumer.js';
 
-if (process.env.CI && !process.env.REDIS_URL) {
-  throw new Error('REDIS_URL is required when CI is set');
-}
+describeRedisLifecycle('RedisQueue', ({ redis, stopTimeoutMs }) => {
+  const queue = new RedisQueue({
+    redis,
+    stopTimeoutMs,
+    keyPrefix: `hexok:queue:it:${randomUUID()}:`,
+  });
+  return {
+    start: () => queue.start(),
+    stop: () => queue.stop(),
+    operate: () => queue.publish('jobs', { n: 1 }),
+  };
+});
 
 async function waitFor(check: () => Promise<boolean> | boolean): Promise<void> {
   const started = Date.now();
@@ -17,76 +27,71 @@ async function waitFor(check: () => Promise<boolean> | boolean): Promise<void> {
   throw new Error('timed out waiting for queue condition');
 }
 
-/** Runs `src` in a child Node. Node strips the types. The hook maps `./x.js` to `./x.ts`. */
-const childPrelude = `
-import { registerHooks } from 'node:module';
-registerHooks({
-  resolve(specifier, context, next) {
-    try {
-      return next(specifier, context);
-    } catch (error) {
-      if (!specifier.startsWith('.') || !specifier.endsWith('.js')) throw error;
-      return next(specifier.slice(0, -3) + '.ts', context);
-    }
-  },
-});
-const { RedisQueue } = await import(process.env.QUEUE_ENTRY);
-`;
+const queueEntry = new URL('./redis-queue.ts', import.meta.url).href;
 
-async function runChild(
+/** Runs `body` in a child Node with `RedisQueue` in scope. */
+function runQueue(
   body: string,
-  env: Record<string, string>,
-  flags: string[] = [],
-): Promise<{
-  code: number | null;
-  ms: number;
-  exitedAt: number;
-  stdout: string;
-  stderr: string;
-}> {
-  const started = Date.now();
-  const child = spawn(
-    process.execPath,
-    [
-      '--no-warnings',
-      ...flags,
-      '--input-type=module',
-      '-e',
-      childPrelude + body,
-    ],
-    {
-      env: {
-        ...process.env,
-        QUEUE_ENTRY: new URL('./redis-queue.ts', import.meta.url).href,
-        ...env,
-      },
-      stdio: ['ignore', 'pipe', 'pipe'],
-      timeout: 6000,
-    },
+  env: Record<string, string> = {},
+  exposeGc = false,
+) {
+  return runNode(
+    `const { RedisQueue } = await import(${JSON.stringify(queueEntry)});\n${body}`,
+    { env, exposeGc },
   );
-  let stdout = '';
-  let stderr = '';
-  child.stdout.on('data', (chunk: Buffer) => {
-    stdout += chunk.toString();
-  });
-  child.stderr.on('data', (chunk: Buffer) => {
-    stderr += chunk.toString();
-  });
-  const code = await new Promise<number | null>((resolve) => {
-    child.on('exit', resolve);
-  });
-  const exitedAt = Date.now();
-  return { code, ms: exitedAt - started, exitedAt, stdout, stderr };
+}
+
+function newPrefix(): string {
+  return `hexok:queue:it:${randomUUID()}:`;
+}
+
+/** Consumer names and pending counts of `group`. */
+async function consumersOf(
+  probe: Redis,
+  key: string,
+  group: string,
+): Promise<Array<{ name: string; pending: number }>> {
+  const rows = (await probe.xinfo('CONSUMERS', key, group)) as unknown[][];
+  return rows.map((row) => ({
+    name: String(row[1]),
+    pending: Number(row[3]),
+  }));
 }
 
 describe.skipIf(!process.env.REDIS_URL)('RedisQueue integration', () => {
   const open: Redis[] = [];
   const queues: RedisQueue[] = [];
+  const proxies: RedisProxy[] = [];
 
   afterEach(async () => {
     await Promise.all(queues.splice(0).map((queue) => queue.stop()));
     await Promise.all(open.splice(0).map((redis) => redis.quit()));
+    await Promise.all(proxies.splice(0).map((proxy) => proxy.close()));
   });
+
+  function probe(): Redis {
+    const client = new Redis(process.env.REDIS_URL ?? '');
+    open.push(client);
+    return client;
+  }
+
+  /** A started queue behind its own outage proxy. */
+  async function proxied(
+    keyPrefix: string,
+    stopTimeoutMs: number,
+  ): Promise<{ queue: RedisQueue; proxy: RedisProxy }> {
+    const proxy = await RedisProxy.start();
+    proxies.push(proxy);
+    const queue = new RedisQueue({
+      redis: { host: proxy.host, port: proxy.port, disconnectTimeout: 100 },
+      keyPrefix,
+      blockMs: 200,
+      stopTimeoutMs,
+    });
+    queues.push(queue);
+    await queue.start();
+    return { queue, proxy };
+  }
 
   it('acks void and drop, leaves retry pending, and skips XACK after unsubscribe and stop', async () => {
     const url = process.env.REDIS_URL ?? '';
@@ -198,7 +203,7 @@ describe.skipIf(!process.env.REDIS_URL)('RedisQueue integration', () => {
   });
 
   it('lets the process exit after stop with the default visibility', async () => {
-    const result = await runChild(
+    const result = await runQueue(
       `
 const queue = new RedisQueue({
   redis: process.env.REDIS_URL,
@@ -275,7 +280,7 @@ await queue.stop();
   });
 
   it('lets the process exit soon after stop with a short disconnectTimeout when Redis is unreachable', async () => {
-    const result = await runChild(
+    const result = await runQueue(
       `
 const queue = new RedisQueue({
   redis: { host: '127.0.0.1', port: 1, disconnectTimeout: 100 },
@@ -293,34 +298,25 @@ await starting;
   });
 
   it('stops promptly when Redis goes away under an idle subscription', async () => {
-    const result = await runChild(
+    const result = await runQueue(
       `
-import net from 'node:net';
-const target = new URL(process.env.REDIS_URL);
-const sockets = new Set();
-const proxy = net.createServer((client) => {
-  const upstream = net.connect(Number(target.port || 6379), target.hostname);
-  for (const socket of [client, upstream]) {
-    sockets.add(socket);
-    socket.on('error', () => {});
-  }
-  client.pipe(upstream).pipe(client);
-});
-await new Promise((resolve) => proxy.listen(0, '127.0.0.1', resolve));
+const { RedisProxy } = await import('@hexok/test-redis');
+const proxy = await RedisProxy.start();
 const queue = new RedisQueue({
-  redis: { host: '127.0.0.1', port: proxy.address().port, disconnectTimeout: 100 },
+  redis: { host: proxy.host, port: proxy.port, disconnectTimeout: 100 },
   keyPrefix: process.env.KEY_PREFIX,
   blockMs: 200,
 });
 await queue.start();
 await queue.subscribe('jobs', { consumerGroup: 'workers', handler: async () => 'ack' });
 await new Promise((resolve) => setTimeout(resolve, 100));
-proxy.close();
-for (const socket of sockets) socket.destroy();
+await proxy.refuse();
+proxy.drop();
 await new Promise((resolve) => setTimeout(resolve, 300));
 const stopping = Date.now();
 await queue.stop();
 console.log(JSON.stringify({ stopMs: Date.now() - stopping, stoppedAt: Date.now() }));
+await proxy.close();
 `,
       { KEY_PREFIX: `hexok:queue:it:${randomUUID()}:` },
     );
@@ -373,7 +369,7 @@ console.log(JSON.stringify({ stopMs: Date.now() - stopping, stoppedAt: Date.now(
   });
 
   it('does not hold delivered payloads after their handlers finish', async () => {
-    const result = await runChild(
+    const result = await runQueue(
       `
 const { Redis } = await import('ioredis');
 const count = 2000;
@@ -385,18 +381,13 @@ for (let i = 0; i < count; i += 500) {
   for (let j = 0; j < 500; j += 1) pipeline.xadd(key, '*', 'payload', payload);
   await pipeline.exec();
 }
-const heap = () => {
-  globalThis.gc();
-  globalThis.gc();
-  return process.memoryUsage().heapUsed;
-};
 const queue = new RedisQueue({
   redis: process.env.REDIS_URL,
   keyPrefix: process.env.KEY_PREFIX,
   maxLen: 1e9,
 });
 await queue.start();
-const before = heap();
+const before = heapUsed();
 let handled = 0;
 await queue.subscribe('jobs', {
   consumerGroup: 'workers',
@@ -406,14 +397,14 @@ await queue.subscribe('jobs', {
 });
 while (handled < count) await new Promise((resolve) => setTimeout(resolve, 20));
 await new Promise((resolve) => setTimeout(resolve, 50));
-const growth = heap() - before;
+const growth = heapUsed() - before;
 await queue.stop();
 await admin.del(key);
 await admin.quit();
 console.log(JSON.stringify({ growth, total: count * payload.length }));
 `,
       { KEY_PREFIX: `hexok:queue:it:${randomUUID()}:` },
-      ['--expose-gc'],
+      true,
     );
     expect(result.stderr).toBe('');
     expect(result.code).toBe(0);
@@ -456,5 +447,181 @@ console.log(JSON.stringify({ growth, total: count * payload.length }));
     const groups = (await probe.xinfo('GROUPS', key)) as unknown[];
     expect(groups).toHaveLength(1);
     expect(await probe.exists(key)).toBe(1);
+  });
+  it('a publish queued while Redis refuses connections rejects with StoppedBeforeReply on stop', async () => {
+    const { queue, proxy } = await proxied(newPrefix(), 500);
+    await proxy.refuse();
+    proxy.drop();
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    const publishing = queue
+      .publish('jobs', { n: 1 })
+      .catch((error: unknown) => error);
+    const started = Date.now();
+    await queue.stop();
+    expect(Date.now() - started).toBeLessThan(750);
+    expect(await publishing).toMatchObject({ code: 'StoppedBeforeReply' });
+  });
+
+  it('unsubscribe resolves within stopTimeoutMs while Redis is blackholed, and the group can subscribe again', async () => {
+    const keyPrefix = newPrefix();
+    const admin = probe();
+    const { queue, proxy } = await proxied(keyPrefix, 500);
+    const options = {
+      consumerGroup: 'workers',
+      handler: async () => 'ack' as const,
+    };
+    await queue.subscribe('jobs', options);
+    await waitFor(
+      async () =>
+        (await consumersOf(admin, `${keyPrefix}jobs`, 'workers')).length === 1,
+    );
+    proxy.blackhole();
+    const started = Date.now();
+    await queue.unsubscribe('jobs', { consumerGroup: 'workers' });
+    const ms = Date.now() - started;
+    expect(ms).toBeGreaterThanOrEqual(450);
+    expect(ms).toBeLessThan(750);
+    await proxy.restore();
+    await queue.subscribe('jobs', options);
+  });
+
+  it('unsubscribe resolves within stopTimeoutMs while Redis refuses connections', async () => {
+    const keyPrefix = newPrefix();
+    const admin = probe();
+    const { queue, proxy } = await proxied(keyPrefix, 500);
+    await queue.subscribe('jobs', {
+      consumerGroup: 'workers',
+      handler: async () => 'ack',
+    });
+    await waitFor(
+      async () =>
+        (await consumersOf(admin, `${keyPrefix}jobs`, 'workers')).length === 1,
+    );
+    await proxy.refuse();
+    proxy.drop();
+    const started = Date.now();
+    await queue.unsubscribe('jobs', { consumerGroup: 'workers' });
+    expect(Date.now() - started).toBeLessThan(750);
+  });
+
+  it('a consumer that owns a pending entry survives unsubscribe, stop, and maintain', async () => {
+    const keyPrefix = newPrefix();
+    const admin = probe();
+    const queue = new RedisQueue({
+      redis: process.env.REDIS_URL ?? '',
+      keyPrefix,
+      blockMs: 200,
+    });
+    queues.push(queue);
+    await queue.start();
+    let handled = 0;
+    for (const topic of ['left', 'stopped']) {
+      await queue.subscribe(topic, {
+        consumerGroup: 'workers',
+        handler: async () => {
+          handled += 1;
+          return 'retry';
+        },
+      });
+      await queue.publish(topic, topic);
+    }
+    await waitFor(() => handled === 2);
+    await queue.unsubscribe('left', { consumerGroup: 'workers' });
+    await queue.stop();
+
+    const maintainer = new RedisQueue({
+      redis: process.env.REDIS_URL ?? '',
+      keyPrefix,
+    });
+    queues.push(maintainer);
+    await maintainer.start();
+    const report = await maintainer.maintain({
+      dryRun: false,
+      idleConsumerMs: 0,
+    });
+    expect(report.consumersRemoved).toEqual([]);
+    for (const topic of ['left', 'stopped']) {
+      expect(
+        await consumersOf(admin, `${keyPrefix}${topic}`, 'workers'),
+      ).toEqual([{ name: expect.stringMatching(/^hexok:/), pending: 1 }]);
+    }
+  });
+
+  it('stop and maintain remove an idle consumer that owns nothing', async () => {
+    const keyPrefix = newPrefix();
+    const admin = probe();
+    const key = `${keyPrefix}jobs`;
+    const queue = new RedisQueue({
+      redis: process.env.REDIS_URL ?? '',
+      keyPrefix,
+      blockMs: 200,
+    });
+    queues.push(queue);
+    await queue.start();
+    await queue.subscribe('jobs', {
+      consumerGroup: 'workers',
+      handler: async () => 'ack',
+    });
+    await waitFor(
+      async () => (await consumersOf(admin, key, 'workers')).length === 1,
+    );
+    await queue.stop();
+    expect(await consumersOf(admin, key, 'workers')).toEqual([]);
+
+    // A consumer left by a process that died owns nothing and is idle.
+    await admin.xreadgroup(
+      'GROUP',
+      'workers',
+      'hexok:dead:1',
+      'COUNT',
+      1,
+      'STREAMS',
+      key,
+      '>',
+    );
+    await queue.start();
+    const report = await queue.maintain({ dryRun: false, idleConsumerMs: 0 });
+    expect(report.consumersRemoved).toEqual([
+      {
+        topic: 'jobs',
+        group: 'workers',
+        consumer: 'hexok:dead:1',
+        idleMs: expect.any(Number),
+      },
+    ]);
+    expect(await consumersOf(admin, key, 'workers')).toEqual([]);
+  });
+
+  it('the release script keeps a consumer that owns a pending entry and deletes one that owns nothing', async () => {
+    const admin = probe();
+    const key = `${newPrefix()}jobs`;
+    await admin.xgroup('CREATE', key, 'workers', '0', 'MKSTREAM');
+    await admin.xadd(key, '*', 'payload', '1');
+    await admin.xreadgroup(
+      'GROUP',
+      'workers',
+      'busy',
+      'COUNT',
+      1,
+      'STREAMS',
+      key,
+      '>',
+    );
+    await admin.xreadgroup(
+      'GROUP',
+      'workers',
+      'idle',
+      'COUNT',
+      1,
+      'STREAMS',
+      key,
+      '>',
+    );
+    expect(await releaseConsumer(admin, key, 'workers', 'busy')).toBe(false);
+    expect(await releaseConsumer(admin, key, 'workers', 'idle')).toBe(true);
+    expect(await consumersOf(admin, key, 'workers')).toEqual([
+      { name: 'busy', pending: 1 },
+    ]);
+    await admin.del(key);
   });
 });

@@ -46,6 +46,8 @@ describeRedisLifecycle('RedisBroadcast', ({ redis, stopTimeoutMs }) => {
     start: () => bus.start(),
     stop: () => bus.stop(),
     operate: () => bus.publish(news, { n: 1 }),
+    // The suite calls stop() as soon as this returns, so the work must already be under way.
+    inFlight: () => bus.publish(news, { n: 2 }),
   };
 });
 

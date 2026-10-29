@@ -9,13 +9,17 @@ import {
   sleep,
 } from '@hexok/ioredis-lifecycle';
 import {
+  assertMaxDeliveries,
+  deliveryAllowed,
   dispositionOf,
   Queue,
   type QueueDisposition,
   type QueueHandler,
+  type QueueMaxDeliveries,
   type QueuePublishOptions,
   type QueueStartFrom,
   type QueueSubscribeOptions,
+  retryExhausted,
 } from '@hexok/queue';
 import { Adapter } from 'hexok';
 import type { Redis, RedisOptions } from 'ioredis';
@@ -27,7 +31,12 @@ import {
   type RedisQueueMaintainSkipReason,
   type RedisQueueStuckReason,
 } from './maintain.js';
-import { courtesyPark, type ParkSink, parkedError } from './park.js';
+import {
+  courtesyPark,
+  type ParkedError,
+  type ParkSink,
+  parkedError,
+} from './park.js';
 import { ackDeleted, releaseConsumer } from './scripts.js';
 
 export type {
@@ -70,6 +79,7 @@ interface Subscription {
   readonly key: string;
   readonly consumer: string;
   readonly startId: string;
+  readonly maxDeliveries: QueueMaxDeliveries;
   readonly onError: QueueDisposition;
   readonly handler: QueueHandler<unknown>;
   /** Aborts on `unsubscribe` or `stop()`. It ends the current read or backoff. */
@@ -139,6 +149,34 @@ function isStreamEntry(entry: unknown): entry is StreamEntry {
     typeof entry[0] === 'string' &&
     Array.isArray(entry[1])
   );
+}
+
+function deliveryCountOf(reply: unknown, id: string): number | undefined {
+  if (!Array.isArray(reply)) return undefined;
+  for (const row of reply) {
+    if (!Array.isArray(row) || row[0] !== id) continue;
+    return pendingCount(row[3]);
+  }
+  return undefined;
+}
+
+/** A pending-list counter. `0` and unsafe numbers are not a delivery count. */
+function pendingCount(value: unknown): number | undefined {
+  const count =
+    typeof value === 'number'
+      ? value
+      : typeof value === 'string' && value !== ''
+        ? Number(value)
+        : Number.NaN;
+  if (!Number.isSafeInteger(count) || count < 1) return undefined;
+  return count;
+}
+
+function exhaustedError(thrown: unknown): ParkedError {
+  if (thrown === undefined) {
+    return { name: 'Error', message: 'queue: deliveries exhausted' };
+  }
+  return { ...parkedError(thrown), message: 'queue: deliveries exhausted' };
 }
 
 function fieldOf(fields: string[], name: string): string | undefined {
@@ -307,6 +345,7 @@ export class RedisQueue extends Adapter(Queue) {
       `queue: already subscribed to ${topic} group ${group}`,
     );
     if (this.#subs.has(mapKey)) throw already;
+    assertMaxDeliveries(options.maxDeliveries);
     const key = this.#key(topic);
     const startId = startIdOf(options.startFrom);
     await this.#lifecycle.run('subscribe', ({ commands }) =>
@@ -330,6 +369,7 @@ export class RedisQueue extends Adapter(Queue) {
       key,
       consumer: `hexok:${process.pid}:${randomUUID()}`,
       startId,
+      maxDeliveries: options.maxDeliveries,
       onError: options.onError ?? 'retry',
       handler: options.handler as QueueHandler<unknown>,
       abort: new AbortController(),
@@ -551,7 +591,11 @@ export class RedisQueue extends Adapter(Queue) {
   async #parkDeliver(
     sub: Subscription,
     id: string,
-    record: { payload: unknown; error: ReturnType<typeof parkedError> },
+    record: {
+      payload: unknown;
+      error: ParkedError;
+      attempts?: number;
+    },
   ): Promise<void> {
     await courtesyPark(
       this.#quarantine,
@@ -563,6 +607,7 @@ export class RedisQueue extends Adapter(Queue) {
         error: record.error,
         occurredAt: new Date(),
         context: { adapter: 'redis' },
+        ...(record.attempts === undefined ? {} : { attempts: record.attempts }),
       },
       this.#logger,
     );
@@ -574,16 +619,55 @@ export class RedisQueue extends Adapter(Queue) {
    */
   async #handleBatch(sub: Subscription, entries: StreamEntry[]): Promise<void> {
     for (const [id] of entries) sub.inflight.add(id);
+    const counts = sub.abort.signal.aborted
+      ? new Map<string, number>()
+      : await this.#deliveryCounts(
+          sub,
+          entries.map(([id]) => id),
+        );
     for (const [id, fields] of entries) {
       if (sub.abort.signal.aborted) sub.inflight.delete(id);
-      else await this.#dispatch(sub, id, fields);
+      else await this.#dispatch(sub, id, fields, counts.get(id));
     }
+  }
+
+  /** One `XPENDING` per id. A missing or unusable count is left out of the map. */
+  async #deliveryCounts(
+    sub: Subscription,
+    ids: readonly string[],
+  ): Promise<Map<string, number>> {
+    const counts = new Map<string, number>();
+    if (ids.length === 0) return counts;
+    let replies: Array<[Error | null, unknown]> | null;
+    try {
+      replies = await this.#lifecycle.run('subscribe', ({ commands }) => {
+        const pipe = commands.pipeline();
+        for (const id of ids) pipe.xpending(sub.key, sub.group, id, id, 1);
+        return pipe.exec();
+      });
+    } catch (error) {
+      this.#logFailure(error, 'XPENDING', this.#fields(sub, 'commands'));
+      return counts;
+    }
+    if (!Array.isArray(replies)) return counts;
+    for (let i = 0; i < ids.length; i += 1) {
+      const id = ids[i];
+      if (id === undefined) continue;
+      const item = replies[i];
+      if (!Array.isArray(item)) continue;
+      const [failed, reply] = item;
+      if (failed) continue;
+      const count = deliveryCountOf(reply, id);
+      if (count !== undefined) counts.set(id, count);
+    }
+    return counts;
   }
 
   async #dispatch(
     sub: Subscription,
     id: string,
     fields: string[],
+    deliveries: number | undefined,
   ): Promise<void> {
     const raw = fieldOf(fields, 'payload');
     if (raw === undefined) {
@@ -614,19 +698,35 @@ export class RedisQueue extends Adapter(Queue) {
       await this.#settle(sub, id, 'drop');
       return;
     }
+    if (deliveries === undefined) {
+      this.#logger.error(new Error('queue: delivery count missing'), {
+        adapter: ADAPTER,
+        topic: sub.topic,
+        group: sub.group,
+        id,
+      });
+      sub.inflight.delete(id);
+      return;
+    }
+    if (!deliveryAllowed(deliveries, sub.maxDeliveries)) {
+      await this.#giveUp(sub, id, deliveries, fields, payload);
+      return;
+    }
     let thrown = false;
+    let thrownError: unknown;
     let returned: QueueDisposition | void;
     try {
       const call: HandlerCall = { sub, active: true };
       try {
         returned = await this.#handling.run(call, () =>
-          sub.handler({ id, topic: sub.topic, payload }),
+          sub.handler({ id, topic: sub.topic, payload, deliveries }),
         );
       } finally {
         call.active = false;
       }
     } catch (error) {
       thrown = true;
+      thrownError = error;
       returned = undefined;
       this.#logger.error(
         error instanceof Error ? error : new Error('queue: handler failed'),
@@ -634,7 +734,41 @@ export class RedisQueue extends Adapter(Queue) {
       );
     }
     const disposition = dispositionOf(returned, thrown, sub.onError);
+    if (
+      disposition === 'retry' &&
+      retryExhausted(deliveries, sub.maxDeliveries)
+    ) {
+      await this.#giveUp(sub, id, deliveries, fields, payload, thrownError);
+      return;
+    }
     await this.#settle(sub, id, disposition);
+  }
+
+  /** Logs, parks when a sink is set, then acknowledges. A failed park still acknowledges. */
+  async #giveUp(
+    sub: Subscription,
+    id: string,
+    deliveries: number,
+    fields: string[],
+    payload: unknown,
+    thrown?: unknown,
+  ): Promise<void> {
+    this.#logger.error(new Error('queue: deliveries exhausted'), {
+      adapter: ADAPTER,
+      topic: sub.topic,
+      group: sub.group,
+      id,
+      deliveries,
+    });
+    const sensitive = fieldOf(fields, 'sensitive') === '1';
+    await this.#parkDeliver(sub, id, {
+      payload: sensitive
+        ? { reason: 'deliveries-exhausted', sensitive: true }
+        : { reason: 'deliveries-exhausted', payload },
+      error: exhaustedError(thrown),
+      attempts: deliveries,
+    });
+    await this.#settle(sub, id, 'ack');
   }
 
   /** Once `unsubscribe` or `stop()` stops waiting, a handler that returns does not `XACK`. Its entry stays pending for another consumer. */

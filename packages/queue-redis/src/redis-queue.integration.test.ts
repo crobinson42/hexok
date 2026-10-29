@@ -1,7 +1,9 @@
 import { randomUUID } from 'node:crypto';
+import type { QueueMaxDeliveries, QueueSubscribeOptions } from '@hexok/queue';
 import { describeRedisLifecycle, RedisProxy, runNode } from '@hexok/test-redis';
 import { Redis } from 'ioredis';
 import { afterEach, describe, expect, it } from 'vitest';
+import type { ParkInput } from './park.js';
 import { RedisQueue } from './redis-queue.js';
 import {
   deleteIdleStream,
@@ -23,6 +25,30 @@ describeRedisLifecycle('RedisQueue', ({ redis, stopTimeoutMs }) => {
     inFlight: () => queue.publish('jobs', { n: 2 }),
   };
 });
+
+function subscribe<T>(
+  queue: {
+    subscribe: (
+      topic: string,
+      options: QueueSubscribeOptions<T>,
+    ) => Promise<void>;
+  },
+  topic: string,
+  options: Omit<QueueSubscribeOptions<T>, 'maxDeliveries'> & {
+    readonly maxDeliveries?: QueueMaxDeliveries;
+  },
+): Promise<void> {
+  const maxDeliveries = options.maxDeliveries ?? 'unlimited';
+  return queue.subscribe(topic, {
+    consumerGroup: options.consumerGroup,
+    handler: options.handler,
+    maxDeliveries,
+    ...(options.startFrom === undefined
+      ? {}
+      : { startFrom: options.startFrom }),
+    ...(options.onError === undefined ? {} : { onError: options.onError }),
+  });
+}
 
 async function waitFor(check: () => Promise<boolean> | boolean): Promise<void> {
   const started = Date.now();
@@ -117,7 +143,7 @@ describe.skipIf(!process.env.REDIS_URL)('RedisQueue integration', () => {
     const seen: string[] = [];
     let mode: 'ack' | 'void' | 'drop' | 'retry' | 'hold' = 'ack';
     let release: (value: 'ack') => void = () => {};
-    await queue.subscribe('jobs', {
+    await subscribe(queue, 'jobs', {
       consumerGroup: 'workers',
       handler: async (message) => {
         seen.push(String(message.payload));
@@ -180,7 +206,7 @@ describe.skipIf(!process.env.REDIS_URL)('RedisQueue integration', () => {
     queues.push(queue2);
     await queue2.start();
     let releaseStop: (value: 'ack') => void = () => {};
-    await queue2.subscribe('jobs', {
+    await subscribe(queue2, 'jobs', {
       consumerGroup: 'workers',
       handler: () =>
         new Promise((resolve) => {
@@ -241,7 +267,7 @@ await queue.stop();
     queues.push(queue);
     await queue.start();
     const seen: unknown[] = [];
-    await queue.subscribe('codes', {
+    await subscribe(queue, 'codes', {
       consumerGroup: 'sms',
       handler: async (message) => {
         seen.push(message.payload);
@@ -316,7 +342,7 @@ const queue = new RedisQueue({
   blockMs: 200,
 });
 await queue.start();
-await queue.subscribe('jobs', { consumerGroup: 'workers', handler: async () => 'ack' });
+await queue.subscribe('jobs', { consumerGroup: 'workers', maxDeliveries: 'unlimited', handler: async () => 'ack' });
 await new Promise((resolve) => setTimeout(resolve, 100));
 await proxy.refuse();
 proxy.drop();
@@ -351,7 +377,7 @@ await proxy.close();
     queues.push(queue);
     await queue.start();
     let handled = 0;
-    await queue.subscribe('jobs', {
+    await subscribe(queue, 'jobs', {
       consumerGroup: 'workers',
       handler: async () => {
         handled += 1;
@@ -399,6 +425,7 @@ const before = heapUsed();
 let handled = 0;
 await queue.subscribe('jobs', {
   consumerGroup: 'workers',
+  maxDeliveries: 'unlimited',
   handler: async () => {
     handled += 1;
   },
@@ -437,7 +464,7 @@ console.log(JSON.stringify({ growth, total: count * payload.length }));
     });
     queues.push(queue);
     await queue.start();
-    await queue.subscribe('jobs', {
+    await subscribe(queue, 'jobs', {
       consumerGroup: 'workers',
       handler: async () => 'ack',
     });
@@ -474,7 +501,7 @@ console.log(JSON.stringify({ growth, total: count * payload.length }));
     const calls: string[] = [];
     let running = 0;
     let most = 0;
-    await queue.subscribe('jobs', {
+    await subscribe(queue, 'jobs', {
       consumerGroup: 'workers',
       startFrom: 'earliest',
       handler: async (message) => {
@@ -502,7 +529,7 @@ console.log(JSON.stringify({ growth, total: count * payload.length }));
     queues.push(queue);
     await queue.start();
     let started = false;
-    await queue.subscribe('jobs', {
+    await subscribe(queue, 'jobs', {
       consumerGroup: 'workers',
       handler: async () => {
         started = true;
@@ -541,7 +568,7 @@ console.log(JSON.stringify({ growth, total: count * payload.length }));
       consumerGroup: 'workers',
       handler: async () => 'ack' as const,
     };
-    await queue.subscribe('jobs', options);
+    await subscribe(queue, 'jobs', options);
     await waitFor(
       async () =>
         (await consumersOf(admin, `${keyPrefix}jobs`, 'workers')).length === 1,
@@ -553,14 +580,14 @@ console.log(JSON.stringify({ growth, total: count * payload.length }));
     expect(ms).toBeGreaterThanOrEqual(450);
     expect(ms).toBeLessThan(750);
     await proxy.restore();
-    await queue.subscribe('jobs', options);
+    await subscribe(queue, 'jobs', options);
   });
 
   it('unsubscribe resolves within stopTimeoutMs while Redis refuses connections', async () => {
     const keyPrefix = newPrefix();
     const admin = probe();
     const { queue, proxy } = await proxied(keyPrefix, 500);
-    await queue.subscribe('jobs', {
+    await subscribe(queue, 'jobs', {
       consumerGroup: 'workers',
       handler: async () => 'ack',
     });
@@ -587,7 +614,7 @@ console.log(JSON.stringify({ growth, total: count * payload.length }));
     await queue.start();
     let handled = 0;
     for (const topic of ['left', 'stopped']) {
-      await queue.subscribe(topic, {
+      await subscribe(queue, topic, {
         consumerGroup: 'workers',
         handler: async () => {
           handled += 1;
@@ -629,7 +656,7 @@ console.log(JSON.stringify({ growth, total: count * payload.length }));
     });
     queues.push(queue);
     await queue.start();
-    await queue.subscribe('jobs', {
+    await subscribe(queue, 'jobs', {
       consumerGroup: 'workers',
       handler: async () => 'ack',
     });
@@ -749,6 +776,51 @@ console.log(JSON.stringify({ growth, total: count * payload.length }));
     ]);
     await admin.del(key);
   });
+
+  it('acks a throw at maxDeliveries and does not run the handler again', async () => {
+    const url = process.env.REDIS_URL ?? '';
+    const admin = new Redis(url);
+    open.push(admin);
+    const prefix = `hexok:queue:it:${randomUUID()}:`;
+    const parked: ParkInput[] = [];
+    const queue = new RedisQueue({
+      redis: url,
+      keyPrefix: prefix,
+      visibilityMs: 300,
+      blockMs: 100,
+      stopTimeoutMs: 1000,
+      quarantine: {
+        async park(input: ParkInput) {
+          parked.push(input);
+          return { id: 'q1' };
+        },
+      },
+    });
+    queues.push(queue);
+    await queue.start();
+    let calls = 0;
+    await subscribe(queue, 'jobs', {
+      consumerGroup: 'workers',
+      maxDeliveries: 1,
+      handler: async () => {
+        calls += 1;
+        throw new Error('nope');
+      },
+    });
+    await queue.publish('jobs', { n: 1 });
+    const key = `${prefix}jobs`;
+    await waitFor(async () => {
+      const summary = (await admin.xpending(key, 'workers')) as [number];
+      return calls === 1 && summary[0] === 0 && parked.length === 1;
+    });
+    await new Promise((resolve) => setTimeout(resolve, 400));
+    expect(calls).toBe(1);
+    expect(parked[0]).toMatchObject({
+      attempts: 1,
+      error: { message: 'queue: deliveries exhausted' },
+    });
+    await admin.del(key);
+  });
 });
 
 /**
@@ -792,7 +864,7 @@ describe.each(recoveryTargets)('RedisQueue recovery on %s', (_name, url) => {
         await new Promise((resolve) => setTimeout(resolve, 300));
         const handled: string[] = [];
         await queue.start();
-        await queue.subscribe('jobs', {
+        await subscribe(queue, 'jobs', {
           consumerGroup: 'workers',
           handler: async (message) => {
             handled.push(message.id);

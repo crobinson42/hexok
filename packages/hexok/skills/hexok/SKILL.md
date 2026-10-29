@@ -86,7 +86,7 @@ An adapter is the concrete port: memory while sketching, a database in the API, 
 
 Read [references/mapper.md](references/mapper.md) when the stored document is a different shape from the domain props. Persisting `toProps()` as JSON needs no mapper.
 
-The publisher adapter accepts `EventInstance<typeof Catalog>`. It sends `Catalog.message(event)` when the transport stores bytes. The subscription adapter runs `Catalog.parse` and then `handle`. Ack, retry, prefetch, and consumer groups stay on that adapter.
+The publisher adapter accepts `EventInstance<typeof Catalog>`. It sends `Catalog.message(event)` when the transport stores bytes. The subscription adapter runs `Catalog.parse` and then `handle`. Ack, retry, prefetch, and consumer groups stay on that adapter. The application sets `maxDeliveries` on `subscribe`. The adapter enforces it. The lease stays on the adapter.
 
 ### 5. Gateway
 

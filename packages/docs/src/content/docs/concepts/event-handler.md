@@ -41,7 +41,7 @@ class EmailSubscribers extends EventHandler('email.subscribers', PostPublished) 
 
 Annotate `event` with `PostPublished`. That is the class passed to `EventHandler`, and it is what types `payload`.
 
-A process that shares the API's memory can pass the instance straight to `handle`. A worker in another process can parse with `handler.event.parse` when the message is that event's payload, or read a [catalog message](/hexok/concepts/event-catalog/), run `BlogEvents.parse`, and then call `handle`. Subscription, ack, and retry belong to that adapter. The instance `token` and `event` are the same values as the statics.
+A process that shares the API's memory can pass the instance straight to `handle`. A worker in another process can parse with `handler.event.parse` when the message is that event's payload, or read a [catalog message](/hexok/concepts/event-catalog/), run `BlogEvents.parse`, and then call `handle`. Subscription, ack, and retry belong to that adapter. The application sets `maxDeliveries` on `subscribe`. The adapter enforces it. The lease stays on the adapter. The instance `token` and `event` are the same values as the statics.
 
 ## API
 

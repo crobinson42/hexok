@@ -9,6 +9,7 @@ const queue = new RedisQueue({ redis: 'redis://127.0.0.1:6379' });
 await queue.start();
 await queue.subscribe('emails', {
   consumerGroup: 'mailer',
+  maxDeliveries: 'unlimited',
   handler: async (message) => {
     await send(message.payload);
   },
@@ -22,9 +23,12 @@ await queue.stop();
 Delivery is at least once. A message can reach a handler more than once, so make handlers idempotent.
 
 - An entry is acked with `XACK` only after its handler returns `'ack'`, `'drop'`, or nothing.
-- An entry whose handler throws or returns `'retry'` stays pending. A thrown error follows the subscription's `onError`, which defaults to `'retry'`.
+- An entry whose handler throws or returns `'retry'` stays pending, until `deliveries` reaches `maxDeliveries`. A thrown error follows the subscription's `onError`, which defaults to `'retry'`. `'ack'`, `void`, and `'drop'` still acknowledge on the last delivery. A retry at the ceiling is acknowledged. It is not a handler `'drop'`.
+- `subscribe` requires `maxDeliveries`. There is no default. `'unlimited'` retries without a ceiling. A positive integer runs the handler at most that many times. The count is handoffs, not a duration. The default lease is 30 seconds. A restart consumes a count. Ten deliveries is not a promise of five minutes.
+- `deliveries` is read from the pending list after each read or claim. It counts this handoff and every earlier handoff, including a crash that never acknowledged. A count past the ceiling does not call the handler. The entry is logged, parked when a sink is set, and acknowledged. A missing count is logged and left pending. It is not acknowledged.
+- The ceiling is per subscriber. Two processes in one group can disagree during a deploy. The one that handles that delivery decides.
 - After `visibilityMs`, `XAUTOCLAIM` in any consumer of the group claims a pending entry and delivers it again. A redelivery can arrive after newer entries.
-- Every entry of a read batch is in the heartbeat from the moment the batch arrives until it settles. The heartbeat `XCLAIM`s those entries every `visibilityMs / 3`, so no consumer reclaims an entry that is running or waiting its turn. The heartbeat is `XCLAIM` with the ids and then `JUSTID`. An empty snapshot does not call `XCLAIM`. `'retry'` removes the id from the heartbeat, so the entry goes idle and can be reclaimed.
+- Every entry of a read batch is in the heartbeat from the moment the batch arrives until it settles. The heartbeat `XCLAIM`s those entries every `visibilityMs / 3`, so no consumer reclaims an entry that is running or waiting its turn. The heartbeat is `XCLAIM` with the ids and then `JUSTID`. `JUSTID` does not increment the delivery count. Keep it. An empty snapshot does not call `XCLAIM`. `'retry'` removes the id from the heartbeat, so the entry goes idle and can be reclaimed.
 - `XAUTOCLAIM` runs every `visibilityMs / 2`. A run is skipped while the previous one is still running.
 - A handler that finishes while `stop()` or `unsubscribe()` waits is acked. Once they stop waiting, a handler that returns does not `XACK`. Its entry stays pending for another consumer.
 - A consumer is never deleted while it owns a pending entry. Deleting it would drop those entries from the group, and no consumer could reclaim them.
@@ -33,7 +37,7 @@ Delivery is at least once. A message can reach a handler more than once, so make
 
 Trimming can lose entries. `XADD` trims with `MAXLEN ~` only. Age trim is a separate `XTRIM MINID` after each publish and every minute. Both may delete entries that are still pending.
 
-There is no dead-letter stream. An optional `quarantine` sink parks a failed encode or `XADD`, a missing payload, and a decode failure. A handler `'drop'` is not parked. An encode failure rejects `publish` and does not call `XADD`. A failed age trim is logged and still resolves `publish` with the stream id. A missing payload or a decode failure is acked after it is parked.
+There is no dead-letter stream. An optional `quarantine` sink parks a failed encode or `XADD`, a missing payload, a decode failure, and a give-up. A parked deliver record has `source: 'queue'`, `operation: 'deliver'`, and `subject` `topic:id`. Those three fields are the same for a missing payload, a decode failure, and a give-up. A give-up is the one whose error message is `queue: deliveries exhausted`, with `attempts` set to the count. A sensitive give-up parks no payload. A handler `'drop'` is not parked. Without a durable sink, acknowledging a give-up discards the entry. Quarantine has no replay method. A republish is a new entry, so its delivery count starts at 1. Trim can still delete a pending entry. The ceiling does not protect against that. An encode failure rejects `publish` and does not call `XADD`. A failed age trim is logged and still resolves `publish` with the stream id. A missing payload or a decode failure is acked after it is parked.
 
 ## Lifecycle
 
@@ -83,13 +87,15 @@ Every log carries `adapter: 'queue'`. `connection` is `commands` or `blocking`, 
 | A connection that ended after `start()` | `error` | `adapter`, `connection`, and `topic`, `group` on a blocking connection |
 | `QUIT` fails during `stop()` | `error` | `adapter`, `connection` |
 | The stop cleanup threw | `error` | `adapter` |
-| A failed `XREADGROUP`, `XCLAIM`, `XAUTOCLAIM`, group recreate, or consumer removal | `error` | `adapter`, `connection`, `topic`, `group` |
+| A failed `XREADGROUP`, `XCLAIM`, `XAUTOCLAIM`, `XPENDING`, group recreate, or consumer removal | `error` | `adapter`, `connection`, `topic`, `group` |
 | A failed `XACK` | `error` | `adapter`, `connection`, `topic`, `group`, `id` |
 | A failed age trim, after a publish or on the minute | `error` | `adapter`, `connection`, `topic` |
 | A background command that `stop()` cut short | `warn` | the failed command's fields, plus `code` |
 | `unsubscribe()` stopped waiting for handlers, and left the consumer for `maintain()` | `warn` | `adapter`, `connection`, `topic`, `group` |
 | `unsubscribe()` stopped waiting for Redis to remove the consumer | `error` | `adapter`, `connection`, `topic`, `group` |
 | A handler throws | `error` | `adapter`, `topic`, `group`, `id` |
+| Deliveries exhausted | `error` | `adapter`, `topic`, `group`, `id`, `deliveries` |
+| A delivery count is missing | `error` | `adapter`, `topic`, `group`, `id` |
 | A payload fails to decode | `error` | `adapter`, `topic`, `group`, `id` |
 | An `XINFO`, `XTRIM`, consumer removal, group destroy, or stream delete fails in `maintain()` | `error` | `adapter`, `connection`, `topic`, and `group` when it is about a group |
 | The quarantine sink fails to park | `error` | `adapter` |

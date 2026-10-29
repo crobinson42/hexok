@@ -48,6 +48,7 @@ class MemoryQueue extends Adapter(Queue) {
   readonly subscriptions: Array<{
     topic: string;
     consumerGroup: string;
+    maxDeliveries: QueueSubscribeOptions<unknown>['maxDeliveries'];
     handler: QueueHandler<unknown>;
   }> = [];
 
@@ -62,6 +63,7 @@ class MemoryQueue extends Adapter(Queue) {
     this.subscriptions.push({
       topic,
       consumerGroup: options.consumerGroup,
+      maxDeliveries: options.maxDeliveries,
       handler: options.handler as QueueHandler<unknown>,
     });
   }
@@ -75,7 +77,9 @@ describe('subscribeHandler', () => {
   it('subscribes the event token and defaults the group to the handler token', async () => {
     const queue = new MemoryQueue();
     const handler = new CountingHandler();
-    const subscription = await subscribeHandler(queue, handler);
+    const subscription = await subscribeHandler(queue, handler, {
+      maxDeliveries: 20,
+    });
     expect(subscription).toEqual({
       topic: 'post.published',
       group: 'count.published',
@@ -84,13 +88,16 @@ describe('subscribeHandler', () => {
       expect.objectContaining({
         topic: 'post.published',
         consumerGroup: 'count.published',
+        maxDeliveries: 20,
       }),
     ]);
   });
 
   it('uses a static group when the handler class sets one', async () => {
     const queue = new MemoryQueue();
-    const subscription = await subscribeHandler(queue, new GroupedHandler());
+    const subscription = await subscribeHandler(queue, new GroupedHandler(), {
+      maxDeliveries: 'unlimited',
+    });
     expect(subscription.group).toBe('shared');
   });
 });

@@ -1,4 +1,4 @@
-import type { Queue, QueueDisposition } from '@hexok/queue';
+import type { Queue, QueueDisposition, QueueMaxDeliveries } from '@hexok/queue';
 import { CodedError } from 'hexok';
 
 /**
@@ -13,12 +13,6 @@ export type QueueEventHandler = {
   handle(event: never): Promise<void> | void;
 };
 
-/**
- * Subscribe one handler. The topic is the event token. The consumer group is
- * a static `group` on the class, or the handler token. A payload the event
- * schema rejects is `drop`. A throw from `handle` propagates so the queue
- * can retry.
- */
 /**
  * Throw when two different handler classes would compete on one topic.
  * Same class twice is left to the queue. Different topics do not interact.
@@ -48,18 +42,18 @@ export function assertDistinctHandlerGroups(
  * Subscribe one handler. The topic is the event token. The consumer group is
  * a static `group` on the class, or the handler token. A payload the event
  * schema rejects is `drop`. A throw from `handle` propagates so the queue
- * can retry.
- * @param queue
- * @param handler
+ * can retry until `maxDeliveries`.
  */
 export async function subscribeHandler(
   queue: Queue,
   handler: QueueEventHandler,
+  options: { readonly maxDeliveries: QueueMaxDeliveries },
 ): Promise<{ topic: string; group: string }> {
   const topic = handler.event.token;
   const group = groupOf(handler);
   await queue.subscribe(topic, {
     consumerGroup: group,
+    maxDeliveries: options.maxDeliveries,
     handler: (message) => deliver(handler, message.payload),
   });
   return { topic, group };

@@ -66,7 +66,9 @@ export async function main(): Promise<void> {
   const subscriptions: Array<{ topic: string; group: string }> = [];
   for (const handler of domainQueueHandlers) {
     subscriptions.push(
-      await subscribeHandler(runtime.domainEventsQueue, handler),
+      await subscribeHandler(runtime.domainEventsQueue, handler, {
+        maxDeliveries: 'unlimited',
+      }),
     );
   }
 

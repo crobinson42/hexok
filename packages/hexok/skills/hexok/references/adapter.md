@@ -48,7 +48,7 @@ Store `toProps()` (or a mapped document) and rebuild with `restore` on the way o
 
 The defaults of `start` and `stop` resolve immediately, so an in-memory adapter can leave them alone. A database adapter overrides `start` to connect and `stop` to disconnect. The application calls them. The use case calls `get` and `save`.
 
-A publisher adapter accepts the catalog instance and, on a real transport, sends `BlogEvents.message(event)`. A subscription adapter owns the consumer loop. It parses with `BlogEvents.parse`, then calls each subscribed handler. It does not hide handler errors. Ack, retry, prefetch, and consumer groups live here, and only when the broker has them.
+A publisher adapter accepts the catalog instance and, on a real transport, sends `BlogEvents.message(event)`. A subscription adapter owns the consumer loop. It parses with `BlogEvents.parse`, then calls each subscribed handler. It does not hide handler errors. Ack, retry, prefetch, and consumer groups live here, and only when the broker has them. The application sets `maxDeliveries` on `subscribe`. The adapter enforces it. The lease stays on the adapter.
 
 One adapter implements one port. A second port is a second class.
 

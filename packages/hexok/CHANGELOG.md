@@ -1,5 +1,11 @@
 # hexok
 
+## 2.2.2
+
+### Patch Changes
+
+- [`091523f`](https://github.com/crobinson42/hexok/commit/091523f4119b6ebff19cd1d72ee61cd26c0ed985) Thanks [@crobinson42](https://github.com/crobinson42)! - `subscribe` requires `maxDeliveries`. A positive integer runs the handler at most that many times. `'unlimited'` keeps retrying. A retry at the ceiling is acknowledged. The Redis adapter reads the pending delivery count and parks a give-up when a sink is set. A give-up is `source: 'queue'`, `operation: 'deliver'`, subject `topic:id`, and error `queue: deliveries exhausted`. Quarantine has no replay method. A republish is a new entry.
+
 ## 2.2.1
 
 ### Patch Changes

@@ -1,6 +1,6 @@
 {
   "name": "@hexok/email-resend",
-  "version": "0.2.0",
+  "version": "1.0.0",
   "description": "Resend adapter for the hexok EmailSender port.",
   "type": "module",
   "license": "MIT",
@@ -45,7 +45,7 @@
   },
   "dependencies": {
     "@hexok/email": "^0.2.0",
-    "hexok": "^2.2.1",
+    "hexok": "^2.2.2",
     "p-retry": "^8.0.1"
   },
   "peerDependencies": {

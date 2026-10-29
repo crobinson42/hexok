@@ -1,5 +1,20 @@
 # @hexok/queue-redis
 
+## 1.0.0
+
+### Major Changes
+
+- [`9e42ece`](https://github.com/crobinson42/hexok/commit/9e42eced138949d2f17d3a49c0fa5cc51f2b19c5) Thanks [@crobinson42](https://github.com/crobinson42)! - Require `ioredis` 6. Connections negotiate RESP3 and keep v5 reply shapes. `@hexok/ioredis-lifecycle` no longer accepts `ioredis` 5.
+
+- [`091523f`](https://github.com/crobinson42/hexok/commit/091523f4119b6ebff19cd1d72ee61cd26c0ed985) Thanks [@crobinson42](https://github.com/crobinson42)! - `subscribe` requires `maxDeliveries`. A positive integer runs the handler at most that many times. `'unlimited'` keeps retrying. A retry at the ceiling is acknowledged. The Redis adapter reads the pending delivery count and parks a give-up when a sink is set. A give-up is `source: 'queue'`, `operation: 'deliver'`, subject `topic:id`, and error `queue: deliveries exhausted`. Quarantine has no replay method. A republish is a new entry.
+
+### Patch Changes
+
+- Updated dependencies [[`9e42ece`](https://github.com/crobinson42/hexok/commit/9e42eced138949d2f17d3a49c0fa5cc51f2b19c5), [`091523f`](https://github.com/crobinson42/hexok/commit/091523f4119b6ebff19cd1d72ee61cd26c0ed985)]:
+  - @hexok/ioredis-lifecycle@1.0.0
+  - @hexok/queue@1.0.0
+  - hexok@2.2.2
+
 ## 0.2.0
 
 ### Minor Changes

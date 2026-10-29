@@ -1,5 +1,13 @@
 # @hexok/sms-twilio
 
+## 0.2.1
+
+### Patch Changes
+
+- [`9e42ece`](https://github.com/crobinson42/hexok/commit/9e42eced138949d2f17d3a49c0fa5cc51f2b19c5) Thanks [@crobinson42](https://github.com/crobinson42)! - `mailgun.js` `^13` and `^14` satisfy the Mailgun peer. `twilio` `^6` satisfies the Twilio peer. `^12` and `^5` still do.
+- Updated dependencies [[`091523f`](https://github.com/crobinson42/hexok/commit/091523f4119b6ebff19cd1d72ee61cd26c0ed985)]:
+  - hexok@2.2.2
+
 ## 0.2.0
 
 ### Minor Changes

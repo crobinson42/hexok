@@ -1,5 +1,16 @@
 # @hexok/ioredis-lifecycle
 
+## 1.0.0
+
+### Major Changes
+
+- [`9e42ece`](https://github.com/crobinson42/hexok/commit/9e42eced138949d2f17d3a49c0fa5cc51f2b19c5) Thanks [@crobinson42](https://github.com/crobinson42)! - Require `ioredis` 6. Connections negotiate RESP3 and keep v5 reply shapes. `@hexok/ioredis-lifecycle` no longer accepts `ioredis` 5.
+
+### Patch Changes
+
+- Updated dependencies [[`091523f`](https://github.com/crobinson42/hexok/commit/091523f4119b6ebff19cd1d72ee61cd26c0ed985)]:
+  - hexok@2.2.2
+
 ## 0.1.0
 
 ### Minor Changes

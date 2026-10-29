@@ -1,6 +1,6 @@
 {
   "name": "@hexok/sms-twilio",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "Twilio adapter for the hexok SmsSender port.",
   "type": "module",
   "license": "MIT",
@@ -42,7 +42,7 @@
   },
   "dependencies": {
     "@hexok/sms": "^0.2.0",
-    "hexok": "^2.2.1"
+    "hexok": "^2.2.2"
   },
   "peerDependencies": {
     "twilio": "^5 || ^6"

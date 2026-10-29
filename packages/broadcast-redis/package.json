@@ -1,6 +1,6 @@
 {
   "name": "@hexok/broadcast-redis",
-  "version": "0.2.0",
+  "version": "1.0.0",
   "description": "Redis pub/sub adapter for the hexok Broadcast port.",
   "type": "module",
   "license": "MIT",
@@ -42,8 +42,8 @@
   },
   "dependencies": {
     "@hexok/broadcast": "^0.1.0",
-    "@hexok/ioredis-lifecycle": "^0.1.0",
-    "hexok": "^2.2.1",
+    "@hexok/ioredis-lifecycle": "^1.0.0",
+    "hexok": "^2.2.2",
     "ioredis": "^6"
   },
   "devDependencies": {

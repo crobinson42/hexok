@@ -1,5 +1,11 @@
 # @hexok/queue-redis
 
+## 1.1.2
+
+### Patch Changes
+
+- [#16](https://github.com/crobinson42/hexok/pull/16) [`8d1ef8d`](https://github.com/crobinson42/hexok/commit/8d1ef8d2b206461a65b27af4f73ce73d0cca27ca) Thanks [@crobinson42](https://github.com/crobinson42)! - The default decode throws `queue: entry is not JSON` or `broadcast: message is not JSON` and does not quote the text. A malformed entry no longer puts the start of its contents into the log.
+
 ## 1.1.1
 
 ### Patch Changes

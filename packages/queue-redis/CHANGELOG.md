@@ -1,5 +1,11 @@
 # @hexok/queue-redis
 
+## 1.1.1
+
+### Patch Changes
+
+- [#14](https://github.com/crobinson42/hexok/pull/14) [`3f3a281`](https://github.com/crobinson42/hexok/commit/3f3a281ced7875fbb388c565b3618bdaea3c0002) Thanks [@crobinson42](https://github.com/crobinson42)! - `keptConsumers` holds the newest 1,000 consumers, so a long-running process no longer grows the list without limit. Each kept consumer is still logged at `warn`.
+
 ## 1.1.0
 
 ### Minor Changes

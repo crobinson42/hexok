@@ -53,7 +53,13 @@ export interface RedisQueueConfig {
   readonly batch?: number;
   readonly blockMs?: number;
   readonly maxLen?: number;
+  /** Entries older than this are trimmed from the topics this instance published to. Default one day. */
   readonly retentionMs?: number;
+  /**
+   * Which streams this instance age-trims. `'published'`, the default, trims only topics it published to, so a consumer never shortens a stream it does not own.
+   * `false` never age-trims. `MAXLEN ~` on `XADD` applies either way.
+   */
+  readonly trim?: 'published' | false;
   /**
    * How long `stop()` and `unsubscribe()` wait for handlers, consumer release, and `QUIT`. Default 10000.
    * A handler still running is no longer waited for. It keeps running until the process exits, and its entry is not acked,
@@ -229,13 +235,14 @@ export class RedisQueue extends Adapter(Queue) {
   readonly #blockMs: number;
   readonly #maxLen: number;
   readonly #retentionMs: number;
+  readonly #trimEnabled: boolean;
   readonly #encode: (payload: unknown) => string;
   readonly #decode: (raw: string) => unknown;
   readonly #logger: LogSink;
   readonly #quarantine: ParkSink | undefined;
   readonly #lifecycle: RedisLifecycle<Clients>;
   #trimTimer: ReturnType<typeof setInterval> | undefined;
-  readonly #topics = new Set<string>();
+  readonly #published = new Set<string>();
   readonly #subs = new Map<string, Subscription>();
   /**
    * The handler call running now. A handler that calls `unsubscribe` on its own subscription, or `stop()`, would otherwise wait for itself until `stopTimeoutMs`.
@@ -253,6 +260,7 @@ export class RedisQueue extends Adapter(Queue) {
     this.#blockMs = config.blockMs ?? 1000;
     this.#maxLen = config.maxLen ?? 10_000;
     this.#retentionMs = config.retentionMs ?? 86_400_000;
+    this.#trimEnabled = config.trim !== false;
     this.#encode = config.encode ?? encodeJson;
     this.#decode = config.decode ?? decodeJson;
     this.#logger = config.logger ?? noopSink;
@@ -274,6 +282,7 @@ export class RedisQueue extends Adapter(Queue) {
     return this.#lifecycle.start(
       () => ({ commands: openRedis(this.#redis) }),
       () => {
+        if (!this.#trimEnabled) return;
         this.#trimTimer = setInterval(() => {
           void this.#trimAll();
         }, 60_000);
@@ -322,7 +331,8 @@ export class RedisQueue extends Adapter(Queue) {
         ? scrubbed(error, error.message)
         : error;
     }
-    this.#topics.add(topic);
+    if (!this.#trimEnabled) return id;
+    this.#published.add(topic);
     try {
       await this.#trim(topic);
     } catch (error) {
@@ -383,7 +393,6 @@ export class RedisQueue extends Adapter(Queue) {
       finish,
     };
     this.#subs.set(mapKey, sub);
-    this.#topics.add(topic);
     const heartbeatMs = Math.max(1, Math.floor(this.#visibilityMs / 3));
     const recoveryMs = Math.max(1, Math.floor(this.#visibilityMs / 2));
     sub.heartbeat = setInterval(() => {
@@ -862,7 +871,7 @@ export class RedisQueue extends Adapter(Queue) {
   }
 
   async #trimAll(): Promise<void> {
-    for (const topic of this.#topics) {
+    for (const topic of this.#published) {
       try {
         await this.#trim(topic);
       } catch (error) {

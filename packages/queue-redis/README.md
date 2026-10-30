@@ -35,7 +35,9 @@ Delivery is at least once. A message can reach a handler more than once, so make
 - When a group is deleted under a subscription, the read loop and `XAUTOCLAIM` recreate it. A failed recreate is logged, and the read loop backs off.
 - A pending entry deleted from the stream, by trim or `XDEL`, is acked. Redis 7 drops it in `XAUTOCLAIM`. Redis 6.2 returns it as `nil` and keeps it pending, so the queue acks the consumer's pending entries that are gone from the stream.
 
-Trimming can lose entries. `XADD` trims with `MAXLEN ~` only. Age trim is a separate `XTRIM MINID` after each publish and every minute. Both may delete entries that are still pending.
+Trimming can lose entries. `XADD` trims with `MAXLEN ~` only. Age trim is a separate `XTRIM MINID` after each publish and every minute, on the topics this instance published to. Both may delete entries that are still pending.
+
+A consumer does not trim. A queue that only subscribes to a topic never trims that stream, so the publisher's retention decides how long entries stay. A stream with no running publisher is not age-trimmed. Run `maintain({ retentionMs })` for that.
 
 There is no dead-letter stream. An optional `quarantine` sink parks a failed encode or `XADD`, a missing payload, a decode failure, and a give-up. A parked deliver record has `source: 'queue'`, `operation: 'deliver'`, and `subject` `topic:id`. Those three fields are the same for a missing payload, a decode failure, and a give-up. A give-up is the one whose error message is `queue: deliveries exhausted`, with `attempts` set to the count. A sensitive give-up parks no payload. A handler `'drop'` is not parked. Without a durable sink, acknowledging a give-up discards the entry. Quarantine has no replay method. A republish is a new entry, so its delivery count starts at 1. Trim can still delete a pending entry. The ceiling does not protect against that. An encode failure rejects `publish` and does not call `XADD`. A failed age trim is logged and still resolves `publish` with the stream id. A missing payload or a decode failure is acked after it is parked.
 
@@ -124,7 +126,8 @@ Every log carries `adapter: 'queue'`. `connection` is `commands` or `blocking`, 
 | `batch` | `10` | Entries per `XREADGROUP` and `XAUTOCLAIM`. Handlers in a batch run one at a time. |
 | `blockMs` | `1000` | How long one `XREADGROUP` blocks before it reads again. |
 | `maxLen` | `10000` | The approximate `MAXLEN ~` cap per stream, applied on `XADD`. It keeps memory bounded. |
-| `retentionMs` | `86400000` | Entries older than this are trimmed with `XTRIM MINID`, after each publish and every minute. One day by default. |
+| `retentionMs` | `86400000` | Entries older than this are trimmed with `XTRIM MINID`, after each publish and every minute, on the topics this instance published to. One day by default. `maintain()` does not use it. |
+| `trim` | `'published'` | `'published'` age-trims only topics this instance published to. `false` never age-trims, and `MAXLEN ~` on `XADD` still applies. |
 | `encode` | `JSON.stringify` | Turns a payload into the `payload` field. |
 | `decode` | `JSON.parse` | Turns the `payload` field back. A failure parks the entry and acks it. |
 | `logger` | no-op | A structural `LogSink`. `@hexok/logger` and `console` fit it. |

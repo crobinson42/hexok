@@ -377,6 +377,47 @@ describe('RedisQueue commands', () => {
     await encodedThrow.stop();
   });
 
+  it('does not age-trim a topic it only subscribes to', async () => {
+    vi.useFakeTimers();
+    const queue = new RedisQueue({ redis: 'redis://127.0.0.1:6379' });
+    await queue.start();
+    const commands = FakeRedis.instances[0];
+    if (!commands) throw new Error('missing commands client');
+    await subscribe(queue, 'orders', {
+      consumerGroup: 'billing',
+      handler: async () => 'ack',
+    });
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(commands.calls.some((call) => call[0] === 'xtrim')).toBe(false);
+    await queue.publish('jobs', { n: 1 });
+    await vi.advanceTimersByTimeAsync(60_000);
+    const trimmed = commands.calls
+      .filter((call) => call[0] === 'xtrim')
+      .map((call) => call[1]);
+    expect(trimmed).toEqual(['hexok:queue:jobs', 'hexok:queue:jobs']);
+    await queue.stop();
+    vi.useRealTimers();
+  });
+
+  it('trim: false sets no timer and sends no XTRIM, and XADD keeps MAXLEN', async () => {
+    vi.useFakeTimers();
+    const queue = new RedisQueue({
+      redis: 'redis://127.0.0.1:6379',
+      trim: false,
+    });
+    await queue.start();
+    expect(vi.getTimerCount()).toBe(0);
+    const commands = FakeRedis.instances[0];
+    if (!commands) throw new Error('missing commands client');
+    await queue.publish('jobs', { n: 1 });
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(commands.calls.some((call) => call[0] === 'xtrim')).toBe(false);
+    const xadd = commands.calls.find((call) => call[0] === 'xadd');
+    expect(xadd).toContain('MAXLEN');
+    await queue.stop();
+    vi.useRealTimers();
+  });
+
   it('parks a failed publish and encode, and not a failed trim', async () => {
     const parked: ParkInput[] = [];
     const quarantine = {

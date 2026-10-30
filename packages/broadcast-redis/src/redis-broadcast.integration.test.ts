@@ -1,8 +1,13 @@
 import { randomUUID } from 'node:crypto';
 import { channel } from '@hexok/broadcast';
-import { describeRedisLifecycle, RedisProxy } from '@hexok/test-redis';
+import {
+  describeRedisLifecycle,
+  documentedAclRules,
+  RedisProxy,
+  withAclUser,
+} from '@hexok/test-redis';
 import type { RedisOptions } from 'ioredis';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, onTestFinished } from 'vitest';
 import { RedisBroadcast } from './redis-broadcast.js';
 
 if (process.env.CI && !process.env.REDIS_URL) {
@@ -229,5 +234,46 @@ describe.skipIf(!process.env.REDIS_URL)('RedisBroadcast integration', () => {
     for (let run = 0; run < 50; run += 1) {
       await startSubscribePublish(redis);
     }
+  });
+});
+
+describe.skipIf(!process.env.REDIS_URL)('RedisBroadcast ACL', () => {
+  it('runs every command as the documented user with no refusal', async () => {
+    const rules = await documentedAclRules(
+      new URL('../README.md', import.meta.url),
+    );
+    await withAclUser(process.env.REDIS_URL ?? '', rules, async (user) => {
+      const errors: unknown[] = [];
+      const bus = new RedisBroadcast({
+        redis: user.url,
+        channelPrefix: prefix(),
+        logger: {
+          debug() {},
+          info() {},
+          warn() {},
+          error: (error) => errors.push(error),
+        },
+      });
+      const news = channel<{ n: number }>('news');
+      onTestFinished(() => bus.stop());
+      await bus.start();
+      const seen: number[] = [];
+      const handler = (message: { payload: { n: number } }) => {
+        seen.push(message.payload.n);
+      };
+      await bus.subscribe(news, handler);
+      await bus.publish(news, { n: 1 });
+      await within(
+        (async () => {
+          while (seen.length === 0) await delay(10);
+        })(),
+        2000,
+      );
+      await bus.unsubscribe(news, handler);
+      await bus.stop();
+      expect(seen).toEqual([1]);
+      expect(errors).toEqual([]);
+      expect(await user.refusals()).toEqual([]);
+    });
   });
 });

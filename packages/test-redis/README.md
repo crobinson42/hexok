@@ -22,6 +22,10 @@ A TCP proxy in front of Redis that fakes outages. `RedisProxy.start()` listens o
 
 `settleWithin(promise, ms)` resolves `true` when the promise settles in time and `false` when time runs out. It never rejects and clears its timer. Use it to assert that a call such as `stop()` finishes in time.
 
+## withAclUser
+
+`withAclUser(adminUrl, rules, body)` creates a user with `rules` and a random name and password, runs `body`, and deletes the user. `body` gets the user's `url` and `refusals()`, which is `ACL LOG` filtered to that user. `ACL LOG` is server-wide, and test files run in parallel. `documentedAclRules(readme)` reads the rules from the first `ACL SETUSER` line of a README, so a test runs the line the README documents.
+
 ## describeRedisLifecycle
 
 `describeRedisLifecycle(name, factory, options?)` asserts the `@hexok/ioredis-lifecycle` guarantees against real Redis behind a `RedisProxy`. Call it at the top level of an `*.integration.test.ts` file. It skips when `REDIS_URL` is unset and throws when `CI` is set without it.

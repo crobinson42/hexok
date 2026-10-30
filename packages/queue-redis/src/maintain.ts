@@ -9,6 +9,11 @@ import {
 
 export interface RedisQueueMaintainOptions {
   readonly dryRun?: boolean;
+  /**
+   * Trims each stream in the run to this age. Unset, `maintain()` does not trim.
+   * It comes from the call, because `maintain()` runs from one process across streams that other services publish with their own retention.
+   */
+  readonly retentionMs?: number;
   readonly idleConsumerMs?: number;
   readonly dropIdleGroups?: { readonly idleMs: number };
   readonly dropIdleStreams?: { readonly idleMs: number };
@@ -65,7 +70,6 @@ export type MaintainRun = <T>(
 interface MaintainInput {
   readonly run: MaintainRun;
   readonly keyPrefix: string;
-  readonly retentionMs: number;
   readonly options: RedisQueueMaintainOptions;
   readonly logger: LogSink;
 }
@@ -194,22 +198,25 @@ async function processKey(
     report.skipped.push({ key, reason: 'xinfo-failed' });
     return;
   }
-  const stale =
-    stream.firstId !== undefined &&
-    isOlderThan(stream.firstId, input.retentionMs, now);
-  if (report.dryRun) {
-    if (stale) report.trimmed.push(topic);
-  } else {
-    try {
-      const minId = `${now - input.retentionMs}-0`;
-      await input.run((commands) => commands.xtrim(key, 'MINID', '~', minId));
+  const retentionMs = input.options.retentionMs;
+  if (retentionMs !== undefined) {
+    const stale =
+      stream.firstId !== undefined &&
+      isOlderThan(stream.firstId, retentionMs, now);
+    if (report.dryRun) {
       if (stale) report.trimmed.push(topic);
-    } catch (error) {
-      throwIfStopped(error);
-      input.logger.error(
-        error instanceof Error ? error : new Error('queue: XTRIM failed'),
-        { ...COMMANDS, topic },
-      );
+    } else {
+      try {
+        const minId = `${now - retentionMs}-0`;
+        await input.run((commands) => commands.xtrim(key, 'MINID', '~', minId));
+        if (stale) report.trimmed.push(topic);
+      } catch (error) {
+        throwIfStopped(error);
+        input.logger.error(
+          error instanceof Error ? error : new Error('queue: XTRIM failed'),
+          { ...COMMANDS, topic },
+        );
+      }
     }
   }
 

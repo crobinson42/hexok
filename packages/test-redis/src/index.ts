@@ -1,4 +1,10 @@
 export {
+  type AclRefusal,
+  type AclUser,
+  documentedAclRules,
+  withAclUser,
+} from './acl-user.js';
+export {
   describeRedisLifecycle,
   type LifecycleSubject,
   type LifecycleSubjectConfig,

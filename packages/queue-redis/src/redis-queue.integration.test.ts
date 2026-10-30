@@ -1,11 +1,18 @@
 import { randomUUID } from 'node:crypto';
 import type { QueueMaxDeliveries, QueueSubscribeOptions } from '@hexok/queue';
-import { describeRedisLifecycle, RedisProxy, runNode } from '@hexok/test-redis';
+import {
+  describeRedisLifecycle,
+  documentedAclRules,
+  RedisProxy,
+  runNode,
+  withAclUser,
+} from '@hexok/test-redis';
 import { Redis } from 'ioredis';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, onTestFinished, vi } from 'vitest';
 import type { ParkInput } from './park.js';
 import { RedisQueue } from './redis-queue.js';
 import {
+  ackDeleted,
   deleteIdleStream,
   destroyIdleGroup,
   releaseConsumer,
@@ -900,6 +907,314 @@ describe.each(recoveryTargets)('RedisQueue scripts on %s', (_name, url) => {
         expect(await admin.exists(key)).toBe(0);
       } finally {
         await admin.del(key);
+        await admin.quit();
+      }
+    },
+  );
+});
+
+/**
+ * Writes `count` entries with ids at `timeMs`. `XTRIM MINID ~` removes only whole stream nodes, 100 entries by default, so a single old entry would survive any trim.
+ */
+async function seed(
+  client: Redis,
+  key: string,
+  count: number,
+  timeMs: number,
+): Promise<void> {
+  const pipe = client.pipeline();
+  for (let i = 0; i < count; i += 1) {
+    pipe.xadd(key, `${timeMs}-${i}`, 'payload', '{}');
+  }
+  await pipe.exec();
+}
+
+describe.skipIf(!process.env.REDIS_URL)('RedisQueue retention', () => {
+  const url = process.env.REDIS_URL ?? '';
+  const DAY_MS = 86_400_000;
+  const HOUR_MS = 3_600_000;
+  const open: Redis[] = [];
+  const queues: RedisQueue[] = [];
+
+  afterEach(async () => {
+    vi.useRealTimers();
+    await Promise.all(queues.splice(0).map((queue) => queue.stop()));
+    await Promise.all(open.splice(0).map((redis) => redis.quit()));
+  });
+
+  function admin(): Redis {
+    const client = new Redis(url);
+    open.push(client);
+    return client;
+  }
+
+  async function started(
+    config: Omit<ConstructorParameters<typeof RedisQueue>[0], 'redis'>,
+  ): Promise<RedisQueue> {
+    const queue = new RedisQueue({ redis: url, blockMs: 50, ...config });
+    queues.push(queue);
+    await queue.start();
+    return queue;
+  }
+
+  /** Fires the minute's trim timer. It also fires the subscription timers, as a running minute would. */
+  async function runTrimTimer(): Promise<void> {
+    await vi.advanceTimersByTimeAsync(60_000);
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  }
+
+  it('a consumer-only queue never trims an old unread entry', async () => {
+    vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] });
+    const keyPrefix = newPrefix();
+    const key = `${keyPrefix}jobs`;
+    const redis = admin();
+    await seed(redis, key, 1000, Date.now() - 2 * DAY_MS);
+    const queue = await started({ keyPrefix, retentionMs: 1000 });
+    const handled: unknown[] = [];
+    await subscribe(queue, 'jobs', {
+      consumerGroup: 'workers',
+      startFrom: 'now',
+      handler: async (message) => {
+        handled.push(message.id);
+      },
+    });
+    await runTrimTimer();
+    await runTrimTimer();
+    expect(await redis.xlen(key)).toBe(1000);
+    expect(handled).toEqual([]);
+    await redis.del(key);
+  });
+
+  it('a publisher trims to its own retention on publish', async () => {
+    const keyPrefix = newPrefix();
+    const key = `${keyPrefix}jobs`;
+    const redis = admin();
+    const now = Date.now();
+    await seed(redis, key, 1000, now - 2 * HOUR_MS);
+    await seed(redis, key, 50, now - HOUR_MS / 2);
+    const queue = await started({ keyPrefix, retentionMs: HOUR_MS });
+    await queue.publish('jobs', { n: 1 });
+    // A node of 100 can keep some old entries with the newer ones. The newer entries all stay.
+    const left = await redis.xlen(key);
+    expect(left).toBeLessThanOrEqual(151);
+    expect(left).toBeGreaterThanOrEqual(51);
+    await redis.del(key);
+  });
+
+  it('a publisher trims again on the timer', async () => {
+    vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] });
+    const keyPrefix = newPrefix();
+    const key = `${keyPrefix}jobs`;
+    const redis = admin();
+    const queue = await started({ keyPrefix, retentionMs: 500 });
+    await queue.publish('jobs', { n: 1 });
+    await seed(redis, key, 1000, Date.now() + 1);
+    expect(await redis.xlen(key)).toBe(1001);
+    await new Promise((resolve) => setTimeout(resolve, 700));
+    await runTrimTimer();
+    expect(await redis.xlen(key)).toBeLessThan(200);
+    await redis.del(key);
+  });
+
+  it('trim: false never trims', async () => {
+    vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] });
+    const keyPrefix = newPrefix();
+    const key = `${keyPrefix}jobs`;
+    const redis = admin();
+    await seed(redis, key, 1000, Date.now() - 2 * DAY_MS);
+    const queue = await started({ keyPrefix, retentionMs: 1000, trim: false });
+    await queue.publish('jobs', { n: 1 });
+    await runTrimTimer();
+    expect(await redis.xlen(key)).toBe(1001);
+    await redis.del(key);
+  });
+
+  it('maintain trims only with retentionMs, and a dry run does not write', async () => {
+    const keyPrefix = newPrefix();
+    const key = `${keyPrefix}jobs`;
+    const redis = admin();
+    const now = Date.now();
+    await seed(redis, key, 1000, now - 2 * HOUR_MS);
+    await seed(redis, key, 50, now - HOUR_MS / 2);
+    // An instance retention must not reach maintain().
+    const queue = await started({ keyPrefix, retentionMs: 1000 });
+
+    const none = await queue.maintain({ dryRun: false });
+    expect(none.trimmed).toEqual([]);
+    expect(await redis.xlen(key)).toBe(1050);
+
+    const dry = await queue.maintain({ retentionMs: HOUR_MS });
+    expect(dry.trimmed).toEqual(['jobs']);
+    expect(await redis.xlen(key)).toBe(1050);
+
+    const real = await queue.maintain({ dryRun: false, retentionMs: HOUR_MS });
+    expect(real.trimmed).toEqual(['jobs']);
+    const left = await redis.xlen(key);
+    expect(left).toBeLessThanOrEqual(150);
+    expect(left).toBeGreaterThanOrEqual(50);
+    await redis.del(key);
+  });
+
+  it('a kept consumer with a pending entry is reported and stays in the group', async () => {
+    const keyPrefix = newPrefix();
+    const key = `${keyPrefix}jobs`;
+    const redis = admin();
+    const warnings: unknown[] = [];
+    const queue = await started({
+      keyPrefix,
+      logger: {
+        debug() {},
+        info() {},
+        warn: (_message, fields) => warnings.push(fields),
+        error() {},
+      },
+    });
+    let seen = false;
+    await subscribe(queue, 'jobs', {
+      consumerGroup: 'workers',
+      handler: async () => {
+        seen = true;
+        return 'retry';
+      },
+    });
+    await queue.publish('jobs', { n: 1 });
+    await waitFor(() => seen);
+    await waitFor(async () => (await redis.xpending(key, 'workers'))[0] === 1);
+    await queue.unsubscribe('jobs', { consumerGroup: 'workers' });
+    const [kept] = queue.keptConsumers;
+    expect(kept?.reason).toBe('pending');
+    expect(warnings).toEqual([
+      expect.objectContaining({ reason: 'pending', consumer: kept?.consumer }),
+    ]);
+    const consumers = await consumersOf(redis, key, 'workers');
+    expect(consumers.map((consumer) => consumer.name)).toEqual([
+      kept?.consumer,
+    ]);
+    await redis.del(key);
+  });
+});
+
+describe.each(recoveryTargets)('RedisQueue ACL on %s', (_name, url) => {
+  it.skipIf(!url)(
+    'runs every command path as the documented user with no refusal',
+    async () => {
+      const adminUrl = url ?? '';
+      const rules = await documentedAclRules(
+        new URL('../README.md', import.meta.url),
+      );
+      const admin = new Redis(adminUrl);
+      const keyPrefix = newPrefix();
+      const keys = ['jobs', 'gone', 'idle'].map(
+        (topic) => `${keyPrefix}${topic}`,
+      );
+      try {
+        await withAclUser(adminUrl, rules, async (user) => {
+          const errors: unknown[] = [];
+          const queue = new RedisQueue({
+            redis: user.url,
+            keyPrefix,
+            visibilityMs: 300,
+            blockMs: 50,
+            stopTimeoutMs: 2000,
+            logger: {
+              debug() {},
+              info() {},
+              warn() {},
+              error: (error) => errors.push(error),
+            },
+          });
+          onTestFinished(() => queue.stop());
+          await queue.start();
+
+          // XADD, XTRIM, XGROUP CREATE, XREADGROUP, XPENDING, XCLAIM, XAUTOCLAIM, XACK.
+          await queue.publish('jobs', { n: 1 });
+          const deliveries: number[] = [];
+          await subscribe(queue, 'jobs', {
+            consumerGroup: 'workers',
+            handler: async (message) => {
+              deliveries.push(message.deliveries);
+              if (message.deliveries === 1) return 'retry';
+              // Longer than a heartbeat, so XCLAIM runs.
+              await new Promise((resolve) => setTimeout(resolve, 250));
+              return 'ack';
+            },
+          });
+          await waitFor(() => deliveries.length >= 2);
+          await waitFor(
+            async () =>
+              (await admin.xpending(keys[0] ?? '', 'workers'))[0] === 0,
+          );
+
+          // The consumer removal script.
+          await queue.unsubscribe('jobs', { consumerGroup: 'workers' });
+          expect(await consumersOf(admin, keys[0] ?? '', 'workers')).toEqual(
+            [],
+          );
+
+          // The script for a pending entry gone from the stream. Redis 7 drops such an entry itself, so the queue reaches this only on 6.2.
+          const client = new Redis(user.url);
+          const goneKey = keys[1] ?? '';
+          await client.xgroup('CREATE', goneKey, 'workers', '0', 'MKSTREAM');
+          const goneId = await client.xadd(goneKey, '*', 'payload', '{}');
+          await client.xreadgroup(
+            'GROUP',
+            'workers',
+            'hexok:acl',
+            'STREAMS',
+            goneKey,
+            '>',
+          );
+          await admin.xdel(goneKey, goneId ?? '');
+          expect(
+            await ackDeleted(client, goneKey, 'workers', 'hexok:acl'),
+          ).toEqual([goneId]);
+          await client.quit();
+
+          // SCAN, XINFO, XTRIM, and the group and stream scripts. Entries, group, and consumer are all idle.
+          const idleKey = keys[2] ?? '';
+          const idleId = `${Date.now() - 60_000}-0`;
+          await admin.xadd(idleKey, idleId, 'payload', '{}');
+          await admin.xgroup('CREATE', idleKey, 'old', '0');
+          await admin.xreadgroup(
+            'GROUP',
+            'old',
+            'hexok:old',
+            'STREAMS',
+            idleKey,
+            '>',
+          );
+          await admin.xack(idleKey, 'old', idleId);
+          const report = await queue.maintain({
+            dryRun: false,
+            retentionMs: 1000,
+            idleConsumerMs: 0,
+            dropIdleGroups: { idleMs: 1000 },
+            dropIdleStreams: { idleMs: 1000 },
+          });
+          expect(report.consumersRemoved).toContainEqual(
+            expect.objectContaining({ topic: 'idle', consumer: 'hexok:old' }),
+          );
+          expect(report.groupsDestroyed).toContainEqual({
+            topic: 'idle',
+            group: 'old',
+          });
+          expect(report.streamsDeleted).toContainEqual({
+            topic: 'idle',
+            length: 1,
+          });
+
+          // QUIT, and the release in stop().
+          await subscribe(queue, 'jobs', {
+            consumerGroup: 'workers',
+            handler: async () => 'ack',
+          });
+          await queue.stop();
+
+          expect(errors).toEqual([]);
+          expect(await user.refusals()).toEqual([]);
+        });
+      } finally {
+        await admin.del(...keys);
         await admin.quit();
       }
     },

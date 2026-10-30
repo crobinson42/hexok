@@ -35,7 +35,9 @@ Delivery is at least once. A message can reach a handler more than once, so make
 - When a group is deleted under a subscription, the read loop and `XAUTOCLAIM` recreate it. A failed recreate is logged, and the read loop backs off.
 - A pending entry deleted from the stream, by trim or `XDEL`, is acked. Redis 7 drops it in `XAUTOCLAIM`. Redis 6.2 returns it as `nil` and keeps it pending, so the queue acks the consumer's pending entries that are gone from the stream.
 
-Trimming can lose entries. `XADD` trims with `MAXLEN ~` only. Age trim is a separate `XTRIM MINID` after each publish and every minute. Both may delete entries that are still pending.
+Trimming can lose entries. `XADD` trims with `MAXLEN ~` only. Age trim is a separate `XTRIM MINID` after each publish and every minute, on the topics this instance published to. Both may delete entries that are still pending.
+
+A consumer does not trim. A queue that only subscribes to a topic never trims that stream, so the publisher's retention decides how long entries stay. A stream with no running publisher is not age-trimmed. Run `maintain({ retentionMs })` for that.
 
 There is no dead-letter stream. An optional `quarantine` sink parks a failed encode or `XADD`, a missing payload, a decode failure, and a give-up. A parked deliver record has `source: 'queue'`, `operation: 'deliver'`, and `subject` `topic:id`. Those three fields are the same for a missing payload, a decode failure, and a give-up. A give-up is the one whose error message is `queue: deliveries exhausted`, with `attempts` set to the count. A sensitive give-up parks no payload. A handler `'drop'` is not parked. Without a durable sink, acknowledging a give-up discards the entry. Quarantine has no replay method. A republish is a new entry, so its delivery count starts at 1. Trim can still delete a pending entry. The ceiling does not protect against that. An encode failure rejects `publish` and does not call `XADD`. A failed age trim is logged and still resolves `publish` with the stream id. A missing payload or a decode failure is acked after it is parked.
 
@@ -59,6 +61,19 @@ There is no dead-letter stream. An optional `quarantine` sink parks a failed enc
 6. It sends `QUIT` on the commands connection, and disconnects it if `QUIT` does not settle in the time left.
 
 A handler that calls `unsubscribe()` on its own subscription, or `stop()`, is not waited for, since it would wait for itself. Its entry is not acked and stays pending for another consumer.
+
+### Kept consumers
+
+`stop()` and `unsubscribe()` keep a consumer whose entries must not be lost, and leave it for `XAUTOCLAIM` or `maintain()`. Each kept consumer logs one `warn` with its `reason`, and `queue.keptConsumers` lists `{ topic, group, consumer, reason }` for every consumer kept since the last `start()`.
+
+| `reason` | Why the consumer stayed |
+| --- | --- |
+| `inflight` | A delivery was still in flight, such as a handler that called `stop()` itself. |
+| `not_ready` | The commands connection was not ready, so the removal was not sent. |
+| `pending` | The removal script found that the consumer owns a pending entry, such as one that returned `'retry'`. |
+| `timeout` | The call stopped waiting for handlers after `stopTimeoutMs`. |
+
+A failed removal is logged at `error` and is not listed, because Redis may have run it. The list records what happened at the call. `XAUTOCLAIM` or `maintain()` can resolve a consumer later, and the list does not change.
 
 ### Errors
 
@@ -91,7 +106,7 @@ Every log carries `adapter: 'queue'`. `connection` is `commands` or `blocking`, 
 | A failed `XACK` | `error` | `adapter`, `connection`, `topic`, `group`, `id` |
 | A failed age trim, after a publish or on the minute | `error` | `adapter`, `connection`, `topic` |
 | A background command that `stop()` cut short | `warn` | the failed command's fields, plus `code` |
-| `unsubscribe()` stopped waiting for handlers, and left the consumer for `maintain()` | `warn` | `adapter`, `connection`, `topic`, `group` |
+| `stop()` or `unsubscribe()` kept a consumer | `warn` | `adapter`, `connection`, `topic`, `group`, `consumer`, `reason` |
 | `unsubscribe()` stopped waiting for Redis to remove the consumer | `error` | `adapter`, `connection`, `topic`, `group` |
 | A handler throws | `error` | `adapter`, `topic`, `group`, `id` |
 | Deliveries exhausted | `error` | `adapter`, `topic`, `group`, `id`, `deliveries` |
@@ -108,8 +123,8 @@ Every log carries `adapter: 'queue'`. `connection` is `commands` or `blocking`, 
 - If `retryStrategy` gives up after `start()`, the connection ends and is logged at `error`. `state` stays `ready` and commands fail until `stop()` and `start()`. The default `retryStrategy` never gives up.
 - During an outage, ioredis holds commands such as `XADD` and the group create in its offline queue. They wait for Redis. On `stop()`, a command queued that way rejects with `StoppedBeforeReply`.
 - A read on a blocking connection that is reconnecting never settles in ioredis. `unsubscribe()` and `stop()` end it themselves.
-- `unsubscribe()` stops waiting after `stopTimeoutMs`. When it stops waiting for handlers, it logs at `warn` and leaves the consumer for `maintain()`. When it stops waiting for Redis to remove the consumer, it logs an `error`, and `maintain()` removes the consumer later. If Redis runs the late removal, the script still keeps a consumer that owns entries.
-- When the commands connection is not ready, `stop()` and `unsubscribe()` skip removing the consumer, and `stop()` skips `QUIT` and disconnects. `maintain()` removes a consumer left that way.
+- `unsubscribe()` stops waiting after `stopTimeoutMs`. When it stops waiting for handlers, it logs at `warn` with reason `timeout` and leaves the consumer for `maintain()`. When it stops waiting for Redis to remove the consumer, it logs an `error`, and `maintain()` removes the consumer later. If Redis runs the late removal, the script still keeps a consumer that owns entries.
+- When the commands connection is not ready, `stop()` and `unsubscribe()` skip removing the consumer and log at `warn` with reason `not_ready`, and `stop()` skips `QUIT` and disconnects. `maintain()` removes a consumer left that way.
 - When Redis is unreachable, the process can stay alive for the ioredis `disconnectTimeout` after `stop()` resolves. That is 2 seconds by default. Set `disconnectTimeout` in the `redis` options to shorten it.
 
 ## Configuration
@@ -124,7 +139,8 @@ Every log carries `adapter: 'queue'`. `connection` is `commands` or `blocking`, 
 | `batch` | `10` | Entries per `XREADGROUP` and `XAUTOCLAIM`. Handlers in a batch run one at a time. |
 | `blockMs` | `1000` | How long one `XREADGROUP` blocks before it reads again. |
 | `maxLen` | `10000` | The approximate `MAXLEN ~` cap per stream, applied on `XADD`. It keeps memory bounded. |
-| `retentionMs` | `86400000` | Entries older than this are trimmed with `XTRIM MINID`, after each publish and every minute. One day by default. |
+| `retentionMs` | `86400000` | Entries older than this are trimmed with `XTRIM MINID`, after each publish and every minute, on the topics this instance published to. One day by default. `maintain()` does not use it. |
+| `trim` | `'published'` | `'published'` age-trims only topics this instance published to. `false` never age-trims, and `MAXLEN ~` on `XADD` still applies. |
 | `encode` | `JSON.stringify` | Turns a payload into the `payload` field. |
 | `decode` | `JSON.parse` | Turns the `payload` field back. A failure parks the entry and acks it. |
 | `logger` | no-op | A structural `LogSink`. `@hexok/logger` and `console` fit it. |
@@ -133,6 +149,34 @@ Every log carries `adapter: 'queue'`. `connection` is `commands` or `blocking`, 
 On Kubernetes, a pod has `terminationGracePeriodSeconds` (30 by default) between `SIGTERM` and `SIGKILL`. An app stops its adapters one after another, so the server close plus every adapter's `stopTimeoutMs` must fit inside it. This adapter's default is 10000 ms.
 
 Unset, `start()` waits for Redis, which suits compose-style boot. Set it under an orchestrator such as Kubernetes, so the process exits and is restarted.
+
+## Redis ACL
+
+This is the least-privilege user for this adapter. Replace `CHANGE_ME`.
+
+```text
+ACL SETUSER hexok-queue on >CHANGE_ME resetchannels ~hexok:queue:* -@all +xadd +xtrim +xgroup|create +xgroup|delconsumer +xgroup|destroy +xreadgroup +xack +xpending +xclaim +xautoclaim +xinfo|stream +xinfo|groups +xinfo|consumers +xrange +exists +eval +scan +time +del +info +client|setinfo
+```
+
+The key pattern follows `keyPrefix`. Scripts run with this user's rights, so the commands they send are listed too.
+
+| Used by | Rules |
+| --- | --- |
+| `publish()` | `+xadd`, and `+xtrim` unless `trim` is `false` |
+| `subscribe()`, reads, and acks | `+xgroup\|create +xreadgroup +xack +xpending +xclaim +xautoclaim` |
+| Consumer removal script, in `stop()`, `unsubscribe()`, and `maintain()` | `+eval +exists +xinfo\|groups +xinfo\|consumers +xpending +xgroup\|delconsumer` |
+| The script that acks entries gone from the stream, on Redis 6.2 | `+eval +xpending +xrange +xack` |
+| `maintain()` | `+scan +xinfo\|stream +xinfo\|groups +xinfo\|consumers`, and `+xtrim` with `retentionMs` |
+| `maintain()` group and stream scripts | `+eval +exists +xinfo\|groups +xinfo\|stream +xgroup\|destroy +time +del` |
+
+A process with one role can drop the rest. `maintain()` is the only user of `+scan`, `+time`, `+del`, `+xinfo|stream`, and `+xgroup|destroy`.
+
+- `+info` is the ioredis ready check, on every connection. `+client|setinfo` is the ioredis client tag. ioredis ignores a refused `CLIENT SETINFO`, but `ACL LOG` records each refusal.
+- Redis 7.0 rejects `+client|setinfo` in `ACL SETUSER`, because it has no such subcommand. Remove that rule on 7.0.
+- `HELLO`, `AUTH`, and `QUIT` need no rule. Redis does not check them against the ACL.
+- Add `+select` when the URL names a database, and `+client|setname` when `connectionName` is set.
+
+An integration test runs this line as a real user and fails if `ACL LOG` records a refusal.
 
 ## Sensitive messages
 
@@ -151,6 +195,7 @@ A parked record's `context` is `{ adapter: 'redis' }`. A `publish()` that reject
 `maintain()` scans the key prefix. Run it from one cron.
 
 - `dryRun` defaults to true and does not write. The report lists what a real run would do.
+- `retentionMs` trims each stream in the run to that age. Unset, `maintain()` does not trim. It comes from the call and not from this instance's `retentionMs`, because one cron scans streams that other services publish with their own retention. A cron usually publishes nothing, so limiting the trim to topics it published would trim nothing. Use `topics` to run it on streams that share a retention.
 - `idleConsumerMs` removes `hexok:` consumers idle that long that own no pending entries. A consumer of another client is never removed.
 - `dropIdleGroups` destroys a group only when it has no consumers, no pending entries, and a last-delivered id older than `idleMs`. That drops the cursor.
 - `dropIdleStreams` deletes a key only when it has no groups and its last id is older than `idleMs`.

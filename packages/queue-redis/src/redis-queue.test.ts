@@ -2058,10 +2058,175 @@ describe('RedisQueue reliability', () => {
           connection: 'commands',
           topic: 'jobs',
           group: 'billing',
+          consumer: expect.stringMatching(/^hexok:/),
+          reason: 'timeout',
         },
       ],
     ]);
+    expect(queue.keptConsumers).toEqual([
+      {
+        topic: 'jobs',
+        group: 'billing',
+        consumer: expect.stringMatching(/^hexok:/),
+        reason: 'timeout',
+      },
+    ]);
     await queue.stop();
+  });
+
+  describe('a kept consumer', () => {
+    function keptWarnings(logs: ReturnType<typeof recordingLogger>) {
+      return logs.calls.filter((call) => call[0] === 'warn');
+    }
+
+    function expectKept(
+      queue: InstanceType<typeof RedisQueue>,
+      logs: ReturnType<typeof recordingLogger>,
+      caller: string,
+      reason: string,
+    ): void {
+      const kept = {
+        topic: 'jobs',
+        group: 'billing',
+        consumer: expect.stringMatching(/^hexok:/),
+        reason,
+      };
+      expect(queue.keptConsumers).toEqual([kept]);
+      expect(keptWarnings(logs)).toEqual([
+        [
+          'warn',
+          expect.stringContaining(`queue: ${caller}`),
+          { adapter: 'queue', connection: 'commands', ...kept },
+        ],
+      ]);
+    }
+
+    async function started(stopTimeoutMs = 500) {
+      const logs = recordingLogger();
+      const queue = new RedisQueue({
+        redis: 'redis://127.0.0.1:6379',
+        stopTimeoutMs,
+        logger: logs.sink,
+      });
+      await queue.start();
+      const commands = FakeRedis.instances.at(-1);
+      if (!commands) throw new Error('missing commands client');
+      return { logs, queue, commands };
+    }
+
+    function deliver(id: string): void {
+      FakeRedis.instances
+        .at(-1)
+        ?.pending?.resolve([['hexok:queue:jobs', [[id, ['payload', '{}']]]]]);
+    }
+
+    it.each([
+      ['unsubscribe()', 'unsubscribe'],
+      ['stop()', 'stop'],
+    ] as const)(
+      '%s called from its own handler warns inflight',
+      async (caller, method) => {
+        const { logs, queue } = await started();
+        let finish = () => {};
+        const finished = new Promise<void>((resolve) => {
+          finish = resolve;
+        });
+        await subscribe(queue, 'jobs', {
+          consumerGroup: 'billing',
+          handler: async () => {
+            await (method === 'stop'
+              ? queue.stop()
+              : queue.unsubscribe('jobs', { consumerGroup: 'billing' }));
+            finish();
+          },
+        });
+        deliver('1-1');
+        await finished;
+        expectKept(queue, logs, caller, 'inflight');
+        await queue.stop();
+      },
+    );
+
+    it.each([
+      ['unsubscribe()', 'unsubscribe'],
+      ['stop()', 'stop'],
+    ] as const)(
+      '%s warns not_ready when the commands client is not ready',
+      async (caller, method) => {
+        const { logs, queue, commands } = await started();
+        await subscribe(queue, 'jobs', {
+          consumerGroup: 'billing',
+          handler: async () => 'ack',
+        });
+        commands.status = 'reconnecting';
+        await (method === 'stop'
+          ? queue.stop()
+          : queue.unsubscribe('jobs', { consumerGroup: 'billing' }));
+        expectKept(queue, logs, caller, 'not_ready');
+        expect(callsOf(commands, 'DELCONSUMER')).toHaveLength(0);
+        commands.status = 'ready';
+        await queue.stop();
+      },
+    );
+
+    it.each([
+      ['unsubscribe()', 'unsubscribe'],
+      ['stop()', 'stop'],
+    ] as const)(
+      '%s warns pending when the script keeps a consumer that owns an entry',
+      async (caller, method) => {
+        const { logs, queue, commands } = await started();
+        await subscribe(queue, 'jobs', {
+          consumerGroup: 'billing',
+          handler: async () => 'ack',
+        });
+        commands.xpending = () => Promise.resolve([['1-1', 'c', 1, 1]]);
+        await (method === 'stop'
+          ? queue.stop()
+          : queue.unsubscribe('jobs', { consumerGroup: 'billing' }));
+        expectKept(queue, logs, caller, 'pending');
+        await queue.stop();
+      },
+    );
+
+    it('stop() warns timeout when it stops waiting for a handler', async () => {
+      vi.useFakeTimers();
+      const { logs, queue } = await started();
+      await subscribe(queue, 'jobs', {
+        consumerGroup: 'billing',
+        handler: () => new Promise(() => {}),
+      });
+      deliver('1-1');
+      await vi.advanceTimersByTimeAsync(0);
+      const stopping = queue.stop();
+      await vi.advanceTimersByTimeAsync(500);
+      await stopping;
+      expectKept(queue, logs, 'stop()', 'timeout');
+    });
+
+    it('stays silent for a consumer that was removed, and start() clears the list', async () => {
+      const { logs, queue } = await started();
+      await subscribe(queue, 'jobs', {
+        consumerGroup: 'billing',
+        handler: async () => 'ack',
+      });
+      await queue.unsubscribe('jobs', { consumerGroup: 'billing' });
+      expect(queue.keptConsumers).toEqual([]);
+      expect(keptWarnings(logs)).toEqual([]);
+
+      const commands = FakeRedis.instances.at(-2);
+      if (!commands) throw new Error('missing commands client');
+      commands.status = 'reconnecting';
+      await subscribe(queue, 'jobs', {
+        consumerGroup: 'billing',
+        handler: async () => 'ack',
+      });
+      await queue.stop();
+      expect(queue.keptConsumers).toHaveLength(1);
+      await queue.start();
+      expect(queue.keptConsumers).toEqual([]);
+      await queue.stop();
+    });
   });
 
   it('a recovery tick is skipped while the previous one runs', async () => {

@@ -1047,4 +1047,42 @@ describe.skipIf(!process.env.REDIS_URL)('RedisQueue retention', () => {
     expect(left).toBeGreaterThanOrEqual(50);
     await redis.del(key);
   });
+
+  it('a kept consumer with a pending entry is reported and stays in the group', async () => {
+    const keyPrefix = newPrefix();
+    const key = `${keyPrefix}jobs`;
+    const redis = admin();
+    const warnings: unknown[] = [];
+    const queue = await started({
+      keyPrefix,
+      logger: {
+        debug() {},
+        info() {},
+        warn: (_message, fields) => warnings.push(fields),
+        error() {},
+      },
+    });
+    let seen = false;
+    await subscribe(queue, 'jobs', {
+      consumerGroup: 'workers',
+      handler: async () => {
+        seen = true;
+        return 'retry';
+      },
+    });
+    await queue.publish('jobs', { n: 1 });
+    await waitFor(() => seen);
+    await waitFor(async () => (await redis.xpending(key, 'workers'))[0] === 1);
+    await queue.unsubscribe('jobs', { consumerGroup: 'workers' });
+    const [kept] = queue.keptConsumers;
+    expect(kept?.reason).toBe('pending');
+    expect(warnings).toEqual([
+      expect.objectContaining({ reason: 'pending', consumer: kept?.consumer }),
+    ]);
+    const consumers = await consumersOf(redis, key, 'workers');
+    expect(consumers.map((consumer) => consumer.name)).toEqual([
+      kept?.consumer,
+    ]);
+    await redis.del(key);
+  });
 });

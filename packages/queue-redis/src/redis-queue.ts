@@ -74,6 +74,21 @@ export interface RedisQueueConfig {
   readonly quarantine?: ParkSink;
 }
 
+/** Why `stop()` or `unsubscribe()` left a consumer in its group. */
+export type RedisQueueKeptReason =
+  | 'inflight'
+  | 'not_ready'
+  | 'pending'
+  | 'timeout';
+
+/** A consumer that `stop()` or `unsubscribe()` left for `XAUTOCLAIM` or `maintain()`. */
+export interface RedisQueueKeptConsumer {
+  readonly topic: string;
+  readonly group: string;
+  readonly consumer: string;
+  readonly reason: RedisQueueKeptReason;
+}
+
 type Clients = { readonly commands: Redis };
 
 /** Runs one command on the commands client through the lifecycle. */
@@ -243,6 +258,7 @@ export class RedisQueue extends Adapter(Queue) {
   readonly #lifecycle: RedisLifecycle<Clients>;
   #trimTimer: ReturnType<typeof setInterval> | undefined;
   readonly #published = new Set<string>();
+  #kept: RedisQueueKeptConsumer[] = [];
   readonly #subs = new Map<string, Subscription>();
   /**
    * The handler call running now. A handler that calls `unsubscribe` on its own subscription, or `stop()`, would otherwise wait for itself until `stopTimeoutMs`.
@@ -278,10 +294,16 @@ export class RedisQueue extends Adapter(Queue) {
     return this.#lifecycle.state;
   }
 
+  /** The consumers `stop()` and `unsubscribe()` kept since the last `start()`. A later `maintain()` or `XAUTOCLAIM` does not change this list. */
+  get keptConsumers(): readonly RedisQueueKeptConsumer[] {
+    return this.#kept;
+  }
+
   override start(): Promise<void> {
     return this.#lifecycle.start(
       () => ({ commands: openRedis(this.#redis) }),
       () => {
+        this.#kept = [];
         if (!this.#trimEnabled) return;
         this.#trimTimer = setInterval(() => {
           void this.#trimAll();
@@ -439,12 +461,13 @@ export class RedisQueue extends Adapter(Queue) {
       }
       sub.ack = undefined;
       if (deadline.signal.aborted) {
-        this.#logger.warn(
+        this.#keep(
+          sub,
+          'timeout',
           `queue: unsubscribe() stopped waiting for handlers after ${this.#stopTimeoutMs}ms. The consumer is left for maintain().`,
-          this.#fields(sub, 'commands'),
         );
       } else {
-        await this.#releaseConsumer(sub, run);
+        await this.#releaseConsumer(sub, run, 'unsubscribe()');
       }
     } finally {
       sub.ack = undefined;
@@ -483,23 +506,58 @@ export class RedisQueue extends Adapter(Queue) {
       const others = subs.filter((sub) => !this.#calledFrom(sub));
       await settledOrAborted(Promise.all(others.map(handlersOf)), signal);
       for (const sub of subs) sub.ack = undefined;
-      if (signal.aborted) return;
-      await Promise.all(subs.map((sub) => this.#releaseConsumer(sub, stopRun)));
+      if (signal.aborted) {
+        for (const sub of subs) {
+          this.#keep(
+            sub,
+            'timeout',
+            `queue: stop() stopped waiting for handlers after ${this.#stopTimeoutMs}ms. The consumer is left for maintain().`,
+          );
+        }
+        return;
+      }
+      await Promise.all(
+        subs.map((sub) => this.#releaseConsumer(sub, stopRun, 'stop()')),
+      );
     });
   }
 
   /**
    * Removes this subscription's consumer with one script that keeps it when it owns a pending entry.
-   * A consumer kept that way is left for `XAUTOCLAIM` or `maintain()`.
+   * A consumer kept that way is left for `XAUTOCLAIM` or `maintain()`, and logged with its reason.
    */
-  async #releaseConsumer(sub: Subscription, run: CommandRun): Promise<void> {
-    if (sub.inflight.size > 0) return;
+  async #releaseConsumer(
+    sub: Subscription,
+    run: CommandRun,
+    caller: 'stop()' | 'unsubscribe()',
+  ): Promise<void> {
+    if (sub.inflight.size > 0) {
+      this.#keep(
+        sub,
+        'inflight',
+        `queue: ${caller} kept the consumer because a delivery is still in flight. It is left for XAUTOCLAIM or maintain().`,
+      );
+      return;
+    }
     try {
-      await run(async ({ commands }) => {
+      const released = await run(async ({ commands }) => {
         // A client that is not ready holds the script in its offline queue until stop() gives up.
-        if (commands.status !== 'ready') return;
-        await releaseConsumer(commands, sub.key, sub.group, sub.consumer);
+        if (commands.status !== 'ready') return 'not_ready';
+        return releaseConsumer(commands, sub.key, sub.group, sub.consumer);
       });
+      if (released === 'not_ready') {
+        this.#keep(
+          sub,
+          'not_ready',
+          `queue: ${caller} kept the consumer because the commands connection is not ready. It is left for maintain().`,
+        );
+      } else if (released === 'kept') {
+        this.#keep(
+          sub,
+          'pending',
+          `queue: ${caller} kept the consumer because it owns a pending entry. It is left for XAUTOCLAIM or maintain().`,
+        );
+      }
     } catch (error) {
       this.#logFailure(
         error,
@@ -507,6 +565,20 @@ export class RedisQueue extends Adapter(Queue) {
         this.#fields(sub, 'commands'),
       );
     }
+  }
+
+  #keep(
+    sub: Subscription,
+    reason: RedisQueueKeptReason,
+    message: string,
+  ): void {
+    const { topic, group, consumer } = sub;
+    this.#kept.push({ topic, group, consumer, reason });
+    this.#logger.warn(message, {
+      ...this.#fields(sub, 'commands'),
+      consumer,
+      reason,
+    });
   }
 
   /** Aborts the read, clears the timers, and disconnects the blocking client. A `QUIT` after that could wait in the offline queue. */

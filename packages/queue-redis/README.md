@@ -62,6 +62,19 @@ There is no dead-letter stream. An optional `quarantine` sink parks a failed enc
 
 A handler that calls `unsubscribe()` on its own subscription, or `stop()`, is not waited for, since it would wait for itself. Its entry is not acked and stays pending for another consumer.
 
+### Kept consumers
+
+`stop()` and `unsubscribe()` keep a consumer whose entries must not be lost, and leave it for `XAUTOCLAIM` or `maintain()`. Each kept consumer logs one `warn` with its `reason`, and `queue.keptConsumers` lists `{ topic, group, consumer, reason }` for every consumer kept since the last `start()`.
+
+| `reason` | Why the consumer stayed |
+| --- | --- |
+| `inflight` | A delivery was still in flight, such as a handler that called `stop()` itself. |
+| `not_ready` | The commands connection was not ready, so the removal was not sent. |
+| `pending` | The removal script found that the consumer owns a pending entry, such as one that returned `'retry'`. |
+| `timeout` | The call stopped waiting for handlers after `stopTimeoutMs`. |
+
+A failed removal is logged at `error` and is not listed, because Redis may have run it. The list records what happened at the call. `XAUTOCLAIM` or `maintain()` can resolve a consumer later, and the list does not change.
+
 ### Errors
 
 Calls outside `start()` and `stop()` reject with a `LifecycleError`.
@@ -93,7 +106,7 @@ Every log carries `adapter: 'queue'`. `connection` is `commands` or `blocking`, 
 | A failed `XACK` | `error` | `adapter`, `connection`, `topic`, `group`, `id` |
 | A failed age trim, after a publish or on the minute | `error` | `adapter`, `connection`, `topic` |
 | A background command that `stop()` cut short | `warn` | the failed command's fields, plus `code` |
-| `unsubscribe()` stopped waiting for handlers, and left the consumer for `maintain()` | `warn` | `adapter`, `connection`, `topic`, `group` |
+| `stop()` or `unsubscribe()` kept a consumer | `warn` | `adapter`, `connection`, `topic`, `group`, `consumer`, `reason` |
 | `unsubscribe()` stopped waiting for Redis to remove the consumer | `error` | `adapter`, `connection`, `topic`, `group` |
 | A handler throws | `error` | `adapter`, `topic`, `group`, `id` |
 | Deliveries exhausted | `error` | `adapter`, `topic`, `group`, `id`, `deliveries` |
@@ -110,8 +123,8 @@ Every log carries `adapter: 'queue'`. `connection` is `commands` or `blocking`, 
 - If `retryStrategy` gives up after `start()`, the connection ends and is logged at `error`. `state` stays `ready` and commands fail until `stop()` and `start()`. The default `retryStrategy` never gives up.
 - During an outage, ioredis holds commands such as `XADD` and the group create in its offline queue. They wait for Redis. On `stop()`, a command queued that way rejects with `StoppedBeforeReply`.
 - A read on a blocking connection that is reconnecting never settles in ioredis. `unsubscribe()` and `stop()` end it themselves.
-- `unsubscribe()` stops waiting after `stopTimeoutMs`. When it stops waiting for handlers, it logs at `warn` and leaves the consumer for `maintain()`. When it stops waiting for Redis to remove the consumer, it logs an `error`, and `maintain()` removes the consumer later. If Redis runs the late removal, the script still keeps a consumer that owns entries.
-- When the commands connection is not ready, `stop()` and `unsubscribe()` skip removing the consumer, and `stop()` skips `QUIT` and disconnects. `maintain()` removes a consumer left that way.
+- `unsubscribe()` stops waiting after `stopTimeoutMs`. When it stops waiting for handlers, it logs at `warn` with reason `timeout` and leaves the consumer for `maintain()`. When it stops waiting for Redis to remove the consumer, it logs an `error`, and `maintain()` removes the consumer later. If Redis runs the late removal, the script still keeps a consumer that owns entries.
+- When the commands connection is not ready, `stop()` and `unsubscribe()` skip removing the consumer and log at `warn` with reason `not_ready`, and `stop()` skips `QUIT` and disconnects. `maintain()` removes a consumer left that way.
 - When Redis is unreachable, the process can stay alive for the ioredis `disconnectTimeout` after `stop()` resolves. That is 2 seconds by default. Set `disconnectTimeout` in the `redis` options to shorten it.
 
 ## Configuration

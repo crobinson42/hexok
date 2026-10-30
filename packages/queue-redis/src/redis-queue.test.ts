@@ -300,6 +300,8 @@ class FakePipeline {
 
 vi.mock('ioredis', () => ({ Redis: FakeRedis, default: FakeRedis }));
 
+const { RedisLifecycle } = await import('@hexok/ioredis-lifecycle');
+
 const { RedisQueue } = await import('./redis-queue.js');
 const { LifecycleError } = await import('./index.js');
 
@@ -416,6 +418,17 @@ describe('RedisQueue commands', () => {
     expect(xadd).toContain('MAXLEN');
     await queue.stop();
     vi.useRealTimers();
+  });
+
+  it('runs a trim under its own lifecycle operation', async () => {
+    const run = vi.spyOn(RedisLifecycle.prototype, 'run');
+    const queue = new RedisQueue({ redis: 'redis://127.0.0.1:6379' });
+    await queue.start();
+    await queue.publish('jobs', { n: 1 });
+    const operations = run.mock.calls.map((call) => call[0]);
+    expect(operations).toEqual(['publish', 'trim']);
+    run.mockRestore();
+    await queue.stop();
   });
 
   it('parks a failed publish and encode, and not a failed trim', async () => {

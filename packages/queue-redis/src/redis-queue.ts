@@ -865,7 +865,7 @@ export class RedisQueue extends Adapter(Queue) {
 
   async #trim(topic: string): Promise<void> {
     const minId = `${Date.now() - this.#retentionMs}-0`;
-    await this.#lifecycle.run('publish', ({ commands }) =>
+    await this.#lifecycle.run('trim', ({ commands }) =>
       commands.xtrim(this.#key(topic), 'MINID', '~', minId),
     );
   }

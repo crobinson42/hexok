@@ -107,7 +107,7 @@ An integration test runs this line as a real user and fails if `ACL LOG` records
 | `startTimeoutMs` | unset | Unset, `start()` waits for Redis. Set it under an orchestrator, so `start()` rejects with `StartTimeout` and the process restarts. |
 | `channelPrefix` | `'hexok:broadcast:'` | Redis pub/sub ignores the DB index, so the prefix keeps apps that share a Redis apart. |
 | `encode` | `JSON.stringify` | Turns a payload into the message string. |
-| `decode` | `JSON.parse` | Turns a message string into a payload. A decode failure is logged and the message is dropped. |
+| `decode` | `JSON.parse` | Turns a message string into a payload. A bad message throws `broadcast: message is not JSON` and does not include the text. A decode failure is logged and the message is dropped. |
 | `logger` | no-op | A structural `LogSink`. `@hexok/logger` and `console` fit it. |
 
 On Kubernetes, a pod has `terminationGracePeriodSeconds` (30 by default) between `SIGTERM` and `SIGKILL`. An app stops its adapters one after another, so the server close plus every adapter's `stopTimeoutMs` must fit inside it. This adapter's default is 1000 ms.

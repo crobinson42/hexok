@@ -142,7 +142,7 @@ Every log carries `adapter: 'queue'`. `connection` is `commands` or `blocking`, 
 | `retentionMs` | `86400000` | Entries older than this are trimmed with `XTRIM MINID`, after each publish and every minute, on the topics this instance published to. One day by default. `maintain()` does not use it. |
 | `trim` | `'published'` | `'published'` age-trims only topics this instance published to. `false` never age-trims, and `MAXLEN ~` on `XADD` still applies. |
 | `encode` | `JSON.stringify` | Turns a payload into the `payload` field. |
-| `decode` | `JSON.parse` | Turns the `payload` field back. A failure parks the entry and acks it. |
+| `decode` | `JSON.parse` | Turns the `payload` field back. A bad entry throws `queue: entry is not JSON` and does not include the text. A failure parks the entry and acks it. |
 | `logger` | no-op | A structural `LogSink`. `@hexok/logger` and `console` fit it. |
 | `quarantine` | unset | A structural `ParkSink`, such as `@hexok/quarantine`. It receives what the queue cannot publish or deliver. |
 

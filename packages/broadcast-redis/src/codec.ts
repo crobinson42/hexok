@@ -2,6 +2,11 @@ export function encodeJson(payload: unknown): string {
   return JSON.stringify(payload);
 }
 
+/** `JSON.parse`. The error does not include the text. Node quotes the start of it. */
 export function decodeJson(raw: string): unknown {
-  return JSON.parse(raw);
+  try {
+    return JSON.parse(raw);
+  } catch {
+    throw new Error('broadcast: message is not JSON');
+  }
 }

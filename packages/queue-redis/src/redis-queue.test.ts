@@ -766,6 +766,47 @@ describe('RedisQueue commands', () => {
     await queue.stop();
   });
 
+  it('logs a default decode failure without the entry text', async () => {
+    vi.useFakeTimers();
+    const parked: ParkInput[] = [];
+    const logs = recordingLogger();
+    const queue = new RedisQueue({
+      redis: 'redis://127.0.0.1:6379',
+      logger: logs.sink,
+      quarantine: {
+        async park(input: ParkInput) {
+          parked.push(input);
+          return { id: 'q1' };
+        },
+      },
+    });
+    await queue.start();
+    await subscribe(queue, 'codes', {
+      consumerGroup: 'sms',
+      handler: async () => 'ack',
+    });
+    FakeRedis.instances[1]?.pending?.resolve([
+      ['hexok:queue:codes', [['5-2', ['payload', 'code=SECRET-4821']]]],
+    ]);
+    await vi.waitFor(() => {
+      expect(parked).toHaveLength(1);
+    });
+    expect(parked[0]).toMatchObject({
+      operation: 'deliver',
+      subject: 'codes:5-2',
+      payload: { reason: 'decode-failed', raw: 'code=SECRET-4821' },
+      error: { name: 'Error', message: 'queue: entry is not JSON' },
+    });
+    expect(logs.calls).toContainEqual([
+      'error',
+      new Error('queue: entry is not JSON'),
+      { adapter: 'queue', topic: 'codes', group: 'sms', id: '5-2' },
+    ]);
+    expect(textOf(parked[0]?.error)).not.toContain('SECRET-4821');
+    expect(textOf(logs.calls)).not.toContain('SECRET-4821');
+    await queue.stop();
+  });
+
   it('does not XCLAIM an empty snapshot and places JUSTID after ids', async () => {
     vi.useFakeTimers();
     const queue = new RedisQueue({

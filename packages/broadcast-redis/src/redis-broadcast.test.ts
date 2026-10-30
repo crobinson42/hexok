@@ -606,5 +606,32 @@ describe('RedisBroadcast', () => {
       });
       await bus.stop();
     });
+
+    it('logs a default decode failure without the message text', async () => {
+      const errors: unknown[] = [];
+      let calls = 0;
+      const bus = new RedisBroadcast({
+        redis: 'redis://127.0.0.1:6379',
+        logger: sink(errors),
+      });
+      await bus.start();
+      await bus.subscribe(news, () => {
+        calls += 1;
+      });
+      const [, subscriber] = lastPair();
+      subscriber.emit('message', 'hexok:broadcast:news', 'code=SECRET-4821');
+      await vi.waitFor(() => {
+        expect(errors).toHaveLength(1);
+      });
+      const logged = errors[0] as { message: Error; fields: unknown };
+      expect(logged.message).toEqual(
+        new Error('broadcast: message is not JSON'),
+      );
+      expect(logged.message.cause).toBeUndefined();
+      expect(logged.fields).toEqual({ adapter: 'broadcast', channel: 'news' });
+      expect(logged.message.stack).not.toContain('SECRET-4821');
+      expect(calls).toBe(0);
+      await bus.stop();
+    });
   });
 });

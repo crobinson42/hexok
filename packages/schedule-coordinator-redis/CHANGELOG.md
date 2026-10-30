@@ -1,5 +1,11 @@
 # @hexok/schedule-coordinator-redis
 
+## 1.0.1
+
+### Patch Changes
+
+- [#12](https://github.com/crobinson42/hexok/pull/12) [`708ed04`](https://github.com/crobinson42/hexok/commit/708ed046a9749a0f5fae8ba50e919426add5850f) Thanks [@crobinson42](https://github.com/crobinson42)! - The README documents a least-privilege Redis ACL line, listing every command the adapter sends, the commands inside its Lua scripts, and the `INFO` and `CLIENT SETINFO` that ioredis sends.
+
 ## 1.0.0
 
 ### Major Changes

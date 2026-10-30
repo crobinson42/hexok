@@ -1,5 +1,21 @@
 # @hexok/queue-redis
 
+## 1.1.0
+
+### Minor Changes
+
+- [#12](https://github.com/crobinson42/hexok/pull/12) [`2de33a6`](https://github.com/crobinson42/hexok/commit/2de33a62278314cc4ff9edb60b5042ba0e858335) Thanks [@crobinson42](https://github.com/crobinson42)! - Consumers no longer trim. A queue that only subscribes to a topic never trims that stream, so a consumer no longer deletes entries, read or not, under its own `retentionMs`. A publisher still trims the topics it published to, after each publish and every minute. A stream with no running publisher is not age-trimmed. `RedisQueueConfig` takes `trim`, either `'published'`, the default, or `false`, which never age-trims. `MAXLEN ~` on `XADD` applies either way.
+
+- [#12](https://github.com/crobinson42/hexok/pull/12) [`09fce0b`](https://github.com/crobinson42/hexok/commit/09fce0b01aa6da0eb72a7c37006d9ddeb666f8fb) Thanks [@crobinson42](https://github.com/crobinson42)! - `stop()` and `unsubscribe()` log a `warn` for each consumer they keep, with `topic`, `group`, `consumer`, and `reason`. The reason is `inflight`, `not_ready`, `pending`, or `timeout`. `RedisQueue.keptConsumers` lists the consumers kept since the last `start()`. A consumer kept with a pending entry, and one left when `stop()` timed out, were silent before. The existing `unsubscribe()` timeout warning gains `consumer` and `reason`.
+
+- [#12](https://github.com/crobinson42/hexok/pull/12) [`1b090a6`](https://github.com/crobinson42/hexok/commit/1b090a6e9134a85f9c54dfbdce2d490f688ee2a0) Thanks [@crobinson42](https://github.com/crobinson42)! - `maintain()` takes `retentionMs` and trims only when it is given. It no longer uses the instance's `retentionMs`, which let one process shorten streams other services publish with longer retention. A `maintain()` that relied on the old trim must now pass `retentionMs`. Without it, `report.trimmed` is empty.
+
+### Patch Changes
+
+- [#12](https://github.com/crobinson42/hexok/pull/12) [`b8b63ba`](https://github.com/crobinson42/hexok/commit/b8b63ba5c47212e8602d474a85b399cdb18ed808) Thanks [@crobinson42](https://github.com/crobinson42)! - An age trim runs under the lifecycle operation `trim`, not `publish`.
+
+- [#12](https://github.com/crobinson42/hexok/pull/12) [`708ed04`](https://github.com/crobinson42/hexok/commit/708ed046a9749a0f5fae8ba50e919426add5850f) Thanks [@crobinson42](https://github.com/crobinson42)! - The README documents a least-privilege Redis ACL line, listing every command the adapter sends, the commands inside its Lua scripts, and the `INFO` and `CLIENT SETINFO` that ioredis sends.
+
 ## 1.0.0
 
 ### Major Changes

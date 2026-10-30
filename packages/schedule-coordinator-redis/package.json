@@ -1,6 +1,6 @@
 {
   "name": "@hexok/schedule-coordinator-redis",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Redis lock adapter for the hexok ScheduleCoordinator port.",
   "type": "module",
   "license": "MIT",

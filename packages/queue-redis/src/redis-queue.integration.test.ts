@@ -905,3 +905,72 @@ describe.each(recoveryTargets)('RedisQueue scripts on %s', (_name, url) => {
     },
   );
 });
+
+/**
+ * Writes `count` entries with ids at `timeMs`. `XTRIM MINID ~` removes only whole stream nodes, 100 entries by default, so a single old entry would survive any trim.
+ */
+async function seed(
+  client: Redis,
+  key: string,
+  count: number,
+  timeMs: number,
+): Promise<void> {
+  const pipe = client.pipeline();
+  for (let i = 0; i < count; i += 1) {
+    pipe.xadd(key, `${timeMs}-${i}`, 'payload', '{}');
+  }
+  await pipe.exec();
+}
+
+describe.skipIf(!process.env.REDIS_URL)('RedisQueue retention', () => {
+  const url = process.env.REDIS_URL ?? '';
+  const HOUR_MS = 3_600_000;
+  const open: Redis[] = [];
+  const queues: RedisQueue[] = [];
+
+  afterEach(async () => {
+    await Promise.all(queues.splice(0).map((queue) => queue.stop()));
+    await Promise.all(open.splice(0).map((redis) => redis.quit()));
+  });
+
+  function admin(): Redis {
+    const client = new Redis(url);
+    open.push(client);
+    return client;
+  }
+
+  async function started(
+    config: Omit<ConstructorParameters<typeof RedisQueue>[0], 'redis'>,
+  ): Promise<RedisQueue> {
+    const queue = new RedisQueue({ redis: url, blockMs: 50, ...config });
+    queues.push(queue);
+    await queue.start();
+    return queue;
+  }
+
+  it('maintain trims only with retentionMs, and a dry run does not write', async () => {
+    const keyPrefix = newPrefix();
+    const key = `${keyPrefix}jobs`;
+    const redis = admin();
+    const now = Date.now();
+    await seed(redis, key, 1000, now - 2 * HOUR_MS);
+    await seed(redis, key, 50, now - HOUR_MS / 2);
+    // An instance retention must not reach maintain().
+    const queue = await started({ keyPrefix, retentionMs: 1000 });
+
+    const none = await queue.maintain({ dryRun: false });
+    expect(none.trimmed).toEqual([]);
+    expect(await redis.xlen(key)).toBe(1050);
+
+    const dry = await queue.maintain({ retentionMs: HOUR_MS });
+    expect(dry.trimmed).toEqual(['jobs']);
+    expect(await redis.xlen(key)).toBe(1050);
+
+    const real = await queue.maintain({ dryRun: false, retentionMs: HOUR_MS });
+    expect(real.trimmed).toEqual(['jobs']);
+    const left = await redis.xlen(key);
+    expect(left).toBeLessThanOrEqual(150);
+    expect(left).toBeGreaterThanOrEqual(50);
+    await redis.del(key);
+  });
+});

@@ -908,10 +908,7 @@ describe('RedisQueue commands', () => {
   it('maintain defaults to a dry run and does not write', async () => {
     const now = Date.now();
     const old = `${now - 60_000}-0`;
-    const queue = new RedisQueue({
-      redis: 'redis://127.0.0.1:6379',
-      retentionMs: 1000,
-    });
+    const queue = new RedisQueue({ redis: 'redis://127.0.0.1:6379' });
     await queue.start();
     const commands = FakeRedis.instances[0];
     if (!commands) throw new Error('missing commands client');
@@ -935,6 +932,7 @@ describe('RedisQueue commands', () => {
     });
 
     const report = await queue.maintain({
+      retentionMs: 1000,
       idleConsumerMs: 1000,
       dropIdleGroups: { idleMs: 1000 },
       dropIdleStreams: { idleMs: 1000 },
@@ -966,13 +964,62 @@ describe('RedisQueue commands', () => {
     await queue.stop();
   });
 
-  it('maintain writes only the idle hexok consumer, then the opted-in group and stream', async () => {
-    const now = Date.now();
-    const old = `${now - 60_000}-0`;
+  it('maintain does not trim without retentionMs, whatever the instance retention', async () => {
+    const old = `${Date.now() - 60_000}-0`;
     const queue = new RedisQueue({
       redis: 'redis://127.0.0.1:6379',
       retentionMs: 1000,
     });
+    await queue.start();
+    const commands = FakeRedis.instances[0];
+    if (!commands) throw new Error('missing commands client');
+    scriptStream(commands, 'hexok:queue:jobs', {
+      length: 3,
+      lastGeneratedId: old,
+      groups: 0,
+      firstId: old,
+    });
+
+    const report = await queue.maintain({ dryRun: false, topics: ['jobs'] });
+
+    expect(report.trimmed).toEqual([]);
+    expect(commands.calls.some((call) => call[0] === 'xtrim')).toBe(false);
+    await queue.stop();
+  });
+
+  it('maintain trims to the retentionMs of the call', async () => {
+    const now = Date.now();
+    const old = `${now - 60_000}-0`;
+    const queue = new RedisQueue({ redis: 'redis://127.0.0.1:6379' });
+    await queue.start();
+    const commands = FakeRedis.instances[0];
+    if (!commands) throw new Error('missing commands client');
+    scriptStream(commands, 'hexok:queue:jobs', {
+      length: 3,
+      lastGeneratedId: old,
+      groups: 0,
+      firstId: old,
+    });
+
+    const report = await queue.maintain({
+      dryRun: false,
+      topics: ['jobs'],
+      retentionMs: 1000,
+    });
+
+    expect(report.trimmed).toEqual(['jobs']);
+    const xtrim = commands.calls.find((call) => call[0] === 'xtrim');
+    expect(xtrim?.slice(1, 4)).toEqual(['hexok:queue:jobs', 'MINID', '~']);
+    expect(Number(String(xtrim?.[4]).split('-')[0])).toBeGreaterThanOrEqual(
+      now - 1000,
+    );
+    await queue.stop();
+  });
+
+  it('maintain writes only the idle hexok consumer, then the opted-in group and stream', async () => {
+    const now = Date.now();
+    const old = `${now - 60_000}-0`;
+    const queue = new RedisQueue({ redis: 'redis://127.0.0.1:6379' });
     await queue.start();
     const commands = FakeRedis.instances[0];
     if (!commands) throw new Error('missing commands client');
@@ -996,6 +1043,7 @@ describe('RedisQueue commands', () => {
     const options = {
       dryRun: false,
       topics: ['jobs'],
+      retentionMs: 1000,
       idleConsumerMs: 1000,
       dropIdleGroups: { idleMs: 1000 },
       dropIdleStreams: { idleMs: 1000 },

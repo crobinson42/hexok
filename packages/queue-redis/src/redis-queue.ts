@@ -453,7 +453,6 @@ export class RedisQueue extends Adapter(Queue) {
       run: (command) =>
         this.#lifecycle.run('maintain', ({ commands }) => command(commands)),
       keyPrefix: this.#keyPrefix,
-      retentionMs: this.#retentionMs,
       options,
       logger: this.#logger,
     });

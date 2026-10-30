@@ -151,6 +151,7 @@ A parked record's `context` is `{ adapter: 'redis' }`. A `publish()` that reject
 `maintain()` scans the key prefix. Run it from one cron.
 
 - `dryRun` defaults to true and does not write. The report lists what a real run would do.
+- `retentionMs` trims each stream in the run to that age. Unset, `maintain()` does not trim. It comes from the call and not from this instance's `retentionMs`, because one cron scans streams that other services publish with their own retention. A cron usually publishes nothing, so limiting the trim to topics it published would trim nothing. Use `topics` to run it on streams that share a retention.
 - `idleConsumerMs` removes `hexok:` consumers idle that long that own no pending entries. A consumer of another client is never removed.
 - `dropIdleGroups` destroys a group only when it has no consumers, no pending entries, and a last-delivered id older than `idleMs`. That drops the cursor.
 - `dropIdleStreams` deletes a key only when it has no groups and its last id is older than `idleMs`.

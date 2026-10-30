@@ -132,6 +132,9 @@ type StreamRead = [string, StreamEntry[]];
 
 const ADAPTER = 'queue';
 
+/** How many entries `keptConsumers` holds. The `warn` log records every kept consumer. */
+const MAX_KEPT_CONSUMERS = 1000;
+
 const noopSink: LogSink = {
   debug() {},
   info() {},
@@ -294,7 +297,7 @@ export class RedisQueue extends Adapter(Queue) {
     return this.#lifecycle.state;
   }
 
-  /** The consumers `stop()` and `unsubscribe()` kept since the last `start()`. A later `maintain()` or `XAUTOCLAIM` does not change this list. */
+  /** The newest 1,000 consumers `stop()` and `unsubscribe()` kept since the last `start()`. A later `maintain()` or `XAUTOCLAIM` does not change this list. */
   get keptConsumers(): readonly RedisQueueKeptConsumer[] {
     return this.#kept;
   }
@@ -574,6 +577,7 @@ export class RedisQueue extends Adapter(Queue) {
   ): void {
     const { topic, group, consumer } = sub;
     this.#kept.push({ topic, group, consumer, reason });
+    if (this.#kept.length > MAX_KEPT_CONSUMERS) this.#kept.shift();
     this.#logger.warn(message, {
       ...this.#fields(sub, 'commands'),
       consumer,

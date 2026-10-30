@@ -64,7 +64,7 @@ A handler that calls `unsubscribe()` on its own subscription, or `stop()`, is no
 
 ### Kept consumers
 
-`stop()` and `unsubscribe()` keep a consumer whose entries must not be lost, and leave it for `XAUTOCLAIM` or `maintain()`. Each kept consumer logs one `warn` with its `reason`, and `queue.keptConsumers` lists `{ topic, group, consumer, reason }` for every consumer kept since the last `start()`.
+`stop()` and `unsubscribe()` keep a consumer whose entries must not be lost, and leave it for `XAUTOCLAIM` or `maintain()`. Each kept consumer logs one `warn` with its `reason`, and `queue.keptConsumers` lists `{ topic, group, consumer, reason }` for the newest 1,000 consumers kept since the last `start()`. The `warn` log is the complete record.
 
 | `reason` | Why the consumer stayed |
 | --- | --- |

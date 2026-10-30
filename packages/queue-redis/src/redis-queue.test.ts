@@ -2204,6 +2204,33 @@ describe('RedisQueue reliability', () => {
       expectKept(queue, logs, 'stop()', 'timeout');
     });
 
+    it('keptConsumers holds the newest 1,000, and the log records every one', async () => {
+      const { logs, queue, commands } = await started();
+      commands.status = 'reconnecting';
+      const keepOne = async () => {
+        await subscribe(queue, 'jobs', {
+          consumerGroup: 'billing',
+          handler: async () => 'ack',
+        });
+        await queue.unsubscribe('jobs', { consumerGroup: 'billing' });
+      };
+
+      await keepOne();
+      const first = queue.keptConsumers[0];
+      for (let kept = 1; kept < 1000; kept++) await keepOne();
+      expect(queue.keptConsumers).toHaveLength(1000);
+      expect(queue.keptConsumers[0]).toBe(first);
+
+      await keepOne();
+      expect(queue.keptConsumers).toHaveLength(1000);
+      expect(queue.keptConsumers).not.toContain(first);
+      expect(keptWarnings(logs).at(-1)?.[2]).toMatchObject({
+        consumer: queue.keptConsumers.at(-1)?.consumer,
+      });
+      expect(keptWarnings(logs)).toHaveLength(1001);
+      await queue.stop();
+    });
+
     it('stays silent for a consumer that was removed, and start() clears the list', async () => {
       const { logs, queue } = await started();
       await subscribe(queue, 'jobs', {

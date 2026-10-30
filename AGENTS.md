@@ -2,6 +2,21 @@
 
 Hexok is a TypeScript kit for hexagonal software. This file is for agents working on this repository. The agent skill for building apps with hexok is in `packages/hexok/skills/hexok/`.
 
+## Scope gate
+
+A request, ticket, or review comment that names hexok does not make it a hexok concern. Evaluate that before you write code.
+
+The gate applies when a change adds public API, an option, a package, or a runtime dependency, or adds docs about a specific environment or deployment. A fix that restores behavior hexok already promises skips the gate.
+
+1. Does the problem come from what the package does on its own, or from how one project deploys it? If it comes from the deployment, document the behavior and stop.
+2. Can an application solve it today with the existing API? If it can, hexok does not change.
+3. If an application cannot solve it, what is the smallest extension point that unblocks it? Prefer that to a feature for one case.
+4. Does the change tie applications to one vendor, deployment, or hexok internal? Applications should be able to replace an adapter or reach what they need without a hexok release. A yes is not an automatic block. Discuss it with the requester and decide together to block or allow it.
+
+When the gate applies, do not implement yet. Give the requester the answers above, the options including no change, the pros, cons, and risks of each, and the cost of maintaining it. Ask whether adding it to hexok is intentional. If no one can answer, stop and report.
+
+Docs state what a package does, requires, and guarantees, and what it leaves to the application. They do not cover every deployment scenario or what a developer using that vendor is expected to know.
+
 ## Layout
 
 npm workspaces with Turbo. Node 24 (`.nvmrc`), ESM only.

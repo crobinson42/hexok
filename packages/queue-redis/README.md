@@ -150,6 +150,34 @@ On Kubernetes, a pod has `terminationGracePeriodSeconds` (30 by default) between
 
 Unset, `start()` waits for Redis, which suits compose-style boot. Set it under an orchestrator such as Kubernetes, so the process exits and is restarted.
 
+## Redis ACL
+
+This is the least-privilege user for this adapter. Replace `CHANGE_ME`.
+
+```text
+ACL SETUSER hexok-queue on >CHANGE_ME resetchannels ~hexok:queue:* -@all +xadd +xtrim +xgroup|create +xgroup|delconsumer +xgroup|destroy +xreadgroup +xack +xpending +xclaim +xautoclaim +xinfo|stream +xinfo|groups +xinfo|consumers +xrange +exists +eval +scan +time +del +info +client|setinfo
+```
+
+The key pattern follows `keyPrefix`. Scripts run with this user's rights, so the commands they send are listed too.
+
+| Used by | Rules |
+| --- | --- |
+| `publish()` | `+xadd`, and `+xtrim` unless `trim` is `false` |
+| `subscribe()`, reads, and acks | `+xgroup\|create +xreadgroup +xack +xpending +xclaim +xautoclaim` |
+| Consumer removal script, in `stop()`, `unsubscribe()`, and `maintain()` | `+eval +exists +xinfo\|groups +xinfo\|consumers +xpending +xgroup\|delconsumer` |
+| The script that acks entries gone from the stream, on Redis 6.2 | `+eval +xpending +xrange +xack` |
+| `maintain()` | `+scan +xinfo\|stream +xinfo\|groups +xinfo\|consumers`, and `+xtrim` with `retentionMs` |
+| `maintain()` group and stream scripts | `+eval +exists +xinfo\|groups +xinfo\|stream +xgroup\|destroy +time +del` |
+
+A process with one role can drop the rest. `maintain()` is the only user of `+scan`, `+time`, `+del`, `+xinfo|stream`, and `+xgroup|destroy`.
+
+- `+info` is the ioredis ready check, on every connection. `+client|setinfo` is the ioredis client tag. ioredis ignores a refused `CLIENT SETINFO`, but `ACL LOG` records each refusal.
+- Redis 7.0 rejects `+client|setinfo` in `ACL SETUSER`, because it has no such subcommand. Remove that rule on 7.0.
+- `HELLO`, `AUTH`, and `QUIT` need no rule. Redis does not check them against the ACL.
+- Add `+select` when the URL names a database, and `+client|setname` when `connectionName` is set.
+
+An integration test runs this line as a real user and fails if `ACL LOG` records a refusal.
+
 ## Sensitive messages
 
 `publish(topic, payload, { sensitive: true })` adds a `sensitive` field to the entry. Other entries are unchanged. The handler still gets the payload.

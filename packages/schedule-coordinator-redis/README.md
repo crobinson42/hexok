@@ -98,6 +98,23 @@ Every log carries `adapter: 'schedule'`. `connection` is `commands`, and appears
 - A Redis that accepts connections and does not answer never replies to `QUIT`. `QUIT` gets only the time left, and then the connection is dropped.
 - After `stop()` resolves, ioredis can keep the process alive for `disconnectTimeout`, 2 seconds by default, while it closes the socket. Set `disconnectTimeout` in the redis options to let the process exit sooner.
 
+## Redis ACL
+
+This is the least-privilege user for this adapter. Replace `CHANGE_ME`.
+
+```text
+ACL SETUSER hexok-sched on >CHANGE_ME resetchannels ~hexok:sched:* -@all +set +get +expire +del +eval +info +client|setinfo
+```
+
+The key pattern follows `keyPrefix`. Taking a lock uses `+set`. Renew and release are scripts, and scripts run with this user's rights. So they need `+eval`, plus the `+get`, `+expire`, and `+del` they send.
+
+- `+info` is the ioredis ready check, on every connection. `+client|setinfo` is the ioredis client tag. ioredis ignores a refused `CLIENT SETINFO`, but `ACL LOG` records each refusal.
+- Redis 7.0 rejects `+client|setinfo` in `ACL SETUSER`, because it has no such subcommand. Remove that rule on 7.0.
+- `HELLO`, `AUTH`, and `QUIT` need no rule. Redis does not check them against the ACL.
+- Add `+select` when the URL names a database, and `+client|setname` when `connectionName` is set.
+
+An integration test runs this line as a real user and fails if `ACL LOG` records a refusal.
+
 ## Configuration
 
 | Option | Default | Why |

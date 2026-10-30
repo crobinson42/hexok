@@ -1,11 +1,18 @@
 import { randomUUID } from 'node:crypto';
 import type { QueueMaxDeliveries, QueueSubscribeOptions } from '@hexok/queue';
-import { describeRedisLifecycle, RedisProxy, runNode } from '@hexok/test-redis';
+import {
+  describeRedisLifecycle,
+  documentedAclRules,
+  RedisProxy,
+  runNode,
+  withAclUser,
+} from '@hexok/test-redis';
 import { Redis } from 'ioredis';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, onTestFinished, vi } from 'vitest';
 import type { ParkInput } from './park.js';
 import { RedisQueue } from './redis-queue.js';
 import {
+  ackDeleted,
   deleteIdleStream,
   destroyIdleGroup,
   releaseConsumer,
@@ -1085,4 +1092,131 @@ describe.skipIf(!process.env.REDIS_URL)('RedisQueue retention', () => {
     ]);
     await redis.del(key);
   });
+});
+
+describe.each(recoveryTargets)('RedisQueue ACL on %s', (_name, url) => {
+  it.skipIf(!url)(
+    'runs every command path as the documented user with no refusal',
+    async () => {
+      const adminUrl = url ?? '';
+      const rules = await documentedAclRules(
+        new URL('../README.md', import.meta.url),
+      );
+      const admin = new Redis(adminUrl);
+      const keyPrefix = newPrefix();
+      const keys = ['jobs', 'gone', 'idle'].map(
+        (topic) => `${keyPrefix}${topic}`,
+      );
+      try {
+        await withAclUser(adminUrl, rules, async (user) => {
+          const errors: unknown[] = [];
+          const queue = new RedisQueue({
+            redis: user.url,
+            keyPrefix,
+            visibilityMs: 300,
+            blockMs: 50,
+            stopTimeoutMs: 2000,
+            logger: {
+              debug() {},
+              info() {},
+              warn() {},
+              error: (error) => errors.push(error),
+            },
+          });
+          onTestFinished(() => queue.stop());
+          await queue.start();
+
+          // XADD, XTRIM, XGROUP CREATE, XREADGROUP, XPENDING, XCLAIM, XAUTOCLAIM, XACK.
+          await queue.publish('jobs', { n: 1 });
+          const deliveries: number[] = [];
+          await subscribe(queue, 'jobs', {
+            consumerGroup: 'workers',
+            handler: async (message) => {
+              deliveries.push(message.deliveries);
+              if (message.deliveries === 1) return 'retry';
+              // Longer than a heartbeat, so XCLAIM runs.
+              await new Promise((resolve) => setTimeout(resolve, 250));
+              return 'ack';
+            },
+          });
+          await waitFor(() => deliveries.length >= 2);
+          await waitFor(
+            async () =>
+              (await admin.xpending(keys[0] ?? '', 'workers'))[0] === 0,
+          );
+
+          // The consumer removal script.
+          await queue.unsubscribe('jobs', { consumerGroup: 'workers' });
+          expect(await consumersOf(admin, keys[0] ?? '', 'workers')).toEqual(
+            [],
+          );
+
+          // The script for a pending entry gone from the stream. Redis 7 drops such an entry itself, so the queue reaches this only on 6.2.
+          const client = new Redis(user.url);
+          const goneKey = keys[1] ?? '';
+          await client.xgroup('CREATE', goneKey, 'workers', '0', 'MKSTREAM');
+          const goneId = await client.xadd(goneKey, '*', 'payload', '{}');
+          await client.xreadgroup(
+            'GROUP',
+            'workers',
+            'hexok:acl',
+            'STREAMS',
+            goneKey,
+            '>',
+          );
+          await admin.xdel(goneKey, goneId ?? '');
+          expect(
+            await ackDeleted(client, goneKey, 'workers', 'hexok:acl'),
+          ).toEqual([goneId]);
+          await client.quit();
+
+          // SCAN, XINFO, XTRIM, and the group and stream scripts. Entries, group, and consumer are all idle.
+          const idleKey = keys[2] ?? '';
+          const idleId = `${Date.now() - 60_000}-0`;
+          await admin.xadd(idleKey, idleId, 'payload', '{}');
+          await admin.xgroup('CREATE', idleKey, 'old', '0');
+          await admin.xreadgroup(
+            'GROUP',
+            'old',
+            'hexok:old',
+            'STREAMS',
+            idleKey,
+            '>',
+          );
+          await admin.xack(idleKey, 'old', idleId);
+          const report = await queue.maintain({
+            dryRun: false,
+            retentionMs: 1000,
+            idleConsumerMs: 0,
+            dropIdleGroups: { idleMs: 1000 },
+            dropIdleStreams: { idleMs: 1000 },
+          });
+          expect(report.consumersRemoved).toContainEqual(
+            expect.objectContaining({ topic: 'idle', consumer: 'hexok:old' }),
+          );
+          expect(report.groupsDestroyed).toContainEqual({
+            topic: 'idle',
+            group: 'old',
+          });
+          expect(report.streamsDeleted).toContainEqual({
+            topic: 'idle',
+            length: 1,
+          });
+
+          // QUIT, and the release in stop().
+          await subscribe(queue, 'jobs', {
+            consumerGroup: 'workers',
+            handler: async () => 'ack',
+          });
+          await queue.stop();
+
+          expect(errors).toEqual([]);
+          expect(await user.refusals()).toEqual([]);
+        });
+      } finally {
+        await admin.del(...keys);
+        await admin.quit();
+      }
+    },
+  );
 });

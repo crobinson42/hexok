@@ -81,6 +81,23 @@ Errors returned to the caller are not logged. This adapter runs no background co
 - A Redis that accepts connections and does not answer never replies to `QUIT`. The connection is disconnected when `stopTimeoutMs` runs out.
 - After `stop()` resolves, ioredis can hold a half-closed socket to an unreachable Redis for its `disconnectTimeout`. That is 2 seconds by default, and it can keep the process alive. Set `disconnectTimeout` in the `redis` options to shorten it.
 
+## Redis ACL
+
+This is the least-privilege user for this adapter. Replace `CHANGE_ME`.
+
+```text
+ACL SETUSER hexok-broadcast on >CHANGE_ME resetchannels &hexok:broadcast:* -@all +publish +subscribe +unsubscribe +info +client|setinfo
+```
+
+The channel pattern follows `channelPrefix`. This adapter stores no keys and runs no scripts. `publish()` uses `+publish`. `subscribe()` and `unsubscribe()` use `+subscribe` and `+unsubscribe`.
+
+- `+info` is the ioredis ready check, on every connection. `+client|setinfo` is the ioredis client tag. ioredis ignores a refused `CLIENT SETINFO`, but `ACL LOG` records each refusal.
+- Redis 7.0 rejects `+client|setinfo` in `ACL SETUSER`, because it has no such subcommand. Remove that rule on 7.0.
+- `HELLO`, `AUTH`, and `QUIT` need no rule. Redis does not check them against the ACL.
+- Add `+select` when the URL names a database, and `+client|setname` when `connectionName` is set.
+
+An integration test runs this line as a real user and fails if `ACL LOG` records a refusal.
+
 ## Configuration
 
 | Option | Default | Why |

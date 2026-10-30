@@ -1,12 +1,22 @@
 import { randomUUID } from 'node:crypto';
 import {
   describeRedisLifecycle,
+  documentedAclRules,
   RedisProxy,
   runNode,
   settleWithin,
+  withAclUser,
 } from '@hexok/test-redis';
 import { Redis, type RedisOptions } from 'ioredis';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import {
+  afterEach,
+  beforeEach,
+  describe,
+  expect,
+  it,
+  onTestFinished,
+  vi,
+} from 'vitest';
 import type { CronScheduler } from './cron-scheduler.js';
 import type { LogSink } from './index.js';
 import { RedisScheduleCoordinator } from './redis-schedule.js';
@@ -635,3 +645,53 @@ console.log(JSON.stringify({ code: error?.code, logged }));
     });
   },
 );
+
+describe.skipIf(!process.env.REDIS_URL)('RedisScheduleCoordinator ACL', () => {
+  it('takes, renews, and releases a lock as the documented user with no refusal', async () => {
+    const url = process.env.REDIS_URL ?? '';
+    const rules = await documentedAclRules(
+      new URL('../README.md', import.meta.url),
+    );
+    const admin = new Redis(url);
+    const keyPrefix = `hexok:sched:it:${randomUUID()}:`;
+    const lock = `${keyPrefix}lock:acl`;
+    try {
+      await withAclUser(url, rules, async (user) => {
+        const scheduler = seam();
+        const logs = recorder();
+        const jobs = new RedisScheduleCoordinator({
+          redis: user.url,
+          keyPrefix,
+          lockTtlSec: 1,
+          logger: logs,
+          scheduler,
+        });
+        onTestFinished(() => jobs.stop());
+        await jobs.start();
+        let aborted = false;
+        let held: string | null = null;
+        jobs.register({
+          name: 'acl',
+          cron: '* * * * *',
+          onTick: async ({ signal }) => {
+            held = await admin.get(lock);
+            // Longer than the renew interval, a third of the TTL.
+            await new Promise((resolve) => setTimeout(resolve, 500));
+            aborted = signal.aborted;
+          },
+        });
+        await scheduler.jobs[0]?.fire();
+        await jobs.stop();
+        expect(held).toEqual(expect.any(String));
+        expect(aborted).toBe(false);
+        expect(await admin.get(lock)).toBeNull();
+        expect(logs.errors).toEqual([]);
+        expect(logs.warnings).toEqual([]);
+        expect(await user.refusals()).toEqual([]);
+      });
+    } finally {
+      await admin.del(lock);
+      await admin.quit();
+    }
+  });
+});

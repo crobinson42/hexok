@@ -60,11 +60,12 @@ The docs site runs with `npm run dev --workspace=@hexok/docs`.
 
 CI runs `lint`, `type-check`, `test`, and `build` in that order. Run all four.
 
-Files named `*.integration.test.ts` need Redis. They skip when `REDIS_URL` is unset, and they throw when `CI` is set without it. Run them locally with:
+Files named `*.integration.test.ts` need Redis or MongoDB. They skip when `REDIS_URL` or `MONGO_URL` is unset, and they throw when `CI` is set without it. Run them locally with:
 
 ```bash
 docker run --rm -p 6379:6379 redis:7.2
-REDIS_URL=redis://127.0.0.1:6379 npm run test
+docker run --rm -p 27017:27017 mongo:7
+REDIS_URL=redis://127.0.0.1:6379 MONGO_URL=mongodb://127.0.0.1:27017 npm run test
 ```
 
 ## Code

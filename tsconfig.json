@@ -19,6 +19,7 @@
     { "path": "packages/sms-twilio" },
     { "path": "packages/schedule-coordinator" },
     { "path": "packages/schedule-coordinator-redis" },
+    { "path": "packages/authz" },
     { "path": "examples/extend" },
     { "path": "examples/app-template" }
   ]

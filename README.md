@@ -154,4 +154,4 @@ const loaded = model.fromModel(raw)
 
 Checks are off unless the mapper or the call passes `{ validate: true }`. For an entity source, `fromModel` returns the entity: `parse` when checks are on, `restore` when they are off. The source may be a Schema instead of an Entity, so a log record that is not an entity uses the same primitive. Another mapper can store the same entity as a Postgres point. The mapper does not commit the entity, and it is not a query builder.
 
-See `examples/app-template` for a wired slice and `examples/extend` for overriding `parse` and `start`.
+See `examples/app-template` for a wired slice, `examples/extend` for overriding `parse` and `start`, and `examples/authz` for relationship checks in that same layout.

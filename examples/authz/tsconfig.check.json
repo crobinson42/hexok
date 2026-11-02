@@ -1,0 +1,14 @@
+{
+  "extends": "./tsconfig.build.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "composite": true,
+    "sourceMap": false
+  },
+  "include": ["src"],
+  "exclude": [],
+  "references": [
+    { "path": "../../packages/hexok" },
+    { "path": "../../packages/authz" }
+  ]
+}

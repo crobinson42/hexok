@@ -1,0 +1,25 @@
+{
+  "name": "@hexok/authz-example",
+  "version": "0.0.1",
+  "private": true,
+  "description": "HTTP API that checks and lists access with @hexok/authz.",
+  "type": "module",
+  "scripts": {
+    "build": "tsc -b tsconfig.build.json",
+    "start": "node dist/servers/http/main.js",
+    "test": "vitest run",
+    "type-check": "tsc --noEmit -p tsconfig.check.json",
+    "lint": "biome check .",
+    "clean": "rm -rf dist *.tsbuildinfo"
+  },
+  "dependencies": {
+    "@hexok/authz": "*",
+    "@ts-pf/contract": "^0.2.2",
+    "@ts-pf/protocol": "^0.2.1",
+    "@ts-pf/server": "^0.4.2",
+    "@ts-pf/server-http": "^0.3.2",
+    "hexok": "*",
+    "srvx": "^1.0.7",
+    "zod": "^4.1.5"
+  }
+}

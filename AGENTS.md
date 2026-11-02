@@ -28,6 +28,7 @@ npm workspaces with Turbo. Node 24 (`.nvmrc`), ESM only.
 - `packages/docs`: the Astro Starlight site at crobinson42.github.io/hexok. Private.
 - `examples/app-template`: a blog API with HTTP and worker processes on Redis. Private.
 - `examples/extend`: small overrides of primitives. Private.
+- `examples/authz`: an HTTP API on the app-template layout that checks and lists with `@hexok/authz`. Private. The package is `@hexok/authz-example`.
 
 **Remember**: Code quality is not negotiable. Clear, maintainable code enables rapid development and confident refactoring.
 

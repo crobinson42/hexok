@@ -21,6 +21,7 @@ export {
   type Permission,
   resolveGrants,
 } from './model.js';
+export { type Move, type PathHandler, Paths, type Placement } from './paths.js';
 export {
   type GrantQuery,
   type Membership,

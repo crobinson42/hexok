@@ -21,6 +21,7 @@
     { "path": "packages/schedule-coordinator-redis" },
     { "path": "packages/authz" },
     { "path": "packages/test-authz" },
+    { "path": "packages/authz-mongo" },
     { "path": "examples/extend" },
     { "path": "examples/app-template" }
   ]

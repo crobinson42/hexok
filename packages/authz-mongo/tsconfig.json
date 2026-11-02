@@ -1,0 +1,11 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": { "rootDir": "src", "outDir": "dist" },
+  "references": [
+    { "path": "../hexok" },
+    { "path": "../authz" },
+    { "path": "../test-authz" }
+  ],
+  "include": ["src"],
+  "exclude": ["src/**/*.test.ts"]
+}

@@ -55,6 +55,7 @@ export type PathUpdate = Pick<PathDoc, 'id' | 'path' | 'parents'>;
 
 /** Paths in one database. Use one instance per database. */
 export abstract class PathStore extends Port('PathStore') {
+  /** The docs this store holds for `ids`, in any order. */
   abstract get(ids: readonly string[]): Promise<readonly PathDoc[]>;
   /** Every doc whose path contains `id`, including `id` itself. */
   abstract descendants(id: string): Promise<readonly PathDoc[]>;

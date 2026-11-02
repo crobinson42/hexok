@@ -196,12 +196,12 @@ export class Paths<Copies extends Record<string, PathStore>> {
     if (parents.length === 0) {
       return { id: target.id, orgId: target.id, path: [target.id], parents };
     }
-    const docs = await this.deps.central.get(parents);
-    for (const id of parents) {
-      if (!docs.some((doc) => doc.id === id)) {
-        throw AuthzError.ParentNotPlaced({ id });
-      }
-    }
+    const found = await this.deps.central.get(parents);
+    const docs = parents.map((id) => {
+      const doc = found.find((candidate) => candidate.id === id);
+      if (doc === undefined) throw AuthzError.ParentNotPlaced({ id });
+      return doc;
+    });
     const orgId = (docs[0] as PathDoc).orgId;
     if (docs.some((doc) => doc.orgId !== orgId)) {
       throw AuthzError.InvalidPath({ id: target.id });

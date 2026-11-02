@@ -2,6 +2,8 @@
 
 Forwards `error` from the hexok `Logger` port to New Relic `noticeError`. Install with `npm i @hexok/logger-newrelic`. `newrelic` `>=12` is an optional peer and is not imported.
 
+The adapter class is closed. Its fields and helpers are private. Wrap it in your own adapter of the port when you need extra logic.
+
 ```ts
 import { NewRelicLogger, type NewRelicLike } from '@hexok/logger-newrelic';
 

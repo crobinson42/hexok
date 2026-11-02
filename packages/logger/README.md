@@ -2,6 +2,8 @@
 
 Logger port and in-process adapters. Install with `npm i @hexok/logger`.
 
+The adapter classes are closed. Their fields and helpers are private. Wrap one in your own adapter of the port when you need extra logic.
+
 ```ts
 import { MemoryLogger } from '@hexok/logger';
 

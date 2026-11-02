@@ -2,6 +2,8 @@
 
 Quarantine port for a failed outbound attempt. Install with `npm i @hexok/quarantine`. `MemoryQuarantine` is the in-process adapter.
 
+The adapter class is closed. Its fields and helpers are private. Wrap it in your own adapter of the port when you need extra logic.
+
 ```ts
 import { MemoryQuarantine, parkOnThrow } from '@hexok/quarantine';
 

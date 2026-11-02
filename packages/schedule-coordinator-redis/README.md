@@ -2,6 +2,8 @@
 
 Per-job Redis lock for `@hexok/schedule-coordinator`. Install with `npm i @hexok/schedule-coordinator-redis`. Depends on `ioredis` 6 and `cron` 4. Connections negotiate RESP3 and keep v5 reply shapes. `lockTtlSec` is in seconds, unlike the `*Ms` options, and the adapter name in errors and logs is `schedule`.
 
+The adapter class is closed. Its fields and helpers are private. Wrap it in your own adapter of the port when you need extra logic.
+
 ```ts
 import { RedisScheduleCoordinator } from '@hexok/schedule-coordinator-redis';
 

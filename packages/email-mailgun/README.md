@@ -2,6 +2,8 @@
 
 Mailgun adapter for `@hexok/email`. Install with `npm i @hexok/email-mailgun`. `mailgun.js` `^12`, `^13`, or `^14` is an optional peer and is not imported. The app constructs the client. A `mailgun.js` 14 client fits `MailgunLike` without a cast.
 
+The adapter class is closed. Its fields and helpers are private. Wrap it in your own adapter of the port when you need extra logic.
+
 There is no retry. Sandbox sets `o:testmode` to `yes` and omits the key otherwise. `idempotencyKey` is stored only as `v:idempotencyKey`. That is not provider dedupe, so a retry can double-send. An optional `quarantine` sink parks `Unavailable` and `RateLimited`. `Rejected` is not parked. This package does not depend on `@hexok/quarantine`.
 
 Errors are safe by default. A provider failure logs `email: mailgun send failed` with only the status and attempt. `Rejected` carries its default message, because Mailgun's error text can hold the recipient address. A failed park logs only the error name. Set `exposeProviderErrors: true` to put Mailgun's error text in `Rejected` and log raw provider and park errors. A `sensitive` message never exposes them.

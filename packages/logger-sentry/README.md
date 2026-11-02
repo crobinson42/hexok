@@ -2,6 +2,8 @@
 
 Ships `warn` and `error` from the hexok `Logger` port to a Sentry client the app constructs. Install with `npm i @hexok/logger-sentry`. `@sentry/node` `>=8` is an optional peer and is not imported.
 
+The adapter class is closed. Its fields and helpers are private. Wrap it in your own adapter of the port when you need extra logic.
+
 ```ts
 import { SentryLogger, type SentryLike } from '@hexok/logger-sentry';
 

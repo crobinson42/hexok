@@ -1,0 +1,23 @@
+{
+  "name": "@hexok/authz-example",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "tsc -b",
+    "test": "vitest run",
+    "type-check": "tsc --noEmit -p tsconfig.check.json",
+    "lint": "biome check .",
+    "clean": "rm -rf dist *.tsbuildinfo"
+  },
+  "dependencies": {
+    "@hexok/authz": "*",
+    "@hexok/authz-mongo": "*",
+    "hexok": "*",
+    "mongodb": "^7.8.0",
+    "zod": "^4.1.5"
+  },
+  "devDependencies": {
+    "@hexok/test-authz": "*"
+  }
+}

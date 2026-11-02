@@ -23,6 +23,7 @@
     { "path": "packages/test-authz" },
     { "path": "packages/authz-mongo" },
     { "path": "examples/extend" },
-    { "path": "examples/app-template" }
+    { "path": "examples/app-template" },
+    { "path": "examples/authz" }
   ]
 }

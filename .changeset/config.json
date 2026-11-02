@@ -11,5 +11,10 @@
   "access": "public",
   "baseBranch": "main",
   "updateInternalDependencies": "patch",
-  "ignore": ["@hexok/extend", "@hexok/docs", "@hexok/app-template"]
+  "ignore": [
+    "@hexok/extend",
+    "@hexok/docs",
+    "@hexok/app-template",
+    "@hexok/authz-example"
+  ]
 }

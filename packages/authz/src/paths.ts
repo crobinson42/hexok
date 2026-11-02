@@ -1,9 +1,15 @@
-import { EventHandler } from 'hexok';
+import { EventHandler, type StandardSchemaV1 } from 'hexok';
 import { AuthzError } from './errors.js';
 import { unionPaths } from './model.js';
 import type { PathDoc, PathStore } from './ports.js';
 
-type EventClass = Parameters<typeof EventHandler>[1];
+/** An event class. `hexok` does not export a name for this shape. */
+export type EventClass = {
+  readonly token: string;
+  readonly schema: StandardSchemaV1;
+  // biome-ignore lint/suspicious/noExplicitAny: event constructors take a payload whose type varies per event
+  new (...args: any[]): object;
+};
 
 type PayloadOf<E> = E extends new (
   // biome-ignore lint/suspicious/noExplicitAny: event constructors take a payload whose type varies per event

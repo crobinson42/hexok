@@ -31,3 +31,19 @@ export {
   PolicyStore,
   Principals,
 } from './ports.js';
+export {
+  type Authorize,
+  type AuthzCtx,
+  AuthzUseCase,
+  authorizeGuard,
+  BootstrapOrganization,
+  type CatalogRef,
+  CreatePermissionSet,
+  DeletePermissionSet,
+  GetAccessSummary,
+  GetAllowedActions,
+  GrantAccess,
+  ListGrants,
+  RevokeGrant,
+  UpdatePermissionSet,
+} from './use-cases.js';

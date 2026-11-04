@@ -16,10 +16,7 @@ import { declared } from './errors.js';
  */
 export const apiContract = router({
   posts: {
-    save: procedure
-      .input(savePostInput)
-      .output(postSchema)
-      .errors(declared('PostNotFound')),
+    save: procedure.input(savePostInput).output(postSchema),
     publish: procedure
       .input(publishPostInput)
       .output(postSchema)

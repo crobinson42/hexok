@@ -1,3 +1,4 @@
+import { SmsError } from '@hexok/sms';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { ConsoleSms } from './console-sms.js';
 
@@ -22,5 +23,13 @@ describe('ConsoleSms', () => {
     const printed = log.mock.calls.flat().join(' ');
     expect(printed).not.toContain('+15551234567');
     expect(printed).not.toContain('482913');
+  });
+
+  it('rejects an empty body', async () => {
+    await expect(
+      new ConsoleSms().send({ to: '+15551234567', body: ' ' }),
+    ).rejects.toSatisfy(
+      (error: unknown) => SmsError.is(error) && error.code === 'Rejected',
+    );
   });
 });

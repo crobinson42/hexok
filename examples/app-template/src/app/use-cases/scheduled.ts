@@ -8,6 +8,7 @@ export type ScheduleSpec = Omit<ScheduleRegistration, 'onTick'>;
 /**
  * Internal use case that owns its cron registration.
  * `execute` still accepts only `internalCall()`. The coordinator never builds that context.
+ * `registration()` passes the tick's abort signal on that context.
  *
  * ```ts
  * class SubscriberReminder extends ScheduledUseCase('post.subscriber-reminder', {
@@ -35,8 +36,9 @@ export function ScheduledUseCase<
     }): ScheduleRegistration {
       return {
         ...schedule,
-        onTick: async () => {
-          await this.execute(internalCall());
+        onTick: async ({ signal }) => {
+          if (signal.aborted) return;
+          await this.execute(internalCall(signal));
         },
       };
     }

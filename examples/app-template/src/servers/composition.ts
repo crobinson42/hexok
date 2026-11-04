@@ -5,7 +5,6 @@ import { JsonLineLogger, type Logger } from '@hexok/logger';
 import { type NewRelicLike, NewRelicLogger } from '@hexok/logger-newrelic';
 import { type SentryLike, SentryLogger } from '@hexok/logger-sentry';
 import { MemoryQuarantine } from '@hexok/quarantine';
-import type { LogSink } from '@hexok/queue-redis';
 import { RedisQueue } from '@hexok/queue-redis';
 import { RedisScheduleCoordinator } from '@hexok/schedule-coordinator-redis';
 import type { SmsSender } from '@hexok/sms';
@@ -20,23 +19,6 @@ import { RedisPosts } from '../infra/repos/redis-posts.js';
 import { RedisSubscribers } from '../infra/repos/redis-subscribers.js';
 import { ConsoleSms } from '../infra/services/console-sms.js';
 import { TeeLogger } from '../infra/services/tee-logger.js';
-
-export function logSink(logger: Logger): LogSink {
-  return {
-    debug(message, fields) {
-      logger.debug(message, fields);
-    },
-    info(message, fields) {
-      logger.info(message, fields);
-    },
-    warn(message, fields) {
-      logger.warn(message, fields);
-    },
-    error(message, fields) {
-      logger.error(message, fields);
-    },
-  };
-}
 
 function requiredEnvVar(name: string): string {
   const value = process.env[name];
@@ -90,7 +72,6 @@ async function createEmailService(
   email: EmailSender;
   from: EmailAddress;
 }> {
-  const sink = logSink(logger);
   const provider = process.env.EMAIL_PROVIDER ?? 'resend';
   const from = fromAddress();
   if (provider === 'resend') {
@@ -101,7 +82,7 @@ async function createEmailService(
       email: new ResendEmailSender({
         client: new mod.Resend(requiredEnvVar('RESEND_API_KEY')),
         sandbox: process.env.RESEND_SANDBOX === '1',
-        logger: sink,
+        logger,
         quarantine,
       }),
       from,
@@ -124,7 +105,7 @@ async function createEmailService(
       email: new MailgunEmailSender({
         client,
         domain: requiredEnvVar('MAILGUN_DOMAIN'),
-        logger: sink,
+        logger,
         quarantine,
       }),
       from,
@@ -149,7 +130,7 @@ async function createSmsService(
   return new TwilioSmsSender({
     client: twilioMod.default(sid, requiredEnvVar('TWILIO_AUTH_TOKEN')),
     from: requiredEnvVar('TWILIO_FROM'),
-    logger: logSink(logger),
+    logger,
     quarantine,
   });
 }
@@ -171,19 +152,18 @@ export type Runtime = {
 export async function createRuntime(): Promise<Runtime> {
   const url = process.env.REDIS_URL ?? 'redis://127.0.0.1:6379';
   const logger = await createLogger();
-  const sink = logSink(logger);
   const quarantine = new MemoryQuarantine();
   const redis = await connectRedis(url);
   const domainEventsQueue = new RedisQueue({
     redis: url,
     keyPrefix: 'domain:',
-    logger: sink,
+    logger,
     quarantine,
   });
   const scheduleCoordinator = new RedisScheduleCoordinator({
     redis: url,
     keyPrefix: 'domain:schedule:',
-    logger: sink,
+    logger,
   });
   return {
     logger,

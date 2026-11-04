@@ -16,6 +16,7 @@ export class EmailSubscribersHandler extends EventHandler(
     await this.deps.emailSubscribers.execute(internalCall(), {
       subject: 'New post',
       body: event.payload.title,
+      idempotencyKey: `post.published:${event.payload.postId}`,
     });
   }
 }

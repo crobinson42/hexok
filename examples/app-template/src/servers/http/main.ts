@@ -6,6 +6,12 @@ import { onShutdown } from '../utils/shutdown.js';
 import { createHttpHandler } from './handler.js';
 
 const runtime = await createRuntime();
+// Registered before start, so a signal during startup still stops what has started.
+let closeServer: (() => Promise<void>) | undefined;
+onShutdown(runtime.logger, async () => {
+  await closeServer?.();
+  await runtime.stop();
+});
 await runtime.domainEventsQueue.start();
 
 const api = createApi({
@@ -21,14 +27,9 @@ const server = serve({
     authenticator: runtime.authenticator,
     logger: runtime.logger,
   }),
-  // onShutdown stops the server and the runtime.
   gracefulShutdown: false,
   silent: true,
 });
+closeServer = () => server.close();
 await server.ready();
 runtime.logger.info('http listening', { url: server.url });
-
-onShutdown(runtime.logger, async () => {
-  await server.close();
-  await runtime.stop();
-});

@@ -15,7 +15,7 @@ import { ApiUseCase } from '../../../context.js';
 
 /** Omitted `channels` means email. Channel rules are checked in `execute`. */
 export const subscribeToPostsInput = z.object({
-  email: z.string(),
+  email: z.string().email(),
   phone: z.string().optional(),
   channels: z.array(notificationChannelSchema).optional(),
 });

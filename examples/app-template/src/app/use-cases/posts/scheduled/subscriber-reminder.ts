@@ -25,6 +25,10 @@ export class SubscriberReminder extends ScheduledUseCase(
   }
 
   async execute(ctx: UseCase.Ctx<typeof InternalUseCase>): Promise<number> {
-    return this.deps.emailSubscribers.execute(ctx, REMINDER);
+    const day = new Date().toISOString().slice(0, 10);
+    return this.deps.emailSubscribers.execute(ctx, {
+      ...REMINDER,
+      idempotencyKey: `post.subscriber-reminder:${day}`,
+    });
   }
 }

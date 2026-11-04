@@ -54,11 +54,15 @@ const internalCaller: unique symbol = Symbol('app-template.internal');
 
 export type InternalCtx = {
   readonly [internalCaller]: true;
+  /** Set by a scheduled tick. Absent for a handler or another in-process caller. */
+  readonly signal?: AbortSignal;
 };
 
 /** Context for `internal/` and `scheduled/` use cases. */
-export function internalCall(): InternalCtx {
-  return { [internalCaller]: true };
+export function internalCall(signal?: AbortSignal): InternalCtx {
+  return signal === undefined
+    ? { [internalCaller]: true }
+    : { [internalCaller]: true, signal };
 }
 
 function internalCallerGuard({ ctx }: { ctx: InternalCtx }): void {

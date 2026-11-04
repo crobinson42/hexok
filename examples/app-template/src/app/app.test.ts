@@ -1,5 +1,5 @@
 import type { EmailMessage, EmailReceipt } from '@hexok/email';
-import { EmailSender } from '@hexok/email';
+import { EmailError, EmailSender } from '@hexok/email';
 import { NoopLogger } from '@hexok/logger';
 import type { SmsMessage, SmsReceipt } from '@hexok/sms';
 import { SmsError, SmsSender } from '@hexok/sms';
@@ -7,7 +7,7 @@ import { asResult, createClient } from '@ts-pf/client';
 import { FetchLink } from '@ts-pf/client-http';
 import { Adapter, CodedError, type EventInstance } from 'hexok';
 import { describe, expect, it } from 'vitest';
-import type { PostEntity } from '../domain/entities/post.js';
+import { PostEntity } from '../domain/entities/post.js';
 import { SubscriberEntity } from '../domain/entities/subscriber.js';
 import { DomainError } from '../domain/errors/domain.js';
 import type { DomainEvents } from '../domain/events/domain-events.js';
@@ -39,43 +39,65 @@ const from = { email: 'blog@localhost', name: 'Blog' };
 
 const ctx = { caller: { userId: 'ada', sessionId: 'ada-session' } };
 
+type PostProps = ConstructorParameters<typeof PostEntity>[0];
+
 class InMemoryPosts extends Adapter(PostRepository) {
-  readonly #rows = new Map<string, PostEntity>();
+  readonly #rows = new Map<string, PostProps>();
 
   override async get(id: string): Promise<PostEntity | null> {
-    return this.#rows.get(id) ?? null;
+    const props = this.#rows.get(id);
+    return props === undefined
+      ? null
+      : PostEntity.restore(structuredClone(props));
   }
 
   override async save(post: PostEntity): Promise<void> {
-    this.#rows.set(post.props.id, post);
+    this.#rows.set(post.props.id, structuredClone(post.toProps()));
+    post.commit();
   }
 
   override async listDue(now: Date): Promise<readonly PostEntity[]> {
     const at = now.getTime();
-    return [...this.#rows.values()].filter((post) => {
+    const due: PostEntity[] = [];
+    for (const props of this.#rows.values()) {
+      const post = PostEntity.restore(structuredClone(props));
       const publishAt = post.props.publishAt;
-      return (
+      if (
         post.props.status === 'scheduled' &&
         publishAt !== null &&
         Date.parse(publishAt) <= at
-      );
-    });
+      ) {
+        due.push(post);
+      }
+    }
+    return due;
   }
 }
 
+type SubscriberProps = ConstructorParameters<typeof SubscriberEntity>[0];
+
 class InMemorySubscribers extends Adapter(SubscriberRepository) {
-  readonly #byEmail = new Map<string, SubscriberEntity>();
+  readonly #byEmail = new Map<string, SubscriberProps>();
 
   override async getByEmail(email: string): Promise<SubscriberEntity | null> {
-    return this.#byEmail.get(email) ?? null;
+    const props = this.#byEmail.get(email);
+    return props === undefined
+      ? null
+      : SubscriberEntity.restore(structuredClone(props));
   }
 
   override async list(): Promise<readonly SubscriberEntity[]> {
-    return [...this.#byEmail.values()];
+    return [...this.#byEmail.values()].map((props) =>
+      SubscriberEntity.restore(structuredClone(props)),
+    );
   }
 
   override async save(subscriber: SubscriberEntity): Promise<void> {
-    this.#byEmail.set(subscriber.props.email, subscriber);
+    this.#byEmail.set(
+      subscriber.props.email,
+      structuredClone(subscriber.toProps()),
+    );
+    subscriber.commit();
   }
 }
 
@@ -120,8 +142,15 @@ function savePost(posts: PostRepository): SavePost {
 
 class RecordingEmail extends Adapter(EmailSender) {
   readonly sent: EmailMessage[] = [];
+  /** Thrown once, then cleared, so a later recipient still receives mail. */
+  fail: Error | undefined;
 
   override async send(message: EmailMessage): Promise<EmailReceipt> {
+    if (this.fail !== undefined) {
+      const error = this.fail;
+      this.fail = undefined;
+      throw error;
+    }
     this.sent.push(message);
     return { id: 'test' };
   }
@@ -136,6 +165,10 @@ class RecordingSms extends Adapter(SmsSender) {
     this.sent.push(message);
     return { id: 'test', acceptedAt: new Date() };
   }
+}
+
+function notice(body = 'Hello') {
+  return { subject: 'New post', body, idempotencyKey: 'notice' };
 }
 
 function emailSubscribers(
@@ -255,6 +288,7 @@ describe('SavePost', () => {
 
     expect(saved.props.id.length).toBeGreaterThan(0);
     expect(saved.props.status).toBe('draft');
+    expect(saved.isNew).toBe(false);
     const stored = await posts.get(saved.props.id);
     expect(stored?.props.id).toBe(saved.props.id);
     expect(stored?.props.title).toBe('Hello');
@@ -396,7 +430,7 @@ describe('PublishPost', () => {
 });
 
 describe('UnpublishPost', () => {
-  it('turns a published post into a draft and records no event', async () => {
+  it('turns a published post into a draft and records PostUnpublishedEvent', async () => {
     const posts = new InMemoryPosts();
     const publishers = recordingPublishers();
     const saved = await savePost(posts).execute(ctx, {
@@ -598,6 +632,12 @@ describe('SubscribeToPosts', () => {
     await expectDomainCode('ChannelsRequired', () =>
       subscribe.execute(ctx, { email: 'cy@ex.com', channels: [] }),
     );
+    await expectDomainCode('ChannelsInvalid', () =>
+      subscribe.execute(ctx, {
+        email: 'cy@ex.com',
+        channels: ['email', 'email'],
+      }),
+    );
   });
 });
 
@@ -650,6 +690,7 @@ describe('EmailSubscribersHandler', () => {
         from,
         subject: 'New post',
         text: 'Hello',
+        idempotencyKey: 'post.published:post-1:sub-1',
       },
     ]);
   });
@@ -676,16 +717,25 @@ describe('EmailSubscribers', () => {
 
     const sent = await emailSubscribers(subscribers, email).execute(
       internalCall(),
-      {
-        subject: 'New post',
-        body: 'Hello',
-      },
+      notice(),
     );
 
     expect(sent).toBe(2);
     expect(email.sent).toEqual([
-      { to: ['ada@ex.com'], from, subject: 'New post', text: 'Hello' },
-      { to: ['bea@ex.com'], from, subject: 'New post', text: 'Hello' },
+      {
+        to: ['ada@ex.com'],
+        from,
+        subject: 'New post',
+        text: 'Hello',
+        idempotencyKey: 'notice:sub-1',
+      },
+      {
+        to: ['bea@ex.com'],
+        from,
+        subject: 'New post',
+        text: 'Hello',
+        idempotencyKey: 'notice:sub-2',
+      },
     ]);
   });
 
@@ -694,7 +744,7 @@ describe('EmailSubscribers', () => {
     await expectDomainCode('InternalCallerRequired', () =>
       emailSubscribers(new InMemorySubscribers(), email).execute(
         {} as InternalCtx,
-        { subject: 'New post', body: 'Hello' },
+        notice(),
       ),
     );
     expect(email.sent).toEqual([]);
@@ -714,10 +764,10 @@ describe('EmailSubscribers sms', () => {
     );
     const email = new RecordingEmail();
     const sms = new RecordingSms();
-    await emailSubscribers(subscribers, email, sms).execute(internalCall(), {
-      subject: 'New post',
-      body: 'Hello',
-    });
+    await emailSubscribers(subscribers, email, sms).execute(
+      internalCall(),
+      notice(),
+    );
     expect(sms.sent).toEqual([{ to: '+15550001111', body: 'Hello' }]);
     expect(email.sent).toHaveLength(1);
   });
@@ -734,10 +784,10 @@ describe('EmailSubscribers sms', () => {
     );
     const email = new RecordingEmail();
     const sms = new RecordingSms();
-    await emailSubscribers(subscribers, email, sms).execute(internalCall(), {
-      subject: 'New post',
-      body: 'Hello',
-    });
+    await emailSubscribers(subscribers, email, sms).execute(
+      internalCall(),
+      notice(),
+    );
     expect(email.sent).toHaveLength(1);
     expect(sms.sent).toEqual([]);
   });
@@ -754,10 +804,10 @@ describe('EmailSubscribers sms', () => {
     );
     const email = new RecordingEmail();
     const sms = new RecordingSms();
-    await emailSubscribers(subscribers, email, sms).execute(internalCall(), {
-      subject: 'New post',
-      body: 'Hello',
-    });
+    await emailSubscribers(subscribers, email, sms).execute(
+      internalCall(),
+      notice(),
+    );
     expect(email.sent).toEqual([]);
     expect(sms.sent).toEqual([{ to: '+15550001111', body: 'Hello' }]);
   });
@@ -784,10 +834,64 @@ describe('EmailSubscribers sms', () => {
     sms.fail = SmsError.Unsubscribed();
     const sent = await emailSubscribers(subscribers, email, sms).execute(
       internalCall(),
-      { subject: 'New post', body: 'Hello' },
+      notice(),
     );
     expect(sent).toBe(2);
     expect(email.sent).toHaveLength(2);
+  });
+
+  it('logs a rejected email and still sends to the next subscriber', async () => {
+    const subscribers = new InMemorySubscribers();
+    await subscribers.save(
+      SubscriberEntity.create({
+        id: 'sub-1',
+        email: 'ada@ex.com',
+        channels: ['email'],
+      }),
+    );
+    await subscribers.save(
+      SubscriberEntity.create({
+        id: 'sub-2',
+        email: 'bea@ex.com',
+        channels: ['email'],
+      }),
+    );
+    const email = new RecordingEmail();
+    email.fail = EmailError.Rejected();
+    const sent = await emailSubscribers(subscribers, email).execute(
+      internalCall(),
+      notice(),
+    );
+    expect(sent).toBe(2);
+    expect(email.sent).toEqual([
+      {
+        to: ['bea@ex.com'],
+        from,
+        subject: 'New post',
+        text: 'Hello',
+        idempotencyKey: 'notice:sub-2',
+      },
+    ]);
+  });
+
+  it('sends nothing when the schedule signal is already aborted', async () => {
+    const subscribers = new InMemorySubscribers();
+    await subscribers.save(
+      SubscriberEntity.create({
+        id: 'sub-1',
+        email: 'ada@ex.com',
+        channels: ['email'],
+      }),
+    );
+    const email = new RecordingEmail();
+    const controller = new AbortController();
+    controller.abort();
+    const sent = await emailSubscribers(subscribers, email).execute(
+      internalCall(controller.signal),
+      notice(),
+    );
+    expect(sent).toBe(0);
+    expect(email.sent).toEqual([]);
   });
 });
 
@@ -808,12 +912,14 @@ describe('SubscriberReminder', () => {
     }).execute(internalCall());
 
     expect(sent).toBe(1);
+    const day = new Date().toISOString().slice(0, 10);
     expect(email.sent).toEqual([
       {
         to: ['ada@ex.com'],
         from,
         subject: 'Posts you follow',
         text: 'A published post is waiting.',
+        idempotencyKey: `post.subscriber-reminder:${day}:sub-1`,
       },
     ]);
   });
@@ -864,6 +970,7 @@ describe('EmailUnpublishedHandler', () => {
         from,
         subject: 'Post removed',
         text: 'Hello',
+        idempotencyKey: 'post.unpublished:post-1:sub-1',
       },
     ]);
   });
@@ -892,6 +999,7 @@ describe('WelcomeSubscriberHandler', () => {
         from,
         subject: 'Welcome',
         text: 'You are subscribed.',
+        idempotencyKey: 'subscriber.joined:sub-1',
       },
     ]);
     expect(sms.sent).toEqual([]);

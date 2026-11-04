@@ -6,8 +6,8 @@ import type { PostRepository } from '../../../../ports/repos/post-repository.js'
 import { ApiUseCase } from '../../../context.js';
 
 export const savePostInput = z.object({
-  id: z.string().optional(),
-  title: z.string(),
+  id: z.string().min(1).optional(),
+  title: z.string().min(1),
   body: z.string(),
 });
 
@@ -29,8 +29,7 @@ export class SavePost extends ApiUseCase('post.save', {
     _ctx: UseCase.Ctx<typeof ApiUseCase>,
     input: SavePostInput,
   ): Promise<PostEntity> {
-    const id =
-      input.id === undefined || input.id === '' ? randomUUID() : input.id;
+    const id = input.id ?? randomUUID();
     const existing = await this.deps.posts.get(id);
     const post =
       existing === null

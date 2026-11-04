@@ -15,6 +15,7 @@ export class EmailUnpublishedHandler extends EventHandler(
     await this.deps.emailSubscribers.execute(internalCall(), {
       subject: 'Post removed',
       body: event.payload.title,
+      idempotencyKey: `post.unpublished:${event.payload.postId}`,
     });
   }
 }

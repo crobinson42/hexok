@@ -35,7 +35,6 @@ export async function main(): Promise<void> {
     logger: runtime.logger,
   });
 
-  /** Setup domain event handlers. */
   const domainQueueHandlers = [
     new EmailSubscribersHandler({ emailSubscribers }),
     new EmailUnpublishedHandler({ emailSubscribers }),
@@ -47,9 +46,6 @@ export async function main(): Promise<void> {
     }),
   ];
 
-  /**
-   * Register scheduled jobs. These are executed by the schedule coordinator every minute (or according to the cron schedule).
-   */
   runtime.scheduleCoordinator.register(
     new SubscriberReminder({ emailSubscribers }).registration(),
   );
@@ -60,6 +56,18 @@ export async function main(): Promise<void> {
       logger: runtime.logger,
     }).registration(),
   );
+  runtime.scheduleCoordinator.register({
+    name: 'queue.maintain',
+    cron: '15 * * * *',
+    timezone: 'UTC',
+    onTick: async ({ signal }) => {
+      if (signal.aborted) return;
+      await runtime.domainEventsQueue.maintain({
+        dryRun: false,
+        idleConsumerMs: 3_600_000,
+      });
+    },
+  });
 
   assertDistinctHandlerGroups(domainQueueHandlers);
 

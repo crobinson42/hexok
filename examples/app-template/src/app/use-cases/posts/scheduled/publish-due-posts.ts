@@ -33,6 +33,7 @@ export class PublishDuePosts extends ScheduledUseCase('post.publish-due', {
     const due = await this.deps.posts.listDue(new Date());
     let published = 0;
     for (const scheduled of due) {
+      if (ctx.signal?.aborted) break;
       try {
         const current = await this.deps.posts.get(scheduled.props.id);
         if (current === null || current.props.status !== 'scheduled') continue;

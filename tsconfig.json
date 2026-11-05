@@ -10,6 +10,7 @@
     { "path": "packages/logger-newrelic" },
     { "path": "packages/queue" },
     { "path": "packages/queue-redis" },
+    { "path": "packages/integration-events" },
     { "path": "packages/broadcast" },
     { "path": "packages/broadcast-redis" },
     { "path": "packages/email" },

@@ -7,37 +7,25 @@ import { endSessionInput } from '../../app/use-cases/sessions/api/command/end-se
 import { subscribeToPostsInput } from '../../app/use-cases/subscribers/api/command/subscribe.js';
 import { postSchema } from '../../domain/schemas/post.js';
 import { subscriberSchema } from '../../domain/schemas/subscriber.js';
-import { declared } from './errors.js';
+import { clientErrors } from './errors.js';
 
 /**
  * The API. HTTP serves it at `/rpc`, such as `POST /rpc/posts/save`.
- * Inputs are the use case schemas. Errors are the domain errors each
- * procedure can throw.
+ * Inputs are the use case schemas. Every procedure declares the same
+ * client-facing domain errors. The use case decides which one it throws.
  */
+const call = procedure.errors(clientErrors);
+
 export const apiContract = router({
   posts: {
-    save: procedure.input(savePostInput).output(postSchema),
-    publish: procedure
-      .input(publishPostInput)
-      .output(postSchema)
-      .errors(declared('PostNotFound', 'AlreadyPublished', 'PublishAtInvalid')),
-    unpublish: procedure
-      .input(unpublishPostInput)
-      .output(postSchema)
-      .errors(declared('PostNotFound', 'NotPublished')),
+    save: call.input(savePostInput).output(postSchema),
+    publish: call.input(publishPostInput).output(postSchema),
+    unpublish: call.input(unpublishPostInput).output(postSchema),
   },
   sessions: {
-    end: procedure
-      .input(endSessionInput)
-      .output(z.null())
-      .errors(declared('SignInRequired')),
+    end: call.input(endSessionInput).output(z.null()),
   },
   subscribers: {
-    subscribe: procedure
-      .input(subscribeToPostsInput)
-      .output(subscriberSchema)
-      .errors(
-        declared('ChannelsRequired', 'ChannelsInvalid', 'SmsRequiresPhone'),
-      ),
+    subscribe: call.input(subscribeToPostsInput).output(subscriberSchema),
   },
 });

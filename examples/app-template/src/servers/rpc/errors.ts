@@ -28,24 +28,24 @@ type ClientCode = {
   [K in DomainCode]: (typeof statuses)[K] extends number ? K : never;
 }[DomainCode];
 
-type Declared<K extends ClientCode> = {
-  [P in K]: (typeof domainErrorDefs)[P] & { status: (typeof statuses)[P] };
-};
-
 /**
- * Declared errors for a procedure: each domain definition with its status.
- * A client narrows on these codes and reads their typed `data`.
+ * Every client-facing domain error, with its status. Procedures declare this
+ * map once. A use case can throw a new code without a contract edit: the
+ * status table above is the only list, and a TypeScript client already
+ * narrows on the code and its `data`.
  */
-export function declared<const K extends ClientCode>(
-  ...codes: K[]
-): Declared<K> {
-  return Object.fromEntries(
-    codes.map((code) => [
+export const clientErrors = Object.fromEntries(
+  (Object.keys(statuses) as DomainCode[])
+    .filter((code): code is ClientCode => statuses[code] !== null)
+    .map((code) => [
       code,
       { ...domainErrorDefs[code], status: statuses[code] },
     ]),
-  ) as Declared<K>;
-}
+) as {
+  [K in ClientCode]: (typeof domainErrorDefs)[K] & {
+    status: (typeof statuses)[K];
+  };
+};
 
 /**
  * The error a client receives. A domain error keeps its code, message,

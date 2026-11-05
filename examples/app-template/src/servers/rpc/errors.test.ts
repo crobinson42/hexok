@@ -2,15 +2,15 @@ import { isPFError } from '@ts-pf/protocol';
 import { CodedError, validationError } from 'hexok';
 import { describe, expect, it } from 'vitest';
 import { DomainError } from '../../domain/errors/domain.js';
-import { declared, toRpcError } from './errors.js';
+import { clientErrors, toRpcError } from './errors.js';
 
-describe('declared', () => {
-  it('adds the status to each domain definition', () => {
-    const errors = declared('PostNotFound', 'AlreadyPublished');
-    expect(errors.PostNotFound.status).toBe(404);
-    expect(errors.PostNotFound.message).toBe('Post was not found');
-    expect(errors.PostNotFound.data).toBeDefined();
-    expect(errors.AlreadyPublished.status).toBe(409);
+describe('clientErrors', () => {
+  it('adds the status to each client-facing domain definition', () => {
+    expect(clientErrors.PostNotFound.status).toBe(404);
+    expect(clientErrors.PostNotFound.message).toBe('Post was not found');
+    expect(clientErrors.PostNotFound.data).toBeDefined();
+    expect(clientErrors.AlreadyPublished.status).toBe(409);
+    expect(clientErrors).not.toHaveProperty('InternalCallerRequired');
   });
 });
 

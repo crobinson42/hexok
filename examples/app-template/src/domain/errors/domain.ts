@@ -1,7 +1,7 @@
 import { type ErrorMap, Errors } from 'hexok';
 import { z } from 'zod';
 
-/** The definitions. The RPC contract reuses them as declared errors. */
+/** The definitions. The RPC layer maps each code to a status. */
 export const domainErrorDefs = {
   AlreadyPublished: { message: 'Post is already published' },
   NotPublished: { message: 'Post is not published' },

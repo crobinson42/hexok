@@ -1,5 +1,14 @@
 # @hexok/logger-newrelic
 
+## 0.1.1
+
+### Patch Changes
+
+- [`98ddb05`](https://github.com/crobinson42/hexok/commit/98ddb05bd487c3118f8d16797a17a134274ad05e) Thanks [@crobinson42](https://github.com/crobinson42)! - Adapter classes are closed. Wrap one in your own adapter of the port when you need extra logic.
+- Updated dependencies [[`62b1458`](https://github.com/crobinson42/hexok/commit/62b14589999112343e999cfddc5613bcee8f4d5c), [`98ddb05`](https://github.com/crobinson42/hexok/commit/98ddb05bd487c3118f8d16797a17a134274ad05e), [`269f90b`](https://github.com/crobinson42/hexok/commit/269f90bc6cbcec83d681d1151d96882bd3dbcb3e)]:
+  - hexok@2.2.3
+  - @hexok/logger@0.2.0
+
 ## 0.1.0
 
 ### Minor Changes

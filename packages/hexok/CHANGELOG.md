@@ -1,5 +1,11 @@
 # hexok
 
+## 2.2.3
+
+### Patch Changes
+
+- [`62b1458`](https://github.com/crobinson42/hexok/commit/62b14589999112343e999cfddc5613bcee8f4d5c) Thanks [@crobinson42](https://github.com/crobinson42)! - The event catalog reference matches the app template's queue wire format.
+
 ## 2.2.2
 
 ### Patch Changes

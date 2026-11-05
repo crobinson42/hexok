@@ -47,7 +47,7 @@ export const ApiUseCase = UseCase.context<ApiCtx, ApiSpec>().guard(
 );
 
 /**
- * Private to this module. In-project callers receive it from `internalCall`.
+ * Private to this module. In-project callers receive it from `internalCallCtx`.
  * A request body cannot construct it.
  */
 const internalCaller: unique symbol = Symbol('app-template.internal');
@@ -59,7 +59,7 @@ export type InternalCtx = {
 };
 
 /** Context for `internal/` and `scheduled/` use cases. */
-export function internalCall(signal?: AbortSignal): InternalCtx {
+export function internalCallCtx(signal?: AbortSignal): InternalCtx {
   return signal === undefined
     ? { [internalCaller]: true }
     : { [internalCaller]: true, signal };

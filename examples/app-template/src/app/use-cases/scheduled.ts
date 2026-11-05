@@ -1,13 +1,13 @@
 import type { ScheduleRegistration } from '@hexok/schedule-coordinator';
 import type { InternalCtx } from './context.js';
-import { InternalUseCase, internalCall } from './context.js';
+import { InternalUseCase, internalCallCtx } from './context.js';
 
 /** Cron fields a scheduled use case declares. `onTick` is filled in by the instance. */
 export type ScheduleSpec = Omit<ScheduleRegistration, 'onTick'>;
 
 /**
  * Internal use case that owns its cron registration.
- * `execute` still accepts only `internalCall()`. The coordinator never builds that context.
+ * `execute` still accepts only `internalCallCtx()`. The coordinator never builds that context.
  * `registration()` passes the tick's abort signal on that context.
  *
  * ```ts
@@ -38,7 +38,7 @@ export function ScheduledUseCase<
         ...schedule,
         onTick: async ({ signal }) => {
           if (signal.aborted) return;
-          await this.execute(internalCall(signal));
+          await this.execute(internalCallCtx(signal));
         },
       };
     }

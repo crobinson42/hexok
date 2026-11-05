@@ -1,7 +1,8 @@
 import { serve } from 'srvx';
 import { createApi } from '../api.js';
-import { createPublishers, createRuntime } from '../composition.js';
 import { createApiApp } from '../rpc/app.js';
+import { createPublishers } from '../runtime/domain-events.js';
+import { createRuntime } from '../runtime/index.js';
 import { onShutdown } from '../utils/shutdown.js';
 import { createHttpHandler } from './handler.js';
 

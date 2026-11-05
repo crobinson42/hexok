@@ -1,6 +1,6 @@
 import type { EmailMessage, EmailReceipt } from '@hexok/email';
 import { EmailError, EmailSender } from '@hexok/email';
-import { NoopLogger } from '@hexok/logger';
+import { type Logger, MemoryLogger, NoopLogger } from '@hexok/logger';
 import type { SmsMessage, SmsReceipt } from '@hexok/sms';
 import { SmsError, SmsSender } from '@hexok/sms';
 import { asResult, createClient } from '@ts-pf/client';
@@ -22,13 +22,12 @@ import { Authenticator, type Caller } from './ports/auth/authenticator.js';
 import { DomainEventPublisher } from './ports/events/domain-event-publisher.js';
 import { PostRepository } from './ports/repos/post-repository.js';
 import { SubscriberRepository } from './ports/repos/subscriber-repository.js';
-import { type InternalCtx, internalCall } from './use-cases/context.js';
+import { internalCallCtx } from './use-cases/context.js';
 import { PublishPost } from './use-cases/posts/api/command/publish-post.js';
 import { SavePost } from './use-cases/posts/api/command/save-post.js';
 import { UnpublishPost } from './use-cases/posts/api/command/unpublish-post.js';
 import { EmailSubscribersHandler } from './use-cases/posts/event-handlers/email-subscribers.js';
 import { EmailUnpublishedHandler } from './use-cases/posts/event-handlers/email-unpublished.js';
-import { EmailSubscribers } from './use-cases/posts/internal/email-subscribers.js';
 import { PublishDuePosts } from './use-cases/posts/scheduled/publish-due-posts.js';
 import { SubscriberReminder } from './use-cases/posts/scheduled/subscriber-reminder.js';
 import { EndSession } from './use-cases/sessions/api/command/end-session.js';
@@ -167,22 +166,12 @@ class RecordingSms extends Adapter(SmsSender) {
   }
 }
 
-function notice(body = 'Hello') {
-  return { subject: 'New post', body, idempotencyKey: 'notice' };
-}
-
-function emailSubscribers(
-  subscribers: SubscriberRepository,
+function senders(
   email: EmailSender,
   sms: SmsSender = new RecordingSms(),
-): EmailSubscribers {
-  return new EmailSubscribers({
-    subscribers,
-    email,
-    sms,
-    from,
-    logger: new NoopLogger(),
-  });
+  logger: Logger = new NoopLogger(),
+) {
+  return { email, sms, from, logger };
 }
 
 function publishedEvent(
@@ -524,7 +513,7 @@ describe('PublishDuePosts', () => {
       posts,
       domainEvents: publishers.domainEvents,
       logger: new NoopLogger(),
-    }).execute(internalCall());
+    }).execute(internalCallCtx());
 
     expect(count).toBe(1);
     expect((await posts.get(saved.props.id))?.props.status).toBe('published');
@@ -556,7 +545,7 @@ describe('PublishDuePosts', () => {
       posts,
       domainEvents: publishers.domainEvents,
       logger: new NoopLogger(),
-    }).execute(internalCall());
+    }).execute(internalCallCtx());
 
     expect(count).toBe(0);
     expect((await posts.get(saved.props.id))?.props.status).toBe('scheduled');
@@ -641,6 +630,14 @@ describe('SubscribeToPosts', () => {
   });
 });
 
+function published(emailSubscribers: boolean): PostPublishedEvent {
+  return new PostPublishedEvent({
+    postId: 'post-1',
+    title: 'Hello',
+    emailSubscribers,
+  });
+}
+
 describe('EmailSubscribersHandler', () => {
   async function handlerWithOneSubscriber(): Promise<{
     handler: EmailSubscribersHandler;
@@ -657,7 +654,8 @@ describe('EmailSubscribersHandler', () => {
     const email = new RecordingEmail();
     return {
       handler: new EmailSubscribersHandler({
-        emailSubscribers: emailSubscribers(subscribers, email),
+        subscribers,
+        ...senders(email),
       }),
       email,
     };
@@ -665,25 +663,13 @@ describe('EmailSubscribersHandler', () => {
 
   it('sends nothing when emailSubscribers is false', async () => {
     const { handler, email } = await handlerWithOneSubscriber();
-    await handler.handle(
-      new PostPublishedEvent({
-        postId: 'post-1',
-        title: 'Hello',
-        emailSubscribers: false,
-      }),
-    );
+    await handler.handle(published(false));
     expect(email.sent).toEqual([]);
   });
 
   it('sends one email with the post title when emailSubscribers is true', async () => {
     const { handler, email } = await handlerWithOneSubscriber();
-    await handler.handle(
-      new PostPublishedEvent({
-        postId: 'post-1',
-        title: 'Hello',
-        emailSubscribers: true,
-      }),
-    );
+    await handler.handle(published(true));
     expect(email.sent).toEqual([
       {
         to: ['ada@ex.com'],
@@ -694,10 +680,8 @@ describe('EmailSubscribersHandler', () => {
       },
     ]);
   });
-});
 
-describe('EmailSubscribers', () => {
-  it('sends one message per subscriber and returns the count', async () => {
+  it('sends one email per subscriber', async () => {
     const subscribers = new InMemorySubscribers();
     await subscribers.save(
       SubscriberEntity.create({
@@ -714,44 +698,28 @@ describe('EmailSubscribers', () => {
       }),
     );
     const email = new RecordingEmail();
-
-    const sent = await emailSubscribers(subscribers, email).execute(
-      internalCall(),
-      notice(),
-    );
-
-    expect(sent).toBe(2);
+    await new EmailSubscribersHandler({
+      subscribers,
+      ...senders(email),
+    }).handle(published(true));
     expect(email.sent).toEqual([
       {
         to: ['ada@ex.com'],
         from,
         subject: 'New post',
         text: 'Hello',
-        idempotencyKey: 'notice:sub-1',
+        idempotencyKey: 'post.published:post-1:sub-1',
       },
       {
         to: ['bea@ex.com'],
         from,
         subject: 'New post',
         text: 'Hello',
-        idempotencyKey: 'notice:sub-2',
+        idempotencyKey: 'post.published:post-1:sub-2',
       },
     ]);
   });
 
-  it('rejects a context that does not carry the internal symbol', async () => {
-    const email = new RecordingEmail();
-    await expectDomainCode('InternalCallerRequired', () =>
-      emailSubscribers(new InMemorySubscribers(), email).execute(
-        {} as InternalCtx,
-        notice(),
-      ),
-    );
-    expect(email.sent).toEqual([]);
-  });
-});
-
-describe('EmailSubscribers sms', () => {
   it('texts only when sms is chosen', async () => {
     const subscribers = new InMemorySubscribers();
     await subscribers.save(
@@ -764,10 +732,10 @@ describe('EmailSubscribers sms', () => {
     );
     const email = new RecordingEmail();
     const sms = new RecordingSms();
-    await emailSubscribers(subscribers, email, sms).execute(
-      internalCall(),
-      notice(),
-    );
+    await new EmailSubscribersHandler({
+      subscribers,
+      ...senders(email, sms),
+    }).handle(published(true));
     expect(sms.sent).toEqual([{ to: '+15550001111', body: 'Hello' }]);
     expect(email.sent).toHaveLength(1);
   });
@@ -784,10 +752,10 @@ describe('EmailSubscribers sms', () => {
     );
     const email = new RecordingEmail();
     const sms = new RecordingSms();
-    await emailSubscribers(subscribers, email, sms).execute(
-      internalCall(),
-      notice(),
-    );
+    await new EmailSubscribersHandler({
+      subscribers,
+      ...senders(email, sms),
+    }).handle(published(true));
     expect(email.sent).toHaveLength(1);
     expect(sms.sent).toEqual([]);
   });
@@ -804,10 +772,10 @@ describe('EmailSubscribers sms', () => {
     );
     const email = new RecordingEmail();
     const sms = new RecordingSms();
-    await emailSubscribers(subscribers, email, sms).execute(
-      internalCall(),
-      notice(),
-    );
+    await new EmailSubscribersHandler({
+      subscribers,
+      ...senders(email, sms),
+    }).handle(published(true));
     expect(email.sent).toEqual([]);
     expect(sms.sent).toEqual([{ to: '+15550001111', body: 'Hello' }]);
   });
@@ -831,13 +799,15 @@ describe('EmailSubscribers sms', () => {
     );
     const email = new RecordingEmail();
     const sms = new RecordingSms();
+    const logger = new MemoryLogger();
     sms.fail = SmsError.Unsubscribed();
-    const sent = await emailSubscribers(subscribers, email, sms).execute(
-      internalCall(),
-      notice(),
-    );
-    expect(sent).toBe(2);
+    await new EmailSubscribersHandler({
+      subscribers,
+      ...senders(email, sms, logger),
+    }).handle(published(true));
     expect(email.sent).toHaveLength(2);
+    expect(logger.records).toHaveLength(1);
+    expect(logger.records[0]?.fields).toEqual({ subscriberId: 'sub-1' });
   });
 
   it('logs a rejected email and still sends to the next subscriber', async () => {
@@ -857,24 +827,54 @@ describe('EmailSubscribers sms', () => {
       }),
     );
     const email = new RecordingEmail();
+    const logger = new MemoryLogger();
     email.fail = EmailError.Rejected();
-    const sent = await emailSubscribers(subscribers, email).execute(
-      internalCall(),
-      notice(),
-    );
-    expect(sent).toBe(2);
+    await new EmailSubscribersHandler({
+      subscribers,
+      ...senders(email, new RecordingSms(), logger),
+    }).handle(published(true));
     expect(email.sent).toEqual([
       {
         to: ['bea@ex.com'],
         from,
         subject: 'New post',
         text: 'Hello',
-        idempotencyKey: 'notice:sub-2',
+        idempotencyKey: 'post.published:post-1:sub-2',
       },
     ]);
+    expect(logger.records).toHaveLength(1);
+    expect(logger.records[0]?.fields).toEqual({ subscriberId: 'sub-1' });
   });
 
-  it('sends nothing when the schedule signal is already aborted', async () => {
+  it('rethrows a transient mail failure and skips SMS', async () => {
+    const subscribers = new InMemorySubscribers();
+    await subscribers.save(
+      SubscriberEntity.create({
+        id: 'sub-1',
+        email: 'ada@ex.com',
+        phone: '+15550001111',
+        channels: ['email', 'sms'],
+      }),
+    );
+    const email = new RecordingEmail();
+    const sms = new RecordingSms();
+    const handler = new EmailSubscribersHandler({
+      subscribers,
+      ...senders(email, sms),
+    });
+    email.fail = EmailError.RateLimited();
+    await expect(handler.handle(published(true))).rejects.toSatisfy(
+      (error: unknown) => EmailError.is(error) && error.code === 'RateLimited',
+    );
+    expect(sms.sent).toEqual([]);
+
+    email.fail = EmailError.Unavailable();
+    await expect(handler.handle(published(true))).rejects.toSatisfy(
+      (error: unknown) => EmailError.is(error) && error.code === 'Unavailable',
+    );
+  });
+
+  it('rethrows an error that is not a mail or SMS catalog member', async () => {
     const subscribers = new InMemorySubscribers();
     await subscribers.save(
       SubscriberEntity.create({
@@ -884,14 +884,13 @@ describe('EmailSubscribers sms', () => {
       }),
     );
     const email = new RecordingEmail();
-    const controller = new AbortController();
-    controller.abort();
-    const sent = await emailSubscribers(subscribers, email).execute(
-      internalCall(controller.signal),
-      notice(),
-    );
-    expect(sent).toBe(0);
-    expect(email.sent).toEqual([]);
+    email.fail = new Error('down');
+    await expect(
+      new EmailSubscribersHandler({
+        subscribers,
+        ...senders(email),
+      }).handle(published(true)),
+    ).rejects.toThrow('down');
   });
 });
 
@@ -908,8 +907,9 @@ describe('SubscriberReminder', () => {
     const email = new RecordingEmail();
 
     const sent = await new SubscriberReminder({
-      emailSubscribers: emailSubscribers(subscribers, email),
-    }).execute(internalCall());
+      subscribers,
+      ...senders(email),
+    }).execute(internalCallCtx());
 
     expect(sent).toBe(1);
     const day = new Date().toISOString().slice(0, 10);
@@ -924,6 +924,26 @@ describe('SubscriberReminder', () => {
     ]);
   });
 
+  it('sends nothing when the schedule signal is already aborted', async () => {
+    const subscribers = new InMemorySubscribers();
+    await subscribers.save(
+      SubscriberEntity.create({
+        id: 'sub-1',
+        email: 'ada@ex.com',
+        channels: ['email'],
+      }),
+    );
+    const email = new RecordingEmail();
+    const controller = new AbortController();
+    controller.abort();
+    const sent = await new SubscriberReminder({
+      subscribers,
+      ...senders(email),
+    }).execute(internalCallCtx(controller.signal));
+    expect(sent).toBe(0);
+    expect(email.sent).toEqual([]);
+  });
+
   it('registers a daily UTC job that runs the reminder', async () => {
     const subscribers = new InMemorySubscribers();
     await subscribers.save(
@@ -935,7 +955,8 @@ describe('SubscriberReminder', () => {
     );
     const email = new RecordingEmail();
     const reminder = new SubscriberReminder({
-      emailSubscribers: emailSubscribers(subscribers, email),
+      subscribers,
+      ...senders(email),
     });
     const job = reminder.registration();
 
@@ -959,7 +980,8 @@ describe('EmailUnpublishedHandler', () => {
     );
     const email = new RecordingEmail();
     const handler = new EmailUnpublishedHandler({
-      emailSubscribers: emailSubscribers(subscribers, email),
+      subscribers,
+      ...senders(email),
     });
     await handler.handle(
       new PostUnpublishedEvent({ postId: 'post-1', title: 'Hello' }),
@@ -980,12 +1002,7 @@ describe('WelcomeSubscriberHandler', () => {
   it('sends one welcome email to the new subscriber', async () => {
     const email = new RecordingEmail();
     const sms = new RecordingSms();
-    const handler = new WelcomeSubscriberHandler({
-      email,
-      sms,
-      from,
-      logger: new NoopLogger(),
-    });
+    const handler = new WelcomeSubscriberHandler(senders(email, sms));
     await handler.handle(
       new SubscriberJoinedEvent({
         subscriberId: 'sub-1',
@@ -1008,12 +1025,7 @@ describe('WelcomeSubscriberHandler', () => {
   it('texts a welcome when sms is the only channel', async () => {
     const email = new RecordingEmail();
     const sms = new RecordingSms();
-    const handler = new WelcomeSubscriberHandler({
-      email,
-      sms,
-      from,
-      logger: new NoopLogger(),
-    });
+    const handler = new WelcomeSubscriberHandler(senders(email, sms));
     await handler.handle(
       new SubscriberJoinedEvent({
         subscriberId: 'sub-1',

@@ -8,7 +8,7 @@ import { InternalUseCase } from '../../context.js';
 
 /**
  * Mark a draft or scheduled post published and emit `postPublished`.
- * Callers pass `internalCall()`. A future `publishAt` is not this use case.
+ * Callers pass `internalCallCtx()`. A future `publishAt` is not this use case.
  */
 export class CommitPublishedPost extends InternalUseCase(
   'post.commit-published',

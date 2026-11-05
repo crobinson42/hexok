@@ -4,7 +4,7 @@ import type { PostEntity } from '../../../../../domain/entities/post.js';
 import { DomainError } from '../../../../../domain/errors/domain.js';
 import type { DomainEventPublisher } from '../../../../ports/events/domain-event-publisher.js';
 import type { PostRepository } from '../../../../ports/repos/post-repository.js';
-import { ApiUseCase, internalCall } from '../../../context.js';
+import { ApiUseCase, internalCallCtx } from '../../../context.js';
 import { CommitPublishedPost } from '../../internal/commit-published-post.js';
 
 /** `emailSubscribers` defaults to false. A missing `publishAt` publishes now. */
@@ -46,7 +46,7 @@ export class PublishPost extends ApiUseCase('post.publish', {
       await this.deps.posts.save(post);
       return post;
     }
-    return this.#commit.execute(internalCall(), {
+    return this.#commit.execute(internalCallCtx(), {
       id: input.id,
       emailSubscribers,
     });

@@ -1,15 +1,12 @@
 import { pathToFileURL } from 'node:url';
 import { EmailSubscribersHandler } from '../app/use-cases/posts/event-handlers/email-subscribers.js';
 import { EmailUnpublishedHandler } from '../app/use-cases/posts/event-handlers/email-unpublished.js';
-import { EmailSubscribers } from '../app/use-cases/posts/internal/email-subscribers.js';
 import { PublishDuePosts } from '../app/use-cases/posts/scheduled/publish-due-posts.js';
 import { SubscriberReminder } from '../app/use-cases/posts/scheduled/subscriber-reminder.js';
 import { WelcomeSubscriberHandler } from '../app/use-cases/subscribers/event-handlers/welcome-subscriber.js';
-import {
-  createNotifications,
-  createPublishers,
-  createRuntime,
-} from './composition.js';
+import { createChannelDeliveryServices } from './runtime/channel-delivery.js';
+import { createPublishers } from './runtime/domain-events.js';
+import { createRuntime } from './runtime/index.js';
 import { onShutdown } from './utils/shutdown.js';
 import {
   assertDistinctHandlerGroups,
@@ -24,30 +21,24 @@ export async function main(): Promise<void> {
   await runtime.domainEventsQueue.start();
   await runtime.scheduleCoordinator.start();
 
-  const notifications = await createNotifications(runtime);
+  const { email, sms, from } = await createChannelDeliveryServices(runtime);
   const { domainEvents } = createPublishers(runtime);
-
-  const emailSubscribers = new EmailSubscribers({
+  const senders = {
     subscribers: runtime.subscribers,
-    email: notifications.email,
-    sms: notifications.sms,
-    from: notifications.from,
+    email,
+    sms,
+    from,
     logger: runtime.logger,
-  });
+  };
 
   const domainQueueHandlers = [
-    new EmailSubscribersHandler({ emailSubscribers }),
-    new EmailUnpublishedHandler({ emailSubscribers }),
-    new WelcomeSubscriberHandler({
-      email: notifications.email,
-      sms: notifications.sms,
-      from: notifications.from,
-      logger: runtime.logger,
-    }),
+    new EmailSubscribersHandler(senders),
+    new EmailUnpublishedHandler(senders),
+    new WelcomeSubscriberHandler({ email, sms, from, logger: runtime.logger }),
   ];
 
   runtime.scheduleCoordinator.register(
-    new SubscriberReminder({ emailSubscribers }).registration(),
+    new SubscriberReminder(senders).registration(),
   );
   runtime.scheduleCoordinator.register(
     new PublishDuePosts({

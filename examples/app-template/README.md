@@ -2,11 +2,11 @@
 
 A blog API with two Node processes sharing Redis.
 
-`SavePost` creates or updates a post and assigns an id when the caller omits one. `PublishPost` and `UnpublishPost` use `PostEntity`. `PublishPost` takes `emailSubscribers` and an optional `publishAt`. With no `publishAt`, or a time that is not in the future, it publishes now and emits `PostPublishedEvent`. A future `publishAt` stores status `scheduled` and emits nothing. `PublishDuePosts` publishes those posts once `publishAt` has passed, using the stored `emailSubscribers` flag. `UnpublishPost` publishes `PostUnpublishedEvent` for a live post. On a scheduled post it cancels the time and emits nothing. The worker `EmailSubscribersHandler` calls the internal `EmailSubscribers` use case when that flag is true. `EmailUnpublishedHandler` calls the same use case with a removal subject. `SubscriberReminder` is the scheduled use case and calls `EmailSubscribers` once a day. `SubscribeToPosts` stores an email and a channel list (`email`, `sms`, or both) and publishes `SubscriberJoinedEvent` only for a new address. Omitted `channels` means email. SMS requires `phone`. A second subscribe for the same email does not change channels. `WelcomeSubscriberHandler` welcomes on the chosen channels. `EmailSubscribers` does the same for publish, unpublish, and the daily reminder. A failed SMS is logged and does not stop the rest of the list. A rejected email is logged the same way. `Unavailable` and `RateLimited` from mail still throw, so the queue retries. Each send sets an idempotency key from the event and the subscriber id, not the address. Resend dedupes on that key. Mailgun does not.
+`SavePost` creates or updates a post and assigns an id when the caller omits one. `PublishPost` and `UnpublishPost` use `PostEntity`. `PublishPost` takes `emailSubscribers` and an optional `publishAt`. With no `publishAt`, or a time that is not in the future, it publishes now and emits `PostPublishedEvent`. A future `publishAt` stores status `scheduled` and emits nothing. `PublishDuePosts` publishes those posts once `publishAt` has passed, using the stored `emailSubscribers` flag. `UnpublishPost` publishes `PostUnpublishedEvent` for a live post. On a scheduled post it cancels the time and emits nothing. The worker `EmailSubscribersHandler` loads subscribers when that flag is true and sends on each subscriber's channels through `EmailSender` and `SmsSender`. `EmailUnpublishedHandler` does the same with a removal subject. `SubscriberReminder` lists subscribers and sends its own reminder once a day. `SubscribeToPosts` stores an email and a channel list (`email`, `sms`, or both) and publishes `SubscriberJoinedEvent` only for a new address. Omitted `channels` means email. SMS requires `phone`. A second subscribe for the same email does not change channels. `WelcomeSubscriberHandler` reads the joined event and sends on those channels. A rejected email is logged and the list continues. `Unavailable` and `RateLimited` from mail still throw, so the queue retries. Any SMS error is logged. Each send sets an idempotency key from the event and the subscriber id, not the address. Resend dedupes on that key. Mailgun does not.
 
 API commands extend `ApiUseCase`. Every call passes `ApiCtx`, `{ caller?: { userId, sessionId, expiresAt? } }`. HTTP builds it from the `Authorization` header with the `Authenticator` port. No `caller` is an anonymous request. A use case that needs a caller reads `ctx.caller` and owns that rule. Each API command declares an input schema next to its class, such as `publishPostInput`, and passes it as `{ input }` to `ApiUseCase`. The family guard validates the input before `execute` runs and throws `VALIDATION` with the schema issues. The RPC contract uses the same schema, so a bad request fails with 422 before the use case runs. The guard covers every other caller. The schema checks shape. Business rules, such as SMS requiring a phone, stay in `execute` as `DomainError`. `execute` receives the caller's input, not the parsed value, so input schemas do not use defaults or transforms.
 
-Internal use cases extend `InternalUseCase`. Scheduled use cases extend `ScheduledUseCase(token, schedule)`. `execute` accepts only the context from `internalCall()`. That context carries a symbol private to `context.ts`. The guard rejects any other context, so a request body cannot call these use cases. `registration()` builds the cron job and passes `internalCall(signal)` on each tick. The signal aborts before the lock expires. A tick stops when it sees that. The worker calls `schedule.register(reminder.registration())`.
+Internal use cases extend `InternalUseCase`. Scheduled use cases extend `ScheduledUseCase(token, schedule)`. `execute` accepts only the context from `internalCallCtx()`. That context carries a symbol private to `context.ts`. The guard rejects any other context, so a request body cannot call these use cases. `registration()` builds the cron job and passes `internalCallCtx(signal)` on each tick. The signal aborts before the lock expires. A tick stops when it sees that. The worker calls `schedule.register(reminder.registration())`.
 
 `servers/api.ts` builds the API use cases from ports with `createApi`. `servers/rpc/contract.ts` is the [ts-pf](https://github.com/crobinson42/ts-pf) contract. `apiContract` lists each procedure with its use case input schema, its output schema, and the domain errors it can throw. `servers/rpc/app.ts` implements it. Each procedure calls one use case. `servers/http/handler.ts` serves `apiContract` at `/rpc`. It is one fetch function, so srvx, Bun, Deno, or Hono can host it. `servers/http/main.ts` starts it with srvx. Each domain event goes to its own Redis stream through `@hexok/queue`. The topic is the event token (`post.published`, `post.unpublished`, `subscriber.joined`). The payload is the event payload. `servers/worker.ts` subscribes once per handler. The topic is `handler.event.token`. The consumer group is the handler token (`email.subscribers`, `email.unpublished`, `email.welcome`), unless the handler class sets `static group`. Same group on one topic competes. The worker throws when two handler classes share a topic and group. A different group gets its own copy. `handler.event.parse` validates the payload. A schema rejection is dropped. A thrown `handle` retries until `maxDeliveries`. The worker passes `'unlimited'` because its quarantine is in-process. A finite ceiling would acknowledge the entry and park it somewhere that does not survive a restart. HTTP does not send mail.
 
@@ -23,24 +23,29 @@ src/infra/      Redis, queue, and vendor adapters
 src/servers/    composition root, HTTP, and the worker
 
 src/servers/
-  composition.ts        Redis, queue, logger, publisher, authenticator, and the worker's mail and SMS
-  api.ts                createApi(ports): the API use cases
-  rpc/contract.ts       apiContract, shared with TypeScript clients
-  rpc/app.ts            createApiApp and callerContext
-  rpc/errors.ts         domain errors as declared ts-pf errors
-  http/handler.ts       createHttpHandler: /rpc as one fetch function
-  http/main.ts          HTTP process entry
-  worker.ts             worker process entry
-
-src/app/
-  notify.ts                   deliver one notice on the chosen channels
+  runtime/index.ts             Runtime and createRuntime
+  runtime/env.ts               required env and optional package load
+  runtime/logger.ts            JSON lines, Sentry, New Relic
+  runtime/email.ts             Resend or Mailgun
+  runtime/sms.ts               Twilio or console SMS
+  runtime/authenticator.ts     AUTH_TOKENS
+  runtime/domain-events.ts     domain queue and publisher
+  runtime/schedule.ts          schedule coordinator
+  runtime/channel-delivery.ts  createChannelDeliveryServices
+  api.ts                       createApi(ports): the API use cases
+  rpc/contract.ts              apiContract, shared with TypeScript clients
+  rpc/app.ts                   createApiApp and callerContext
+  rpc/errors.ts                domain errors as declared ts-pf errors
+  http/handler.ts              createHttpHandler: /rpc as one fetch function
+  http/main.ts                 HTTP process entry
+  worker.ts                    worker process entry
 
 src/app/use-cases/
   context.ts
   scheduled.ts
   posts/api/command/          save, publish, unpublish
-  posts/event-handlers/       email after publish and unpublish
-  posts/internal/             CommitPublishedPost and EmailSubscribers
+  posts/event-handlers/       email and SMS after publish and unpublish
+  posts/internal/             CommitPublishedPost
   posts/scheduled/            SubscriberReminder and PublishDuePosts
   sessions/api/command/       end session
   subscribers/api/command/    subscribe
@@ -49,7 +54,7 @@ src/app/use-cases/
 src/servers/utils/            shutdown and subscribeHandler
 ```
 
-`context.ts` holds the API and internal factories. `scheduled.ts` holds `ScheduledUseCase`. The worker constructs `EmailSubscribers`, passes it to `EmailSubscribersHandler` and `EmailUnpublishedHandler`, constructs `WelcomeSubscriberHandler` with the mail sender, SMS sender, and logger, and registers `SubscriberReminder`, `PublishDuePosts`, and `queue.maintain` on the schedule coordinator. `PublishDuePosts` writes the same domain queue as `PublishPost`. It subscribes each handler with `subscribeHandler`. HTTP and the handler pass `internalCall()` where they call an internal use case. A scheduled use case does that inside `registration()`. The handler does not subscribe itself. The app owns `DomainEvents`. `DomainEventPublisher` is the queue port.
+`context.ts` holds the API and internal factories. `scheduled.ts` holds `ScheduledUseCase`. The worker passes `EmailSender`, `SmsSender`, and `from` to `EmailSubscribersHandler`, `EmailUnpublishedHandler`, `WelcomeSubscriberHandler`, and `SubscriberReminder`. It registers `SubscriberReminder`, `PublishDuePosts`, and `queue.maintain` on the schedule coordinator. `PublishDuePosts` writes the same domain queue as `PublishPost`. It subscribes each handler with `subscribeHandler`. HTTP passes `internalCallCtx()` where it calls an internal use case. A scheduled use case does that inside `registration()`. The handler does not subscribe itself. The app owns `DomainEvents`. `DomainEventPublisher` is the queue port.
 
 ```bash
 redis-server

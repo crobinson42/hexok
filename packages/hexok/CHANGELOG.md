@@ -1,5 +1,11 @@
 # hexok
 
+## 2.2.4
+
+### Patch Changes
+
+- [#19](https://github.com/crobinson42/hexok/pull/19) [`c456d74`](https://github.com/crobinson42/hexok/commit/c456d741b5fde1d356646c4eb043d766cee6b03e) Thanks [@crobinson42](https://github.com/crobinson42)! - The agent skill covers integration events from `@hexok/integration-events`, for facts another application that deploys on its own consumes.
+
 ## 2.2.3
 
 ### Patch Changes

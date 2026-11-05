@@ -33,6 +33,8 @@ An adapter that owns a queue sends `message` and, on the other side, runs `parse
 
 Narrow one entry when a function handles a single key: `EventInstance<typeof BlogEvents, 'postPublished'>` and `EventMessage<typeof BlogEvents, 'postPublished'>`.
 
+A catalog is the agreement inside one application. A contract between applications that deploy on their own is a `Contract` from [`@hexok/integration-events`](/hexok/packages/integration-events/), with a version on each message.
+
 ## API
 
 `EventCatalog(token, events)` returns the class you extend. `token` is a string literal. `events` is a map of event classes. Duplicate event tokens throw `hexok: duplicate event "<token>" in catalog "<name>"` when the class is defined. The map is frozen on the catalog.

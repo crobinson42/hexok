@@ -52,3 +52,7 @@ The string `'post.published'` is the event's token. A catalog map key, such as `
 A rejected `parse` throws a [coded error](/hexok/concepts/error/coded/) with code `VALIDATION` and the message `hexok: post.published validation failed`.
 
 Override `parse` when the boundary needs to preprocess the value. Callers can tell two event classes apart with `instanceof` or by comparing `event.token`.
+
+## Events between applications
+
+An event is internal to one application. Two processes of that application, such as an API and its worker, share it. When another application that deploys on its own consumes the fact, the fact is a contract. [`@hexok/integration-events`](/hexok/packages/integration-events/) defines versioned messages for that case. Its `Message` is an `Event` with a version. Map a domain event to an integration event at the edge. Do not publish the domain event.

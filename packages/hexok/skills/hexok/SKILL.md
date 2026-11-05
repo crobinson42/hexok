@@ -31,6 +31,7 @@ Read the reference before writing that concept. Each file is the supporting docu
 | UseCase | [references/use-case.md](references/use-case.md) | Application. One caller action. `UseCase.context` is in that file. |
 | Port | [references/port.md](references/port.md) | Application. The contract a use case or handler calls. |
 | EventHandler | [references/event-handler.md](references/event-handler.md) | Application. Work that follows one event. |
+| Integration events | [references/integration-events.md](references/integration-events.md) | Contract between applications. Read it when another application that deploys on its own publishes or consumes the event. From `@hexok/integration-events`. |
 | Adapter | [references/adapter.md](references/adapter.md) | Interface adapter. The current implementation of one port. |
 | Mapper | [references/mapper.md](references/mapper.md) | Interface adapter. Read it when the stored document is not the domain props. |
 
@@ -71,6 +72,8 @@ Identify work that is a consequence of the story and is outside the use case's j
 When that work exists and the event does not, define the event and register it on a catalog. Give the use case an event-publisher port and publish the event instance at the end of `execute`, after the entity rule has run and the save has succeeded. Read [references/event.md](references/event.md) and [references/event-catalog.md](references/event-catalog.md).
 
 When the story has no consequence beyond its own write, this step is `none`. Do not add an event so the step looks complete.
+
+When the consequence runs in another application that deploys on its own, the event is an integration event, not a domain event. Read [references/integration-events.md](references/integration-events.md).
 
 ### 3.c. Event handlers
 

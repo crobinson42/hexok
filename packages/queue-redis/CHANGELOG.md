@@ -1,5 +1,13 @@
 # @hexok/queue-redis
 
+## 1.1.3
+
+### Patch Changes
+
+- [`98ddb05`](https://github.com/crobinson42/hexok/commit/98ddb05bd487c3118f8d16797a17a134274ad05e) Thanks [@crobinson42](https://github.com/crobinson42)! - Adapter classes are closed. Wrap one in your own adapter of the port when you need extra logic.
+- Updated dependencies [[`62b1458`](https://github.com/crobinson42/hexok/commit/62b14589999112343e999cfddc5613bcee8f4d5c)]:
+  - hexok@2.2.3
+
 ## 1.1.2
 
 ### Patch Changes

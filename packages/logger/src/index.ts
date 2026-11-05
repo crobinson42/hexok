@@ -6,3 +6,4 @@ export { type LogFields, Logger } from './logger.js';
 export { MemoryLogger, type MemoryRecord } from './memory-logger.js';
 export { NoopLogger } from './noop-logger.js';
 export { type NormalizedError, normalizeError } from './normalize-error.js';
+export { TeeLogger } from './tee-logger.js';

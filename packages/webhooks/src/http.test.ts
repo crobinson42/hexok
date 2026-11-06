@@ -45,6 +45,11 @@ function strict(resolve: WebhookResolver): HttpOptions {
   return { httpsOnly: true, allowPrivate: false, timeoutMs: 15_000, resolve };
 }
 
+/** The result of one send. */
+async function sent(...args: Parameters<typeof send>) {
+  return (await send(...args)).result;
+}
+
 function post(url: string, signal = new AbortController().signal) {
   return {
     url,
@@ -71,8 +76,7 @@ describe('send', () => {
         res.writeHead(204).end();
       });
     });
-    const result = await send(post(`${url}/hook`), local);
-    expect(result).toEqual({
+    expect(await sent(post(`${url}/hook`), local)).toEqual({
       status: 204,
       durationMs: expect.any(Number),
       responseBody: '',
@@ -99,7 +103,7 @@ describe('send', () => {
     const url = await serve((_req, res) => {
       res.writeHead(301, { location: elsewhere }).end('moved');
     });
-    const result = await send(post(url), local);
+    const result = await sent(post(url), local);
     expect(result).toMatchObject({
       status: 301,
       error: 'http',
@@ -115,7 +119,7 @@ describe('send', () => {
       const drip = setInterval(() => res.write('.'), 3000);
       res.on('close', () => clearInterval(drip));
     });
-    const result = await send(post(url), local);
+    const result = await sent(post(url), local);
     expect(result.error).toBe('timeout');
     expect(result.durationMs).toBeGreaterThanOrEqual(15_000);
     expect(result.durationMs).toBeLessThan(16_000);
@@ -126,7 +130,7 @@ describe('send', () => {
     const url = await serve((_req, res) => {
       res.writeHead(200).end('x'.repeat(1024 * 1024));
     });
-    const result = await send(post(url), local);
+    const result = await sent(post(url), local);
     expect(result.status).toBe(200);
     expect(result.error).toBeUndefined();
     expect(result.responseBody).toBe('x'.repeat(20 * 1024));
@@ -142,7 +146,7 @@ describe('send', () => {
       'https://0.0.0.0',
       'https://[fd00::1]',
     ]) {
-      expect(await send(post(url), strict(resolve))).toMatchObject({
+      expect(await sent(post(url), strict(resolve))).toMatchObject({
         error: 'blocked',
       });
       expect(await checkUrl(url, strict(resolve))).toEqual({
@@ -158,7 +162,7 @@ describe('send', () => {
       { address: '93.184.215.14', family: 4 },
       { address: '10.0.0.1', family: 4 },
     ]);
-    const result = await send(
+    const result = await sent(
       post('https://hooks.example.com/in'),
       strict(resolve),
     );
@@ -176,7 +180,7 @@ describe('send', () => {
       { address: '93.184.215.14', family: 4 },
     ]);
     expect(
-      await send(post('http://hooks.example.com'), strict(resolve)),
+      await sent(post('http://hooks.example.com'), strict(resolve)),
     ).toMatchObject({ error: 'blocked' });
     expect(await checkUrl('http://hooks.example.com', strict(resolve))).toEqual(
       { ok: false, code: 'scheme' },
@@ -189,7 +193,7 @@ describe('send', () => {
       code: 'ENOTFOUND',
     });
     expect(
-      await send(
+      await sent(
         post('https://nowhere.example'),
         strict(async () => {
           throw missing;
@@ -197,7 +201,7 @@ describe('send', () => {
       ),
     ).toMatchObject({ error: 'dns' });
     expect(
-      await send(
+      await sent(
         post('https://nowhere.example'),
         strict(async () => []),
       ),
@@ -205,19 +209,19 @@ describe('send', () => {
 
     const plain = await serve((_req, res) => res.end('ok'));
     expect(
-      await send(post(plain.replace('http:', 'https:')), local),
+      await sent(post(plain.replace('http:', 'https:')), local),
     ).toMatchObject({ error: 'tls' });
 
     const closed = await serve(() => {});
     const server = servers.pop();
     await new Promise((resolve) => server?.close(resolve));
-    expect(await send(post(closed), local)).toMatchObject({
+    expect(await sent(post(closed), local)).toMatchObject({
       error: 'connection',
     });
 
     const hanging = await serve(() => {});
     const stop = new AbortController();
-    const pending = send(post(hanging, stop.signal), local);
+    const pending = sent(post(hanging, stop.signal), local);
     setTimeout(() => stop.abort(), 50);
     expect(await pending).toMatchObject({ error: 'cancelled' });
   });
@@ -258,5 +262,29 @@ describe('checkUrl', () => {
   it('allows private addresses only with allowPrivate', async () => {
     const options = { ...strict(async () => []), allowPrivate: true };
     expect((await checkUrl('https://127.0.0.1', options)).ok).toBe(true);
+  });
+});
+
+describe('send Retry-After', () => {
+  it('returns Retry-After in seconds or as an HTTP date', async () => {
+    const url = await serve((req, res) => {
+      const header =
+        req.url === '/date'
+          ? new Date(Date.now() + 120_000).toUTCString()
+          : req.url === '/bad'
+            ? 'soon'
+            : '30';
+      res.writeHead(503, { 'retry-after': header }).end();
+    });
+    expect(await send(post(url), local)).toMatchObject({
+      result: { status: 503, error: 'http' },
+      retryAfterMs: 30_000,
+    });
+    const dated = await send(post(`${url}/date`), local);
+    expect(dated.retryAfterMs).toBeGreaterThan(115_000);
+    expect(dated.retryAfterMs).toBeLessThanOrEqual(120_000);
+    expect(
+      (await send(post(`${url}/bad`), local)).retryAfterMs,
+    ).toBeUndefined();
   });
 });

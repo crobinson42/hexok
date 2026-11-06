@@ -280,3 +280,26 @@ For a reviewer:
 
 - **`agent: false`.** Every send opens a new TCP and TLS connection. A keep-alive pool would let a socket opened under one check, or one `allowPrivate` setting, carry a later request. At millions of sends a day this costs a handshake per send. A per-instance agent that checks the address on every new socket would remove that cost. It is not in the plan, so it is not built.
 - **`http.ts` `send`** settles once from four events: response `end`, response `error`, response `close` without completion, and request `error`. Review that state handling.
+
+### Phase 3: the `Webhooks` class (2026-11-05)
+
+Done. `webhooks.ts` holds the `WebhookEndpoints` port, the call and hook types, `WebhookError`, `retryDelayMs`, and `Webhooks` with `publish`, `start`, `stop`, `checkUrl` and `sendTest`. `webhooks.test.ts` covers every "Done when" item on a test queue that records `delayMs`, with a fixed clock and `random: () => 0.5`, against a local server that checks every request with `verify()`.
+
+Decisions the plan left open:
+
+- **Config names.** `concurrency` (50), `endpointConcurrency` (5), `timeoutMs` (15000), `hookTimeoutMs` (10000), `retrySchedule` (the Svix delays), `maxPayloadBytes` (262144), `httpsOnly` (true), `allowPrivate` (false), and the test seams `now`, `random` and `resolve`. The 20 KB response cap, ±20% jitter, the Retry-After clamp, the 1 to 5 s push-back, the own-failure backoff and the 5 min verify tolerance are fixed behaviour. The README states them. They are not options.
+- **Topic and group.** Both are the constant `'webhooks'`. A product gets its own `RedisQueue` with its own `keyPrefix`, so no option is needed.
+- **Entries.** An event entry is `{ kind: 'event', organizationId, eventId, key, data, timestamp, failures, endpointIds? }`. A delivery entry adds `endpointId`, `deliveryId` and `attempt`. `data` is the validated JSON form, and the body sent is `{ type: event.token, timestamp, data }`, so receivers get exactly what was validated. `timestamp` is the publish time. `webhook-timestamp` is the send time of each attempt. `failures` counts our own failures in a row and drives the 30 s to 5 min backoff.
+- **`endpointIds` skips `subscribed()`.** A targeted publish writes one delivery per listed id. `get()` before the attempt still drops a disabled or deleted endpoint as `cancelled`. Filtering through `subscribed()` would stop a resend to an endpoint that has since unsubscribed from the event type.
+- **`call.endpoint.url` is `''` when `get()` returns null.** Entries never hold the URL, because a URL such as a Slack incoming-webhook URL can itself be a secret.
+- **Validation errors** are `WebhookError.InvalidPayload` (no JSON form, or the JSON form fails the schema; the message carries the schema error) and `WebhookError.PayloadTooLarge`. `WebhookError.UnsafeUrl` carries `{ reason }`. The schema's `issues` are not carried over.
+- **A send that `stop()` aborted** returns `'retry'` without a failure hook. The entry stays pending, and another worker repeats the same attempt with the same `deliveryId`.
+- **`publish` resolves the `webhook-id`**, which is useful for logs. `sendTest` uses a random `webhook-id`, so a receiver never dedupes a test against a real event.
+- **`send` returns `{ result, retryAfterMs? }`.** `WebhookResult` stays exactly the plan's type. Retry-After is honoured only on 429, 502, 503 and 504.
+
+For a reviewer:
+
+- **The test queue's `subscribe` is an overload.** The port's `subscribe<T>` asks an adapter to hand a `T` it cannot check. The sibling fakes cast `options.handler as QueueHandler<unknown>`. `DelayQueue` in `webhooks.test.ts` instead declares the generic signature and implements it with `unknown`, which TypeScript accepts without a cast. Decide whether that counts as a cast under the team's rule.
+- **`#hook`** races the hook against a timer and builds the hook's promise so it never rejects, so a hook that throws after its timeout is not an unhandled rejection. A hook that times out keeps running in the background. Only its signal tells it to stop.
+- **Fan-out is at least once.** A crash or a failed `publish` partway through a fan-out repeats it, and the endpoints already written get a second delivery with a new `deliveryId` and the same `webhook-id`.
+- **`package-lock.json`** in phase 2 also moved two workspace versions, `hexok` 2.2.3 to 2.2.4 and `integration-events` 0.0.0 to 0.1.0, that were stale on `main`. `npm install` did it when it linked the new workspace.

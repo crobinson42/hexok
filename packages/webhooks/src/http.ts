@@ -46,6 +46,12 @@ export interface SendRequest {
   readonly signal: AbortSignal;
 }
 
+/** What {@link send} returns. `retryAfterMs` is the response's `Retry-After`, when it has a valid one. */
+export interface SendOutcome {
+  readonly result: WebhookResult;
+  readonly retryAfterMs?: number;
+}
+
 const RESPONSE_CAP_BYTES = 20 * 1024;
 
 /** The operating system resolver, `/etc/hosts` included. */
@@ -139,6 +145,14 @@ export async function checkUrl(
   return checked;
 }
 
+/** `Retry-After` as seconds or an HTTP date, in milliseconds from now. */
+function retryAfterOf(header: string | undefined): number | undefined {
+  if (header === undefined) return undefined;
+  if (/^\d+$/.test(header)) return Number(header) * 1000;
+  const at = Date.parse(header);
+  return Number.isNaN(at) ? undefined : Math.max(0, at - Date.now());
+}
+
 function codeOf(error: unknown): string {
   if (typeof error !== 'object' || error === null || !('code' in error)) {
     return '';
@@ -158,12 +172,14 @@ const TLS_CODE =
 export async function send(
   request: SendRequest,
   options: HttpOptions,
-): Promise<WebhookResult> {
+): Promise<SendOutcome> {
   const started = performance.now();
   const elapsed = () => Math.round(performance.now() - started);
   const checked = target(request.url, options);
   if (!checked.ok) {
-    return { error: 'blocked', durationMs: elapsed(), responseBody: '' };
+    return {
+      result: { error: 'blocked', durationMs: elapsed(), responseBody: '' },
+    };
   }
   const url = checked.value;
   const deadline = AbortSignal.timeout(options.timeoutMs);
@@ -208,6 +224,7 @@ export async function send(
   };
   return new Promise((resolve) => {
     let status: number | undefined;
+    let retryAfterMs: number | undefined;
     const chunks: Buffer[] = [];
     let bytes = 0;
     let settled = false;
@@ -219,10 +236,15 @@ export async function send(
         .toString('utf8');
       const base = { durationMs: elapsed(), responseBody };
       const withStatus = status === undefined ? base : { ...base, status };
-      resolve(error === undefined ? withStatus : { ...withStatus, error });
+      const result =
+        error === undefined ? withStatus : { ...withStatus, error };
+      resolve(
+        retryAfterMs === undefined ? { result } : { result, retryAfterMs },
+      );
     };
     const onResponse = (response: IncomingMessage) => {
       status = response.statusCode;
+      retryAfterMs = retryAfterOf(response.headers['retry-after']);
       const outcome =
         status !== undefined && status >= 200 && status < 300
           ? undefined

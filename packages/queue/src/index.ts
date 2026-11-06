@@ -8,6 +8,7 @@ export {
   type QueueMaxDeliveries,
   type QueueMessage,
   type QueuePublishOptions,
+  type QueueRetryIn,
   type QueueStartFrom,
   type QueueSubscribeOptions,
   retryExhausted,

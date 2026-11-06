@@ -17,9 +17,18 @@ export interface QueueMessage<T> {
   readonly deliveries: number;
 }
 
+/**
+ * Acknowledges the entry and publishes its replacement `retryInMs` from now, in one step.
+ * The replacement carries `payload`, or the same payload when it is omitted, and starts at delivery 1.
+ */
+export interface QueueRetryIn<T> {
+  readonly retryInMs: number;
+  readonly payload?: T;
+}
+
 export type QueueHandler<T> = (
   message: QueueMessage<T>,
-) => Promise<QueueDisposition | void>;
+) => Promise<QueueDisposition | QueueRetryIn<T> | void>;
 
 export type QueueStartFrom =
   | 'earliest'
@@ -33,14 +42,22 @@ export interface QueueSubscribeOptions<T> {
   readonly maxDeliveries: QueueMaxDeliveries;
   readonly startFrom?: QueueStartFrom;
   readonly onError?: QueueDisposition;
+  /** How many handlers of this subscription run at once. Positive integer. Default 1. */
+  readonly concurrency?: number;
   readonly handler: QueueHandler<T>;
 }
 
 /** `sensitive` keeps the payload out of quarantine and logs. Use it for one-time codes and reset links. */
 export interface QueuePublishOptions {
   readonly sensitive?: boolean;
+  /** Delivers no sooner than this many milliseconds from now. Omitted or 0 publishes now. */
+  readonly delayMs?: number;
 }
 
+/**
+ * An adapter honours `delayMs`, `concurrency`, and a {@link QueueRetryIn} result, or throws.
+ * An adapter that cannot delay must throw on `delayMs` and on a retry result, never deliver early.
+ */
 export abstract class Queue extends Port('Queue') {
   abstract publish(
     topic: string,

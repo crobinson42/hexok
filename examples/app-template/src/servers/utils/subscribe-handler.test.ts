@@ -1,4 +1,8 @@
-import type { QueueHandler, QueueSubscribeOptions } from '@hexok/queue';
+import type {
+  QueueHandler,
+  QueuePublishOptions,
+  QueueSubscribeOptions,
+} from '@hexok/queue';
 import { Queue } from '@hexok/queue';
 import { Adapter, EventHandler } from 'hexok';
 import { describe, expect, it } from 'vitest';
@@ -52,7 +56,13 @@ class MemoryQueue extends Adapter(Queue) {
     handler: QueueHandler<unknown>;
   }> = [];
 
-  async publish(): Promise<string> {
+  /** Cannot delay, so it throws on `delayMs`, as the port requires. */
+  async publish(
+    _topic: string,
+    _payload: unknown,
+    options: QueuePublishOptions = {},
+  ): Promise<string> {
+    if (options.delayMs) throw new Error('memory queue: cannot delay');
     return '1';
   }
 

@@ -13,9 +13,12 @@ import type { ParkInput } from './park.js';
 import { RedisQueue } from './redis-queue.js';
 import {
   ackDeleted,
+  delayedMember,
   deleteIdleStream,
   destroyIdleGroup,
+  promoteDue,
   releaseConsumer,
+  retryLater,
 } from './scripts.js';
 
 describeRedisLifecycle('RedisQueue', ({ redis, stopTimeoutMs }) => {
@@ -1215,6 +1218,436 @@ describe.each(recoveryTargets)('RedisQueue ACL on %s', (_name, url) => {
         });
       } finally {
         await admin.del(...keys);
+        await admin.quit();
+      }
+    },
+  );
+});
+
+function newDelayedPrefix(): string {
+  return `hexok:queue-delayed:it:${randomUUID()}:`;
+}
+
+const sleepMs = (ms: number) =>
+  new Promise((resolve) => setTimeout(resolve, ms));
+
+/** The Redis clock in milliseconds. */
+async function redisNow(client: Redis): Promise<number> {
+  const [seconds, micros] = await client.time();
+  return Number(seconds) * 1000 + Math.floor(Number(micros) / 1000);
+}
+
+describe.each(recoveryTargets)(
+  'RedisQueue delay scripts on %s',
+  (_name, url) => {
+    it.skipIf(!url)(
+      'a promote run moves at most 1,000 due entries and never past the back-pressure mark',
+      async () => {
+        const admin = new Redis(url ?? '');
+        const stream = `${newPrefix()}jobs`;
+        const delayed = `${newDelayedPrefix()}jobs`;
+        try {
+          const now = await redisNow(admin);
+          const pipe = admin.pipeline();
+          for (let i = 0; i < 1500; i += 1) {
+            pipe.zadd(
+              delayed,
+              now - 1000,
+              delayedMember(`{"n":${i}}`, false).member,
+            );
+          }
+          pipe.zadd(
+            delayed,
+            now + 60_000,
+            delayedMember('{"later":true}', false).member,
+          );
+          await pipe.exec();
+          const limits = { maxLen: 10_000, mark: 9000, max: 1000 };
+          expect(await promoteDue(admin, delayed, stream, limits)).toBe(1000);
+          expect(await admin.xlen(stream)).toBe(1000);
+          expect(await admin.zcard(delayed)).toBe(501);
+          // Room for 5 below the mark moves 5.
+          expect(
+            await promoteDue(admin, delayed, stream, { ...limits, mark: 1005 }),
+          ).toBe(5);
+          // At the mark, a run moves nothing.
+          expect(
+            await promoteDue(admin, delayed, stream, { ...limits, mark: 1005 }),
+          ).toBe(-1);
+          expect(await admin.xlen(stream)).toBe(1005);
+          expect(await promoteDue(admin, delayed, stream, limits)).toBe(495);
+          // The entry not yet due stays.
+          expect(await promoteDue(admin, delayed, stream, limits)).toBe(0);
+          expect(await admin.zcard(delayed)).toBe(1);
+        } finally {
+          await admin.del(stream, delayed);
+          await admin.quit();
+        }
+      },
+    );
+
+    it.skipIf(!url)(
+      'the retry script acks the entry and adds its replacement in one call, once',
+      async () => {
+        const admin = new Redis(url ?? '');
+        const stream = `${newPrefix()}jobs`;
+        const delayed = `${newDelayedPrefix()}jobs`;
+        try {
+          await admin.xgroup('CREATE', stream, 'workers', '0', 'MKSTREAM');
+          const id = (await admin.xadd(stream, '*', 'payload', '{}')) ?? '';
+          await admin.xreadgroup(
+            'GROUP',
+            'workers',
+            'c',
+            'STREAMS',
+            stream,
+            '>',
+          );
+          const { member } = delayedMember('{"attempt":2}', true);
+          const before = await redisNow(admin);
+          expect(
+            await retryLater(
+              admin,
+              { stream, delayed },
+              { group: 'workers', id },
+              { delayMs: 5000, member },
+            ),
+          ).toBe(true);
+          expect((await admin.xpending(stream, 'workers'))[0]).toBe(0);
+          const scored = await admin.zrange(delayed, '0', '-1', 'WITHSCORES');
+          expect(scored[0]).toBe(member);
+          expect(Number(scored[1])).toBeGreaterThanOrEqual(before + 5000);
+          expect(Number(scored[1])).toBeLessThanOrEqual(
+            (await redisNow(admin)) + 5000,
+          );
+          // The entry is no longer pending, so a second call adds nothing.
+          expect(
+            await retryLater(
+              admin,
+              { stream, delayed },
+              { group: 'workers', id },
+              { delayMs: 5000, member: delayedMember('{}', false).member },
+            ),
+          ).toBe(false);
+          expect(await admin.zcard(delayed)).toBe(1);
+        } finally {
+          await admin.del(stream, delayed);
+          await admin.quit();
+        }
+      },
+    );
+  },
+);
+
+describe.skipIf(!process.env.REDIS_URL)(
+  'RedisQueue delay, retry results, and slots',
+  () => {
+    const url = process.env.REDIS_URL ?? '';
+    const queues: RedisQueue[] = [];
+    const open: Redis[] = [];
+    const keys: string[] = [];
+
+    afterEach(async () => {
+      await Promise.all(queues.splice(0).map((queue) => queue.stop()));
+      const admin = new Redis(url);
+      if (keys.length > 0) await admin.del(...keys.splice(0));
+      await admin.quit();
+      await Promise.all(open.splice(0).map((client) => client.quit()));
+    });
+
+    function probe(): Redis {
+      const client = new Redis(url);
+      open.push(client);
+      return client;
+    }
+
+    function queueOf(
+      config: Partial<ConstructorParameters<typeof RedisQueue>[0]> & {
+        readonly keyPrefix: string;
+        readonly delayedPrefix: string;
+      },
+    ): RedisQueue {
+      const queue = new RedisQueue({ redis: url, blockMs: 100, ...config });
+      queues.push(queue);
+      keys.push(`${config.keyPrefix}jobs`, `${config.delayedPrefix}jobs`);
+      return queue;
+    }
+
+    it('does not deliver a delayed entry before its due time, and delivers it within promoteMs plus blockMs after', async () => {
+      const queue = queueOf({
+        keyPrefix: newPrefix(),
+        delayedPrefix: newDelayedPrefix(),
+        promoteMs: 200,
+        blockMs: 200,
+      });
+      await queue.start();
+      let receivedAt = 0;
+      await subscribe(queue, 'jobs', {
+        consumerGroup: 'workers',
+        handler: async () => {
+          receivedAt = Date.now();
+        },
+      });
+      const dueAt = Date.now() + 800;
+      await queue.publish('jobs', { n: 1 }, { delayMs: 800 });
+      await waitFor(() => receivedAt > 0);
+      // The due time is on this clock and promotion on the Redis clock. The container's skew is a few milliseconds.
+      expect(receivedAt).toBeGreaterThanOrEqual(dueAt - 20);
+      expect(receivedAt).toBeLessThanOrEqual(dueAt + 200 + 200 + 100);
+    });
+
+    it('two instances promoting at once deliver each delayed entry once, identical payloads included', async () => {
+      const config = {
+        keyPrefix: newPrefix(),
+        delayedPrefix: newDelayedPrefix(),
+        promoteMs: 20,
+      };
+      const first = queueOf(config);
+      const second = queueOf(config);
+      await Promise.all([first.start(), second.start()]);
+      const handled: string[] = [];
+      for (const queue of [first, second]) {
+        await subscribe(queue, 'jobs', {
+          consumerGroup: 'workers',
+          handler: async (message) => {
+            handled.push(message.id);
+          },
+        });
+      }
+      const ids = new Set<string>();
+      for (let i = 0; i < 50; i += 1) {
+        ids.add(await first.publish('jobs', { same: true }, { delayMs: 300 }));
+      }
+      expect(ids.size).toBe(50);
+      await waitFor(() => handled.length >= 50);
+      await sleepMs(300);
+      expect(handled).toHaveLength(50);
+      expect(new Set(handled).size).toBe(50);
+      expect(await probe().xlen(`${config.keyPrefix}jobs`)).toBe(50);
+    });
+
+    it('a delayed entry survives a restart of every instance', async () => {
+      const config = {
+        keyPrefix: newPrefix(),
+        delayedPrefix: newDelayedPrefix(),
+        promoteMs: 50,
+      };
+      const before = queueOf(config);
+      await before.start();
+      await subscribe(before, 'jobs', {
+        consumerGroup: 'workers',
+        handler: async () => {},
+      });
+      await before.publish('jobs', { n: 1 }, { delayMs: 400 });
+      await before.stop();
+      const after = queueOf(config);
+      await after.start();
+      const seen: unknown[] = [];
+      await subscribe(after, 'jobs', {
+        consumerGroup: 'workers',
+        handler: async (message) => {
+          seen.push(message.payload);
+        },
+      });
+      await waitFor(() => seen.length === 1);
+      expect(seen).toEqual([{ n: 1 }]);
+    });
+
+    it('a retry result leaves the entry acked and its replacement delayed, then delivers it at delivery 1', async () => {
+      const config = {
+        keyPrefix: newPrefix(),
+        delayedPrefix: newDelayedPrefix(),
+        promoteMs: 50,
+      };
+      const queue = queueOf(config);
+      await queue.start();
+      const redis = probe();
+      const seen: Array<{ payload: unknown; deliveries: number }> = [];
+      let retried = false;
+      await queue.subscribe<{ attempt: number }>('jobs', {
+        consumerGroup: 'workers',
+        maxDeliveries: 1,
+        handler: async (message) => {
+          seen.push({
+            payload: message.payload,
+            deliveries: message.deliveries,
+          });
+          if (message.payload.attempt === 2) return 'ack';
+          retried = true;
+          return { retryInMs: 500, payload: { attempt: 2 } };
+        },
+      });
+      await queue.publish('jobs', { attempt: 1 });
+      await waitFor(() => retried);
+      await waitFor(
+        async () => (await redis.zcard(`${config.delayedPrefix}jobs`)) === 1,
+      );
+      expect(
+        (await redis.xpending(`${config.keyPrefix}jobs`, 'workers'))[0],
+      ).toBe(0);
+      await waitFor(() => seen.length === 2);
+      expect(seen).toEqual([
+        { payload: { attempt: 1 }, deliveries: 1 },
+        { payload: { attempt: 2 }, deliveries: 1 },
+      ]);
+      expect(await redis.zcard(`${config.delayedPrefix}jobs`)).toBe(0);
+    });
+
+    it('with concurrency 5 runs five slow handlers at once, reclaims none, and stop waits for all of them', async () => {
+      const config = {
+        keyPrefix: newPrefix(),
+        delayedPrefix: newDelayedPrefix(),
+        visibilityMs: 300,
+        stopTimeoutMs: 5000,
+      };
+      const queue = queueOf(config);
+      await queue.start();
+      for (let i = 0; i < 10; i += 1) await queue.publish('jobs', { i });
+      let running = 0;
+      let most = 0;
+      let finished = 0;
+      const started: string[] = [];
+      await queue.subscribe('jobs', {
+        consumerGroup: 'workers',
+        maxDeliveries: 'unlimited',
+        concurrency: 5,
+        handler: async (message) => {
+          started.push(message.id);
+          running += 1;
+          most = Math.max(most, running);
+          // Three times visibilityMs, so a reclaim would show as a second start.
+          await sleepMs(900);
+          running -= 1;
+          finished += 1;
+        },
+      });
+      await waitFor(() => started.length === 5);
+      await sleepMs(300);
+      expect(running).toBe(5);
+      await queue.stop();
+      expect(finished).toBe(5);
+      expect(most).toBe(5);
+      expect(new Set(started).size).toBe(started.length);
+      expect(started).toHaveLength(5);
+      const redis = probe();
+      expect(
+        (await redis.xpending(`${config.keyPrefix}jobs`, 'workers'))[0],
+      ).toBe(0);
+    });
+
+    it('redelivers 1,000 entries a killed consumer left pending within a few recovery runs', async () => {
+      const config = {
+        keyPrefix: newPrefix(),
+        delayedPrefix: newDelayedPrefix(),
+        visibilityMs: 2000,
+      };
+      const key = `${config.keyPrefix}jobs`;
+      const redis = probe();
+      await redis.xgroup('CREATE', key, 'workers', '0', 'MKSTREAM');
+      const pipe = redis.pipeline();
+      for (let i = 0; i < 1000; i += 1)
+        pipe.xadd(key, '*', 'payload', `{"i":${i}}`);
+      await pipe.exec();
+      await redis.xreadgroup(
+        'GROUP',
+        'workers',
+        'hexok:killed',
+        'COUNT',
+        1000,
+        'STREAMS',
+        key,
+        '>',
+      );
+      // Every entry is idle past visibilityMs when the first recovery run comes.
+      await sleepMs(1100);
+      const queue = queueOf(config);
+      await queue.start();
+      const handled = new Set<string>();
+      const subscribedAt = Date.now();
+      await subscribe(queue, 'jobs', {
+        consumerGroup: 'workers',
+        handler: async (message) => {
+          handled.add(message.id);
+        },
+      });
+      await waitFor(() => handled.size === 1000);
+      // Recovery runs every 1000ms. At 10 entries a run, 1,000 would take 100 runs.
+      expect(Date.now() - subscribedAt).toBeLessThan(3500);
+      await waitFor(
+        async () => (await redis.xpending(key, 'workers'))[0] === 0,
+      );
+    });
+
+    it('maintain does not report the delayed set, even under a keyPrefix that covers it', async () => {
+      const base = `hexok:queue:it:${randomUUID()}:`;
+      for (const config of [
+        { keyPrefix: newPrefix(), delayedPrefix: newDelayedPrefix() },
+        { keyPrefix: base, delayedPrefix: `${base}delayed:` },
+      ]) {
+        const queue = queueOf(config);
+        await queue.start();
+        await queue.publish('jobs', { n: 1 });
+        await queue.publish('jobs', { n: 2 }, { delayMs: 60_000 });
+        expect(await probe().zcard(`${config.delayedPrefix}jobs`)).toBe(1);
+        const report = await queue.maintain();
+        expect(report.scanned).toBe(1);
+        expect(report.skipped).toEqual([]);
+      }
+    });
+  },
+);
+
+describe.each(recoveryTargets)('RedisQueue delay ACL on %s', (_name, url) => {
+  it.skipIf(!url)(
+    'runs delayed publish, promote, and the retry script as the documented user with no refusal',
+    async () => {
+      const adminUrl = url ?? '';
+      const rules = await documentedAclRules(
+        new URL('../README.md', import.meta.url),
+      );
+      const admin = new Redis(adminUrl);
+      const keyPrefix = newPrefix();
+      const delayedPrefix = newDelayedPrefix();
+      try {
+        await withAclUser(adminUrl, rules, async (user) => {
+          const errors: unknown[] = [];
+          const queue = new RedisQueue({
+            redis: user.url,
+            keyPrefix,
+            delayedPrefix,
+            promoteMs: 50,
+            blockMs: 50,
+            stopTimeoutMs: 2000,
+            logger: {
+              debug() {},
+              info() {},
+              warn() {},
+              error: (error) => errors.push(error),
+            },
+          });
+          onTestFinished(() => queue.stop());
+          await queue.start();
+          const seen: number[] = [];
+          await queue.subscribe<{ attempt: number }>('jobs', {
+            consumerGroup: 'workers',
+            maxDeliveries: 'unlimited',
+            concurrency: 2,
+            handler: async (message) => {
+              seen.push(message.payload.attempt);
+              if (message.payload.attempt > 1) return 'ack';
+              return { retryInMs: 50, payload: { attempt: 2 } };
+            },
+          });
+          // ZADD, then the promote script, then the retry script, then the promote script again.
+          await queue.publish('jobs', { attempt: 1 }, { delayMs: 50 });
+          await waitFor(() => seen.length === 2);
+          await queue.stop();
+          expect(seen).toEqual([1, 2]);
+          expect(errors).toEqual([]);
+          expect(await user.refusals()).toEqual([]);
+        });
+      } finally {
+        await admin.del(`${keyPrefix}jobs`, `${delayedPrefix}jobs`);
         await admin.quit();
       }
     },

@@ -17,6 +17,7 @@ import {
   type QueueHandler,
   type QueueMaxDeliveries,
   type QueuePublishOptions,
+  type QueueRetryIn,
   type QueueStartFrom,
   type QueueSubscribeOptions,
   retryExhausted,
@@ -37,7 +38,13 @@ import {
   type ParkSink,
   parkedError,
 } from './park.js';
-import { ackDeleted, releaseConsumer } from './scripts.js';
+import {
+  ackDeleted,
+  delayedMember,
+  promoteDue,
+  releaseConsumer,
+  retryLater,
+} from './scripts.js';
 
 export type {
   RedisQueueMaintainOptions,
@@ -49,6 +56,10 @@ export type {
 export interface RedisQueueConfig {
   readonly redis: string | RedisOptions;
   readonly keyPrefix?: string;
+  /** Each topic's delayed entries are the sorted set `<delayedPrefix><topic>`. Default `'hexok:queue-delayed:'`. */
+  readonly delayedPrefix?: string;
+  /** How often each subscription moves due delayed entries into its stream. Default 1000. */
+  readonly promoteMs?: number;
   readonly visibilityMs?: number;
   readonly batch?: number;
   readonly blockMs?: number;
@@ -99,6 +110,7 @@ interface Subscription {
   readonly group: string;
   readonly key: string;
   readonly consumer: string;
+  readonly delayedKey: string;
   readonly startId: string;
   readonly maxDeliveries: QueueMaxDeliveries;
   readonly onError: QueueDisposition;
@@ -111,12 +123,22 @@ interface Subscription {
    */
   ack: CommandRun | undefined;
   readonly inflight: Set<string>;
+  /** Handler slots not in use. The read loop and `XAUTOCLAIM` share them. */
+  free: number;
+  /** Woken when a slot frees or the subscription closes. Each one checks again. */
+  readonly waiters: Array<() => void>;
+  /** Handler calls in progress, each holding one slot. */
+  readonly running: Set<Promise<void>>;
   readonly blocking: Redis;
   heartbeat: ReturnType<typeof setInterval> | undefined;
   recovery: ReturnType<typeof setInterval> | undefined;
-  /** `XAUTOCLAIM` runs, which can dispatch handlers. */
+  promote: ReturnType<typeof setInterval> | undefined;
+  promoting: boolean;
+  /** Where the next `XAUTOCLAIM` resumes. */
+  claimCursor: string;
+  /** `XAUTOCLAIM` runs. */
   readonly recovering: Set<Promise<void>>;
-  /** Resolves when the read loop ends, after its last handler. */
+  /** Resolves when the read loop ends. Handlers it started can still be in `running`. */
   readonly done: Promise<void>;
   readonly finish: () => void;
 }
@@ -134,6 +156,12 @@ const ADAPTER = 'queue';
 
 /** How many entries `keptConsumers` holds. The `warn` log records every kept consumer. */
 const MAX_KEPT_CONSUMERS = 1000;
+
+/** How many delayed entries one promote run moves at most. */
+const PROMOTE_MAX = 1000;
+
+/** A promote run never fills a stream past this share of `maxLen`, so `MAXLEN ~` does not trim entries it just moved. */
+const BACK_PRESSURE = 0.9;
 
 const noopSink: LogSink = {
   debug() {},
@@ -223,9 +251,16 @@ async function createGroup(
   }
 }
 
-/** The subscription's read loop and any handlers `XAUTOCLAIM` dispatched. */
-function handlersOf(sub: Subscription): Promise<unknown> {
-  return Promise.all([sub.done, ...sub.recovering]);
+/** The subscription's read loop, its `XAUTOCLAIM` runs, then every handler they started. */
+async function handlersOf(sub: Subscription): Promise<void> {
+  await Promise.all([sub.done, ...sub.recovering]);
+  await Promise.all(sub.running);
+}
+
+/** Throws unless `value` is a finite number of milliseconds, zero or more. */
+function assertDelay(name: 'delayMs' | 'retryInMs', value: number): void {
+  if (Number.isFinite(value) && value >= 0) return;
+  throw new Error(`queue: ${name} must be a finite number, zero or more`);
 }
 
 /** Resolves when `promise` settles or `signal` aborts, whichever is first. It removes its listener either way. */
@@ -247,6 +282,8 @@ function settledOrAborted(
 export class RedisQueue extends Adapter(Queue) {
   readonly #redis: string | RedisOptions;
   readonly #keyPrefix: string;
+  readonly #delayedPrefix: string;
+  readonly #promoteMs: number;
   readonly #visibilityMs: number;
   readonly #stopTimeoutMs: number;
   readonly #batch: number;
@@ -273,6 +310,8 @@ export class RedisQueue extends Adapter(Queue) {
     super();
     this.#redis = config.redis;
     this.#keyPrefix = config.keyPrefix ?? 'hexok:queue:';
+    this.#delayedPrefix = config.delayedPrefix ?? 'hexok:queue-delayed:';
+    this.#promoteMs = config.promoteMs ?? 1000;
     this.#visibilityMs = config.visibilityMs ?? 30_000;
     this.#stopTimeoutMs = config.stopTimeoutMs ?? 10_000;
     this.#batch = config.batch ?? 10;
@@ -322,6 +361,8 @@ export class RedisQueue extends Adapter(Queue) {
   ): Promise<string> {
     // A state error comes before encoding, so it is never parked.
     this.#lifecycle.assertReady('publish');
+    const delayMs = options.delayMs ?? 0;
+    assertDelay('delayMs', delayMs);
     const sensitive = options.sensitive === true;
     let encoded: string;
     try {
@@ -333,6 +374,31 @@ export class RedisQueue extends Adapter(Queue) {
       });
       throw sensitive ? scrubbed(error, 'queue: encode failed') : error;
     }
+    const id =
+      delayMs > 0
+        ? await this.#publishLater(topic, payload, encoded, sensitive, delayMs)
+        : await this.#publishNow(topic, payload, encoded, sensitive);
+    if (!this.#trimEnabled) return id;
+    this.#published.add(topic);
+    try {
+      await this.#trim(topic);
+    } catch (error) {
+      this.#logFailure(error, 'XTRIM', {
+        adapter: ADAPTER,
+        connection: 'commands',
+        topic,
+      });
+    }
+    return id;
+  }
+
+  /** `XADD`s the entry and resolves its stream id. */
+  async #publishNow(
+    topic: string,
+    payload: unknown,
+    encoded: string,
+    sensitive: boolean,
+  ): Promise<string> {
     const key = this.#key(topic);
     const fields = ['payload', encoded];
     if (sensitive) fields.push('sensitive', '1');
@@ -356,16 +422,33 @@ export class RedisQueue extends Adapter(Queue) {
         ? scrubbed(error, error.message)
         : error;
     }
-    if (!this.#trimEnabled) return id;
-    this.#published.add(topic);
+    return id;
+  }
+
+  /**
+   * `ZADD`s the entry to the topic's delayed set, due `delayMs` from now on this process's clock, and resolves the member's id.
+   * A subscription's promote run moves it into the stream once it is due.
+   */
+  async #publishLater(
+    topic: string,
+    payload: unknown,
+    encoded: string,
+    sensitive: boolean,
+    delayMs: number,
+  ): Promise<string> {
+    const { id, member } = delayedMember(encoded, sensitive);
     try {
-      await this.#trim(topic);
+      await this.#lifecycle.run('publish', ({ commands }) =>
+        commands.zadd(this.#delayedKey(topic), Date.now() + delayMs, member),
+      );
     } catch (error) {
-      this.#logFailure(error, 'XTRIM', {
-        adapter: ADAPTER,
-        connection: 'commands',
-        topic,
+      await this.#parkPublish(topic, payload, error, {
+        sensitive,
+        generic: 'queue: ZADD failed',
       });
+      if (!(error instanceof Error)) throw new Error('queue: ZADD failed');
+      // ioredis puts the member, payload included, on `error.command`, whether or not the entry is sensitive.
+      throw LifecycleError.is(error) ? error : scrubbed(error, error.message);
     }
     return id;
   }
@@ -381,6 +464,10 @@ export class RedisQueue extends Adapter(Queue) {
     );
     if (this.#subs.has(mapKey)) throw already;
     assertMaxDeliveries(options.maxDeliveries);
+    const concurrency = options.concurrency ?? 1;
+    if (!Number.isSafeInteger(concurrency) || concurrency < 1) {
+      throw new Error('queue: concurrency must be a positive integer');
+    }
     const key = this.#key(topic);
     const startId = startIdOf(options.startFrom);
     await this.#lifecycle.run('subscribe', ({ commands }) =>
@@ -402,6 +489,7 @@ export class RedisQueue extends Adapter(Queue) {
       topic,
       group,
       key,
+      delayedKey: this.#delayedKey(topic),
       consumer: `hexok:${process.pid}:${randomUUID()}`,
       startId,
       maxDeliveries: options.maxDeliveries,
@@ -410,9 +498,15 @@ export class RedisQueue extends Adapter(Queue) {
       abort: new AbortController(),
       ack: (command) => this.#lifecycle.run('subscribe', command),
       inflight: new Set(),
+      free: concurrency,
+      waiters: [],
+      running: new Set(),
       blocking,
       heartbeat: undefined,
       recovery: undefined,
+      promote: undefined,
+      promoting: false,
+      claimCursor: '0-0',
       recovering: new Set(),
       done,
       finish,
@@ -431,6 +525,13 @@ export class RedisQueue extends Adapter(Queue) {
       });
       sub.recovering.add(run);
     }, recoveryMs);
+    sub.promote = setInterval(() => {
+      if (sub.promoting) return;
+      sub.promoting = true;
+      void this.#promote(sub).finally(() => {
+        sub.promoting = false;
+      });
+    }, this.#promoteMs);
     void this.#readLoop(sub);
   }
 
@@ -488,6 +589,7 @@ export class RedisQueue extends Adapter(Queue) {
       run: (command) =>
         this.#lifecycle.run('maintain', ({ commands }) => command(commands)),
       keyPrefix: this.#keyPrefix,
+      delayedPrefix: this.#delayedPrefix,
       options,
       logger: this.#logger,
     });
@@ -585,14 +687,42 @@ export class RedisQueue extends Adapter(Queue) {
     });
   }
 
-  /** Aborts the read, clears the timers, and disconnects the blocking client. A `QUIT` after that could wait in the offline queue. */
+  /** Aborts the read, clears the timers, wakes slot waiters, and disconnects the blocking client. A `QUIT` after that could wait in the offline queue. */
   #closeSub(sub: Subscription): void {
     sub.abort.abort(new Error('queue: the subscription was closed'));
     if (sub.heartbeat) clearInterval(sub.heartbeat);
     if (sub.recovery) clearInterval(sub.recovery);
+    if (sub.promote) clearInterval(sub.promote);
     sub.heartbeat = undefined;
     sub.recovery = undefined;
+    sub.promote = undefined;
+    for (const wake of sub.waiters.splice(0)) wake();
     this.#lifecycle.detach(sub.blocking);
+  }
+
+  /** Resolves the number of free slots once there is at least one, or 0 when the subscription closes first. */
+  async #freeSlots(sub: Subscription): Promise<number> {
+    while (sub.free === 0 && !sub.abort.signal.aborted) {
+      await new Promise<void>((resolve) => sub.waiters.push(resolve));
+    }
+    return sub.abort.signal.aborted ? 0 : sub.free;
+  }
+
+  /** Takes one slot, waiting for one to free. Resolves false when the subscription closes first. */
+  async #takeSlot(sub: Subscription): Promise<boolean> {
+    while ((await this.#freeSlots(sub)) > 0) {
+      // Another taker can run between the wait and this line, so check again before taking.
+      if (sub.free > 0) {
+        sub.free -= 1;
+        return true;
+      }
+    }
+    return false;
+  }
+
+  #releaseSlot(sub: Subscription): void {
+    sub.free += 1;
+    for (const wake of sub.waiters.splice(0)) wake();
   }
 
   async #readLoop(sub: Subscription): Promise<void> {
@@ -600,6 +730,9 @@ export class RedisQueue extends Adapter(Queue) {
     let failures = 0;
     try {
       while (!signal.aborted) {
+        // A read asks only for free slots. It holds none while it blocks, so XAUTOCLAIM can still claim.
+        const count = Math.min(this.#batch, await this.#freeSlots(sub));
+        if (count === 0) break;
         let rows: StreamRead[] | null;
         try {
           // `run` adds the abort listener for this one read and removes it when the read settles,
@@ -613,7 +746,7 @@ export class RedisQueue extends Adapter(Queue) {
                 sub.group,
                 sub.consumer,
                 'COUNT',
-                this.#batch,
+                count,
                 'BLOCK',
                 this.#blockMs,
                 'STREAMS',
@@ -699,7 +832,8 @@ export class RedisQueue extends Adapter(Queue) {
 
   /**
    * Every entry of a batch joins the heartbeat when the batch arrives, not when its turn comes.
-   * Otherwise an entry waiting behind slow handlers goes idle, and `XAUTOCLAIM`, even this subscription's own, delivers it again.
+   * Otherwise an entry waiting for a slot goes idle, and `XAUTOCLAIM`, even this subscription's own, delivers it again.
+   * Each entry starts its handler once it takes a slot. This resolves when the last one has started, not finished.
    */
   async #handleBatch(sub: Subscription, entries: StreamEntry[]): Promise<void> {
     for (const [id] of entries) sub.inflight.add(id);
@@ -710,8 +844,17 @@ export class RedisQueue extends Adapter(Queue) {
           entries.map(([id]) => id),
         );
     for (const [id, fields] of entries) {
-      if (sub.abort.signal.aborted) sub.inflight.delete(id);
-      else await this.#dispatch(sub, id, fields, counts.get(id));
+      if (!(await this.#takeSlot(sub))) {
+        sub.inflight.delete(id);
+        continue;
+      }
+      const run = this.#dispatch(sub, id, fields, counts.get(id)).finally(
+        () => {
+          sub.running.delete(run);
+          this.#releaseSlot(sub);
+        },
+      );
+      sub.running.add(run);
     }
   }
 
@@ -798,7 +941,7 @@ export class RedisQueue extends Adapter(Queue) {
     }
     let thrown = false;
     let thrownError: unknown;
-    let returned: QueueDisposition | void;
+    let returned: QueueDisposition | QueueRetryIn<unknown> | void;
     try {
       const call: HandlerCall = { sub, active: true };
       try {
@@ -807,6 +950,12 @@ export class RedisQueue extends Adapter(Queue) {
         );
       } finally {
         call.active = false;
+      }
+      if (typeof returned === 'object') {
+        // A bad retryInMs or a replacement that fails to encode throws here, and counts as a handler throw.
+        const replacement = this.#replacement(returned, raw, fields);
+        await this.#retryLater(sub, id, replacement);
+        return;
       }
     } catch (error) {
       thrown = true;
@@ -826,6 +975,56 @@ export class RedisQueue extends Adapter(Queue) {
       return;
     }
     await this.#settle(sub, id, disposition);
+  }
+
+  /** The delayed-set member that replaces an entry. It keeps the entry's `sensitive` flag, and its payload when the result has none. */
+  #replacement(
+    result: QueueRetryIn<unknown>,
+    raw: string,
+    fields: string[],
+  ): { delayMs: number; member: string } {
+    assertDelay('retryInMs', result.retryInMs);
+    const encoded =
+      result.payload === undefined ? raw : this.#encode(result.payload);
+    const sensitive = fieldOf(fields, 'sensitive') === '1';
+    return {
+      delayMs: Math.ceil(result.retryInMs),
+      member: delayedMember(encoded, sensitive).member,
+    };
+  }
+
+  /**
+   * Acks the entry and adds its replacement to the delayed set in one script.
+   * Once `unsubscribe` or `stop()` stops waiting, it runs nothing and the entry stays pending, as `#settle` does.
+   */
+  async #retryLater(
+    sub: Subscription,
+    id: string,
+    replacement: { delayMs: number; member: string },
+  ): Promise<void> {
+    const ack = sub.ack;
+    if (ack !== undefined) {
+      try {
+        await ack(({ commands }) =>
+          retryLater(
+            commands,
+            { stream: sub.key, delayed: sub.delayedKey },
+            { group: sub.group, id },
+            replacement,
+          ),
+        );
+      } catch (error) {
+        // ioredis puts the script args, payload included, on `error.command`.
+        this.#logFailure(
+          error instanceof Error && !LifecycleError.is(error)
+            ? scrubbed(error, error.message)
+            : error,
+          'retry script',
+          { ...this.#fields(sub, 'commands'), id },
+        );
+      }
+    }
+    sub.inflight.delete(id);
   }
 
   /** Logs, parks when a sink is set, then acknowledges. A failed park still acknowledges. */
@@ -890,38 +1089,64 @@ export class RedisQueue extends Adapter(Queue) {
     }
   }
 
+  /**
+   * Claims idle entries into free slots, resuming at the cursor the last run left.
+   * It claims again while a full batch comes back, and ends on a short batch or when the scan wraps to `0-0`.
+   */
   async #recover(sub: Subscription): Promise<void> {
-    if (sub.abort.signal.aborted) return;
     try {
-      const reply = await this.#lifecycle.run('subscribe', ({ commands }) =>
-        commands.xautoclaim(
-          sub.key,
-          sub.group,
-          sub.consumer,
-          this.#visibilityMs,
-          '0-0',
-          'COUNT',
-          this.#batch,
-        ),
-      );
-      // Redis 7 lists deleted ids as a third element and drops them itself. Redis 6.2 returns each as `nil` and keeps it pending.
-      const claimed = Array.isArray(reply[1]) ? (reply[1] as unknown[]) : [];
-      const entries = claimed.filter(isStreamEntry);
-      if (entries.length < claimed.length) {
-        await this.#lifecycle.run('subscribe', ({ commands }) =>
-          ackDeleted(commands, sub.key, sub.group, sub.consumer),
+      while (!sub.abort.signal.aborted) {
+        const count = Math.min(this.#batch, await this.#freeSlots(sub));
+        if (count === 0) return;
+        const reply = await this.#lifecycle.run('subscribe', ({ commands }) =>
+          commands.xautoclaim(
+            sub.key,
+            sub.group,
+            sub.consumer,
+            this.#visibilityMs,
+            sub.claimCursor,
+            'COUNT',
+            count,
+          ),
         );
+        sub.claimCursor = typeof reply[0] === 'string' ? reply[0] : '0-0';
+        // Redis 7 lists deleted ids as a third element and drops them itself. Redis 6.2 returns each as `nil` and keeps it pending.
+        const claimed = Array.isArray(reply[1]) ? (reply[1] as unknown[]) : [];
+        const entries = claimed.filter(isStreamEntry);
+        if (entries.length < claimed.length) {
+          await this.#lifecycle.run('subscribe', ({ commands }) =>
+            ackDeleted(commands, sub.key, sub.group, sub.consumer),
+          );
+        }
+        await this.#handleBatch(
+          sub,
+          entries.filter(([id]) => !sub.inflight.has(id)),
+        );
+        if (claimed.length < count || sub.claimCursor === '0-0') return;
       }
-      await this.#handleBatch(
-        sub,
-        entries.filter(([id]) => !sub.inflight.has(id)),
-      );
     } catch (error) {
       if (isNoGroup(error) && !sub.abort.signal.aborted) {
+        sub.claimCursor = '0-0';
         await this.#restoreGroup(sub);
         return;
       }
       this.#logFailure(error, 'XAUTOCLAIM', this.#fields(sub, 'commands'));
+    }
+  }
+
+  /** Moves the topic's due delayed entries into its stream. */
+  async #promote(sub: Subscription): Promise<void> {
+    if (sub.abort.signal.aborted) return;
+    try {
+      await this.#lifecycle.run('subscribe', ({ commands }) =>
+        promoteDue(commands, sub.delayedKey, sub.key, {
+          maxLen: this.#maxLen,
+          mark: Math.floor(this.#maxLen * BACK_PRESSURE),
+          max: PROMOTE_MAX,
+        }),
+      );
+    } catch (error) {
+      this.#logFailure(error, 'promote script', this.#fields(sub, 'commands'));
     }
   }
 
@@ -999,6 +1224,10 @@ export class RedisQueue extends Adapter(Queue) {
 
   #key(topic: string): string {
     return `${this.#keyPrefix}${topic}`;
+  }
+
+  #delayedKey(topic: string): string {
+    return `${this.#delayedPrefix}${topic}`;
   }
 }
 

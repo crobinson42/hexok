@@ -6,8 +6,10 @@ import {
   ackDeletedScript,
   deleteIdleStreamScript,
   destroyIdleGroupScript,
+  promoteDueScript,
   releaseConsumer,
   releaseConsumerScript,
+  retryLaterScript,
 } from './scripts.js';
 
 interface Pending {
@@ -166,6 +168,9 @@ class FakeRedis extends EventEmitter {
     this.calls.push(['eval', ...args]);
     this.scripts.push(script);
     if (script === ackDeletedScript) return [];
+    // Nothing is due in the delayed set.
+    if (script === promoteDueScript) return 0;
+    if (script === retryLaterScript) return this.retryReply;
     const path = args.slice(1, 4).map(String);
     for (let depth = 1; depth <= 3; depth += 1) {
       if (this.gone.has(path.slice(0, depth).join('\0'))) return -1;
@@ -192,6 +197,23 @@ class FakeRedis extends EventEmitter {
     if (owned.length > 0) return 0;
     await this.xgroup('DELCONSUMER', key, group, consumer);
     return 1;
+  }
+
+  /** What the retry script replies: 1 acked and added the replacement, 0 the entry was no longer pending. */
+  retryReply: unknown = 1;
+
+  failZadd = false;
+
+  zadd(...args: unknown[]): Promise<number> {
+    this.calls.push(['zadd', ...args]);
+    if (this.failZadd) {
+      const error = Object.assign(new Error('zadd failed'), {
+        command: { name: 'zadd', args: args.map(String) },
+      });
+      error.name = 'ReplyError';
+      return Promise.reject(error);
+    }
+    return Promise.resolve(1);
   }
 
   xack(...args: unknown[]): Promise<number> {
@@ -3089,6 +3111,360 @@ describe('RedisQueue reliability', () => {
     });
     expect(calls).toBe(0);
     expect(commands.calls.some((call) => call[0] === 'xack')).toBe(false);
+    await queue.stop();
+  });
+});
+
+describe('RedisQueue delayed entries, retry results, and slots', () => {
+  afterEach(() => {
+    vi.useRealTimers();
+    FakeRedis.instances.length = 0;
+  });
+
+  async function started(
+    config: Partial<ConstructorParameters<typeof RedisQueue>[0]> = {},
+  ) {
+    const queue = new RedisQueue({
+      redis: 'redis://127.0.0.1:6379',
+      ...config,
+    });
+    await queue.start();
+    const commands = FakeRedis.instances[0];
+    if (!commands) throw new Error('missing commands client');
+    return { queue, commands };
+  }
+
+  it('ZADDs a delayed publish with its due time and a unique member, and does not XADD', async () => {
+    const { queue, commands } = await started();
+    const before = Date.now();
+    const first = await queue.publish('jobs', { n: 1 }, { delayMs: 5000 });
+    const second = await queue.publish(
+      'jobs',
+      { n: 1 },
+      { delayMs: 5000, sensitive: true },
+    );
+    const zadds = commands.calls.filter((call) => call[0] === 'zadd');
+    expect(zadds).toHaveLength(2);
+    const [key, score, member] = zadds[0]?.slice(1) ?? [];
+    expect(key).toBe('hexok:queue-delayed:jobs');
+    expect(Number(score)).toBeGreaterThanOrEqual(before + 5000);
+    expect(Number(score)).toBeLessThanOrEqual(Date.now() + 5000);
+    expect(member).toBe(`${first}:0:{"n":1}`);
+    expect(zadds[1]?.[3]).toBe(`${second}:1:{"n":1}`);
+    expect(first).not.toBe(second);
+    expect(commands.calls.some((call) => call[0] === 'xadd')).toBe(false);
+    await queue.publish('jobs', { n: 2 }, { delayMs: 0 });
+    expect(commands.calls.filter((call) => call[0] === 'xadd')).toHaveLength(1);
+    await queue.stop();
+  });
+
+  it('rejects a delayMs that is negative or not finite before encoding', async () => {
+    const encode = vi.fn((payload: unknown) => JSON.stringify(payload));
+    const { queue, commands } = await started({ encode });
+    for (const delayMs of [-1, Number.NaN, Number.POSITIVE_INFINITY]) {
+      await expect(queue.publish('jobs', {}, { delayMs })).rejects.toThrow(
+        'queue: delayMs must be a finite number, zero or more',
+      );
+    }
+    expect(encode).not.toHaveBeenCalled();
+    expect(commands.calls.some((call) => call[0] === 'zadd')).toBe(false);
+    await queue.stop();
+  });
+
+  it('scrubs a failed ZADD of the member, and parks it like a failed XADD', async () => {
+    const parked: ParkInput[] = [];
+    const { queue, commands } = await started({
+      quarantine: {
+        park: async (input) => {
+          parked.push(input);
+          return { id: 'q1' };
+        },
+      },
+    });
+    commands.failZadd = true;
+    const error: unknown = await queue
+      .publish('jobs', { secret: 'abc' }, { delayMs: 10 })
+      .catch((caught: unknown) => caught);
+    expect(error).toBeInstanceOf(Error);
+    expect(textOf(error)).not.toContain('abc');
+    expect(error).toMatchObject({ name: 'ReplyError', message: 'zadd failed' });
+    expect(parked[0]).toMatchObject({
+      source: 'queue',
+      operation: 'publish',
+      subject: 'jobs',
+      payload: { secret: 'abc' },
+      error: { name: 'ReplyError', message: 'zadd failed' },
+    });
+    await queue
+      .publish('jobs', { secret: 'abc' }, { delayMs: 10, sensitive: true })
+      .catch(() => {});
+    expect(parked[1]).toMatchObject({
+      payload: { sensitive: true },
+      error: { name: 'ReplyError', message: 'queue: ZADD failed' },
+    });
+    expect(textOf(parked[1])).not.toContain('abc');
+    await queue.stop();
+  });
+
+  it('runs the promote script every promoteMs with the back-pressure mark', async () => {
+    vi.useFakeTimers();
+    const { queue, commands } = await started({ maxLen: 2000, promoteMs: 250 });
+    await subscribe(queue, 'jobs', {
+      consumerGroup: 'billing',
+      handler: async () => {},
+    });
+    await vi.advanceTimersByTimeAsync(500);
+    expect(
+      commands.scripts.filter((script) => script === promoteDueScript),
+    ).toHaveLength(2);
+    const evals = commands.calls.filter((call) => call[0] === 'eval');
+    expect(evals[0]).toEqual([
+      'eval',
+      2,
+      'hexok:queue-delayed:jobs',
+      'hexok:queue:jobs',
+      2000,
+      1800,
+      1000,
+    ]);
+    await queue.stop();
+    const after = commands.calls.filter((call) => call[0] === 'eval').length;
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(commands.calls.filter((call) => call[0] === 'eval')).toHaveLength(
+      after,
+    );
+  });
+
+  it('a retry result acks and adds the replacement in one script, without XACK', async () => {
+    vi.useFakeTimers();
+    const { queue, commands } = await started();
+    const results = [
+      { retryInMs: 1500 },
+      { retryInMs: 20.2, payload: { attempt: 2 } },
+    ];
+    await subscribe<{ attempt: number }>(queue, 'jobs', {
+      consumerGroup: 'billing',
+      handler: async () => results.shift(),
+    });
+    const blocking = FakeRedis.instances[1];
+    blocking?.pending?.resolve([
+      [
+        'hexok:queue:jobs',
+        [
+          ['5-1', ['payload', '{"attempt":1}']],
+          ['5-2', ['payload', '{"attempt":1}', 'sensitive', '1']],
+        ],
+      ],
+    ]);
+    await vi.advanceTimersByTimeAsync(0);
+    await vi.advanceTimersByTimeAsync(0);
+    const retries = commands.calls.filter((call) => call[0] === 'eval');
+    expect(retries.map((call) => call.slice(0, 7))).toEqual([
+      [
+        'eval',
+        2,
+        'hexok:queue:jobs',
+        'hexok:queue-delayed:jobs',
+        'billing',
+        '5-1',
+        1500,
+      ],
+      [
+        'eval',
+        2,
+        'hexok:queue:jobs',
+        'hexok:queue-delayed:jobs',
+        'billing',
+        '5-2',
+        21,
+      ],
+    ]);
+    expect(String(retries[0]?.[7])).toMatch(
+      /^[0-9a-f-]{36}:0:\{"attempt":1\}$/,
+    );
+    expect(String(retries[1]?.[7])).toMatch(
+      /^[0-9a-f-]{36}:1:\{"attempt":2\}$/,
+    );
+    expect(commands.calls.some((call) => call[0] === 'xack')).toBe(false);
+    await queue.stop();
+  });
+
+  it('a bad retryInMs counts as a handler throw and follows onError', async () => {
+    vi.useFakeTimers();
+    const logs = recordingLogger();
+    const { queue, commands } = await started({ logger: logs.sink });
+    await subscribe(queue, 'jobs', {
+      consumerGroup: 'billing',
+      onError: 'drop',
+      handler: async () => ({ retryInMs: -5 }),
+    });
+    FakeRedis.instances[1]?.pending?.resolve([
+      ['hexok:queue:jobs', [['6-1', ['payload', '{}']]]],
+    ]);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(commands.scripts).not.toContain(retryLaterScript);
+    expect(commands.calls.filter((call) => call[0] === 'xack')).toEqual([
+      ['xack', 'hexok:queue:jobs', 'billing', '6-1'],
+    ]);
+    expect(logs.calls[0]?.[1]).toMatchObject({
+      message: 'queue: retryInMs must be a finite number, zero or more',
+    });
+    await queue.stop();
+  });
+
+  it('logs a failed retry script without the payload and leaves the entry pending', async () => {
+    vi.useFakeTimers();
+    const logs = recordingLogger();
+    const { queue, commands } = await started({ logger: logs.sink });
+    commands.retryReply = 'unexpected';
+    await subscribe(queue, 'jobs', {
+      consumerGroup: 'billing',
+      handler: async () => ({ retryInMs: 10, payload: { secret: 'abc' } }),
+    });
+    FakeRedis.instances[1]?.pending?.resolve([
+      ['hexok:queue:jobs', [['7-1', ['payload', '{}']]]],
+    ]);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(logs.calls).toEqual([
+      [
+        'error',
+        expect.objectContaining({
+          message: 'queue: the retry script replied unexpectedly',
+        }),
+        expect.objectContaining({ topic: 'jobs', group: 'billing', id: '7-1' }),
+      ],
+    ]);
+    expect(textOf(logs.calls)).not.toContain('abc');
+    expect(commands.calls.some((call) => call[0] === 'xack')).toBe(false);
+    await queue.stop();
+  });
+
+  it('rejects a concurrency that is not a positive integer before creating the group', async () => {
+    const { queue, commands } = await started();
+    for (const concurrency of [0, -1, 1.5, Number.NaN]) {
+      await expect(
+        queue.subscribe('jobs', {
+          consumerGroup: 'billing',
+          maxDeliveries: 'unlimited',
+          concurrency,
+          handler: async () => {},
+        }),
+      ).rejects.toThrow('queue: concurrency must be a positive integer');
+    }
+    expect(callsOf(commands, 'CREATE')).toEqual([]);
+    await queue.stop();
+  });
+
+  it('a read asks only for free slots, and runs up to concurrency handlers at once', async () => {
+    vi.useFakeTimers();
+    const { queue } = await started({ batch: 10 });
+    const release: Array<() => void> = [];
+    let running = 0;
+    let most = 0;
+    await queue.subscribe('jobs', {
+      consumerGroup: 'billing',
+      maxDeliveries: 'unlimited',
+      concurrency: 3,
+      handler: async () => {
+        running += 1;
+        most = Math.max(most, running);
+        await new Promise<void>((resolve) => release.push(resolve));
+        running -= 1;
+      },
+    });
+    const blocking = FakeRedis.instances[1];
+    if (!blocking) throw new Error('missing blocking client');
+    const counts = () =>
+      blocking.calls
+        .filter((call) => call[0] === 'xreadgroup')
+        .map((call) => call[5]);
+    expect(counts()).toEqual([3]);
+    blocking.pending?.resolve([
+      [
+        'hexok:queue:jobs',
+        [
+          ['8-1', ['payload', '{}']],
+          ['8-2', ['payload', '{}']],
+        ],
+      ],
+    ]);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(running).toBe(2);
+    expect(counts()).toEqual([3, 1]);
+    blocking.pending?.resolve([
+      [
+        'hexok:queue:jobs',
+        [
+          ['8-3', ['payload', '{}']],
+          ['8-4', ['payload', '{}']],
+        ],
+      ],
+    ]);
+    await vi.advanceTimersByTimeAsync(0);
+    // The reply held more than the read asked for, so 8-4 waits for a slot.
+    expect(running).toBe(3);
+    expect(counts()).toEqual([3, 1]);
+    release.shift()?.();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(running).toBe(3);
+    expect(most).toBe(3);
+    const stopped = settledFlag(queue.stop());
+    await vi.advanceTimersByTimeAsync(0);
+    expect(stopped()).toBe(false);
+    for (const done of release.splice(0)) done();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(stopped()).toBe(true);
+  });
+
+  it('recovery keeps its cursor and claims again while a full batch comes back', async () => {
+    vi.useFakeTimers();
+    const { queue, commands } = await started({ visibilityMs: 1000, batch: 2 });
+    commands.autoclaimReplies = [
+      [
+        '9-3',
+        [
+          ['9-1', ['payload', '{}']],
+          ['9-2', ['payload', '{}']],
+        ],
+      ],
+      ['9-9', [['9-3', ['payload', '{}']]]],
+      ['0-0', []],
+    ];
+    const handled: string[] = [];
+    await queue.subscribe('jobs', {
+      consumerGroup: 'billing',
+      maxDeliveries: 'unlimited',
+      concurrency: 2,
+      handler: async (message) => {
+        handled.push(message.id);
+      },
+    });
+    await vi.advanceTimersByTimeAsync(500);
+    expect(handled).toEqual(['9-1', '9-2', '9-3']);
+    await vi.advanceTimersByTimeAsync(500);
+    const claims = commands.calls.filter((call) => call[0] === 'xautoclaim');
+    // The first run claims three times, from the cursor each reply left. The next run starts over at 0-0.
+    expect(claims.map((call) => call[5])).toEqual(['0-0', '9-3', '9-9', '0-0']);
+    // Each claim asks for the free slots only, never more than batch.
+    for (const call of claims) {
+      expect(call[7]).toBeGreaterThanOrEqual(1);
+      expect(call[7]).toBeLessThanOrEqual(2);
+    }
+    await queue.stop();
+  });
+
+  it('maintain skips delayed sets that a custom keyPrefix covers', async () => {
+    const { queue, commands } = await started({
+      keyPrefix: 'app:',
+      delayedPrefix: 'app:delayed:',
+    });
+    commands.scanPages = [['0', ['app:jobs', 'app:delayed:jobs']]];
+    const report = await queue.maintain();
+    expect(report.scanned).toBe(1);
+    expect(report.skipped).toEqual([]);
+    expect(
+      commands.calls.filter((call) => call[0] === 'xinfo').map((c) => c[2]),
+    ).not.toContain('app:delayed:jobs');
     await queue.stop();
   });
 });

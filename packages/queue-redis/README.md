@@ -30,12 +30,33 @@ Delivery is at least once. A message can reach a handler more than once, so make
 - `deliveries` is read from the pending list after each read or claim. It counts this handoff and every earlier handoff, including a crash that never acknowledged. A count past the ceiling does not call the handler. The entry is logged, parked when a sink is set, and acknowledged. A missing count is logged and left pending. It is not acknowledged.
 - The ceiling is per subscriber. Two processes in one group can disagree during a deploy. The one that handles that delivery decides.
 - After `visibilityMs`, `XAUTOCLAIM` in any consumer of the group claims a pending entry and delivers it again. A redelivery can arrive after newer entries.
-- Every entry of a read batch is in the heartbeat from the moment the batch arrives until it settles. The heartbeat `XCLAIM`s those entries every `visibilityMs / 3`, so no consumer reclaims an entry that is running or waiting its turn. The heartbeat is `XCLAIM` with the ids and then `JUSTID`. `JUSTID` does not increment the delivery count. Keep it. An empty snapshot does not call `XCLAIM`. `'retry'` removes the id from the heartbeat, so the entry goes idle and can be reclaimed.
-- `XAUTOCLAIM` runs every `visibilityMs / 2`. A run is skipped while the previous one is still running.
+- Every entry of a read batch is in the heartbeat from the moment the batch arrives until it settles. The heartbeat `XCLAIM`s those entries every `visibilityMs / 3`, so no consumer reclaims an entry that is running or waiting for a slot. The heartbeat is `XCLAIM` with the ids and then `JUSTID`. `JUSTID` does not increment the delivery count. Keep it. An empty snapshot does not call `XCLAIM`. `'retry'` removes the id from the heartbeat, so the entry goes idle and can be reclaimed.
+- `XAUTOCLAIM` runs every `visibilityMs / 2`. A run is skipped while the previous one is still running. A run resumes at the cursor the last one left, and claims again while a full batch comes back, so a backlog of idle entries drains in one run instead of one batch per run. It ends on a short batch or when the scan wraps to the start.
+- `concurrency` sets how many handlers of a subscription run at once. The default is 1. The read loop and `XAUTOCLAIM` share that many slots. A read or a claim asks only for free slots, up to `batch`, and holds none while it blocks. `stop()` and `unsubscribe()` wait for every running handler.
 - A handler that finishes while `stop()` or `unsubscribe()` waits is acked. Once they stop waiting, a handler that returns does not `XACK`. Its entry stays pending for another consumer.
 - A consumer is never deleted while it owns a pending entry. Deleting it would drop those entries from the group, and no consumer could reclaim them.
 - When a group is deleted under a subscription, the read loop and `XAUTOCLAIM` recreate it. A failed recreate is logged, and the read loop backs off.
 - A pending entry deleted from the stream, by trim or `XDEL`, is acked. Redis 7 drops it in `XAUTOCLAIM`. Redis 6.2 returns it as `nil` and keeps it pending, so the queue acks the consumer's pending entries that are gone from the stream.
+
+### Delayed entries
+
+`publish(topic, payload, { delayMs })` adds the entry to the sorted set `<delayedPrefix><topic>`, scored with its due time on this process's clock, and resolves the member's id. It does not `XADD`. Omitted or 0 publishes now.
+
+- A member is a random id, the `sensitive` flag, and the encoded payload, so two identical payloads stay two entries.
+- Every subscription runs one script every `promoteMs` that moves due members into the stream with `XADD … MAXLEN ~`, oldest first, at most 1,000 a run. Due is measured on the Redis clock. A due entry reaches a free slot within `promoteMs` plus `blockMs`.
+- The script is atomic, so two subscriptions promoting the same topic move each member once.
+- A run never fills the stream past 90% of `maxLen`, and skips while the stream is at that mark, so `MAXLEN ~` does not trim the entries it moves. `XLEN` counts acknowledged entries until the age trim removes them. Size `maxLen` and `retentionMs` so a busy stream stays under the mark, or delayed entries wait.
+- Only a subscription promotes. A delayed entry on a topic with no running subscriber waits in its set. It survives every restart, because it lives in Redis.
+
+### Retry results
+
+A handler may return `{ retryInMs, payload? }`. One script acks the entry and adds its replacement to the delayed set, due `retryInMs` from now on the Redis clock. A retry is never lost or doubled.
+
+- The replacement carries `payload`, or the entry's own payload when it is omitted. It keeps the entry's `sensitive` flag. It is a new entry, so its delivery count starts at 1, and `maxDeliveries` does not count across it.
+- When the entry is no longer pending, such as when another consumer acked it, the script adds nothing.
+- A `retryInMs` that is not a finite number, zero or more, or a `payload` that fails to encode, counts as a handler throw and follows `onError`.
+- Once `stop()` or `unsubscribe()` stops waiting, a handler that returns a retry result runs no script. Its entry stays pending for another consumer.
+- A failed script is logged. The entry stays pending and is delivered again after `visibilityMs`.
 
 Trimming can lose entries. `XADD` trims with `MAXLEN ~` only. Age trim is a separate `XTRIM MINID` after each publish and every minute, on the topics this instance published to. Both may delete entries that are still pending.
 
@@ -106,6 +127,8 @@ Every log carries `adapter: 'queue'`. `connection` is `commands` or `blocking`, 
 | The stop cleanup threw | `error` | `adapter` |
 | A failed `XREADGROUP`, `XCLAIM`, `XAUTOCLAIM`, `XPENDING`, group recreate, or consumer removal | `error` | `adapter`, `connection`, `topic`, `group` |
 | A failed `XACK` | `error` | `adapter`, `connection`, `topic`, `group`, `id` |
+| A failed retry script | `error` | `adapter`, `connection`, `topic`, `group`, `id` |
+| A failed promote script | `error` | `adapter`, `connection`, `topic`, `group` |
 | A failed age trim, after a publish or on the minute | `error` | `adapter`, `connection`, `topic` |
 | A background command that `stop()` cut short | `warn` | the failed command's fields, plus `code` |
 | `stop()` or `unsubscribe()` kept a consumer | `warn` | `adapter`, `connection`, `topic`, `group`, `consumer`, `reason` |
@@ -137,8 +160,10 @@ Every log carries `adapter: 'queue'`. `connection` is `commands` or `blocking`, 
 | `stopTimeoutMs` | `10000` | How long `stop()` and `unsubscribe()` wait for handlers, consumer removal, and `QUIT`. A handler still running is no longer waited for. It keeps running until the process exits, and its entry is not acked, so another consumer delivers it again after `visibilityMs`. So a stop shorter than `visibilityMs` is safe. |
 | `startTimeoutMs` | unset | Unset, `start()` waits for Redis. Set it under an orchestrator, so `start()` rejects with `StartTimeout` and the process restarts. |
 | `keyPrefix` | `'hexok:queue:'` | Each topic is the stream `<keyPrefix><topic>`. `maintain()` scans this prefix. |
+| `delayedPrefix` | `'hexok:queue-delayed:'` | Each topic's delayed entries are the sorted set `<delayedPrefix><topic>`. The default is outside `keyPrefix`, and `maintain()` skips these keys when a custom `keyPrefix` covers them. |
+| `promoteMs` | `1000` | How often each subscription moves due delayed entries into its stream. |
 | `visibilityMs` | `30000` | How long an entry stays with a consumer that stopped heartbeating. After it, `XAUTOCLAIM` delivers it again. |
-| `batch` | `10` | Entries per `XREADGROUP` and `XAUTOCLAIM`. Handlers in a batch run one at a time. |
+| `batch` | `10` | The most entries one `XREADGROUP` or `XAUTOCLAIM` asks for. A call asks for fewer when fewer slots are free. |
 | `blockMs` | `1000` | How long one `XREADGROUP` blocks before it reads again. |
 | `maxLen` | `10000` | The approximate `MAXLEN ~` cap per stream, applied on `XADD`. It keeps memory bounded. |
 | `retentionMs` | `86400000` | Entries older than this are trimmed with `XTRIM MINID`, after each publish and every minute, on the topics this instance published to. One day by default. `maintain()` does not use it. |
@@ -157,21 +182,23 @@ Unset, `start()` waits for Redis, which suits compose-style boot. Set it under a
 This is the least-privilege user for this adapter. Replace `CHANGE_ME`.
 
 ```text
-ACL SETUSER hexok-queue on >CHANGE_ME resetchannels ~hexok:queue:* -@all +xadd +xtrim +xgroup|create +xgroup|delconsumer +xgroup|destroy +xreadgroup +xack +xpending +xclaim +xautoclaim +xinfo|stream +xinfo|groups +xinfo|consumers +xrange +exists +eval +scan +time +del +info +client|setinfo
+ACL SETUSER hexok-queue on >CHANGE_ME resetchannels ~hexok:queue:* ~hexok:queue-delayed:* -@all +xadd +xtrim +zadd +xgroup|create +xgroup|delconsumer +xgroup|destroy +xreadgroup +xack +xpending +xclaim +xautoclaim +xinfo|stream +xinfo|groups +xinfo|consumers +xrange +xlen +zrangebyscore +zrem +exists +eval +scan +time +del +info +client|setinfo
 ```
 
-The key pattern follows `keyPrefix`. Scripts run with this user's rights, so the commands they send are listed too.
+The key patterns follow `keyPrefix` and `delayedPrefix`. Scripts run with this user's rights, so the commands they send are listed too.
 
 | Used by | Rules |
 | --- | --- |
-| `publish()` | `+xadd`, and `+xtrim` unless `trim` is `false` |
+| `publish()` | `+xadd`, `+zadd` with `delayMs`, and `+xtrim` unless `trim` is `false` |
+| The promote script, in every subscription | `+eval +xlen +time +zrangebyscore +xadd +zrem` |
+| The retry script, for a `{ retryInMs }` result | `+eval +xack +time +zadd` |
 | `subscribe()`, reads, and acks | `+xgroup\|create +xreadgroup +xack +xpending +xclaim +xautoclaim` |
 | Consumer removal script, in `stop()`, `unsubscribe()`, and `maintain()` | `+eval +exists +xinfo\|groups +xinfo\|consumers +xpending +xgroup\|delconsumer` |
 | The script that acks entries gone from the stream, on Redis 6.2 | `+eval +xpending +xrange +xack` |
 | `maintain()` | `+scan +xinfo\|stream +xinfo\|groups +xinfo\|consumers`, and `+xtrim` with `retentionMs` |
 | `maintain()` group and stream scripts | `+eval +exists +xinfo\|groups +xinfo\|stream +xgroup\|destroy +time +del` |
 
-A process with one role can drop the rest. `maintain()` is the only user of `+scan`, `+time`, `+del`, `+xinfo|stream`, and `+xgroup|destroy`.
+A process with one role can drop the rest. `maintain()` is the only user of `+scan`, `+del`, `+xinfo|stream`, and `+xgroup|destroy`.
 
 - `+info` is the ioredis ready check, on every connection. `+client|setinfo` is the ioredis client tag. ioredis ignores a refused `CLIENT SETINFO`, but `ACL LOG` records each refusal.
 - Redis 7.0 rejects `+client|setinfo` in `ACL SETUSER`, because it has no such subcommand. Remove that rule on 7.0.
@@ -187,6 +214,7 @@ An integration test runs this line as a real user and fails if `ACL LOG` records
 - A failed encode or `XADD` parks `{ sensitive: true }` in place of the payload. Its parked error is `queue: encode failed` or `queue: XADD failed` with the original `name` and `code`.
 - A failed encode rejects with `queue: encode failed` and the original `name` and `code`.
 - A failed `XADD` rejects with a copy of the Redis error that keeps `name`, `message`, and `code`. It drops `command`, which holds the payload. A `LifecycleError` holds no payload and is thrown as it is.
+- A failed `ZADD` for a delayed publish, and a failed retry script, are scrubbed the same way for every entry, sensitive or not, before they are thrown or logged.
 - A sensitive entry that fails to decode parks no `raw`. Its log and parked error say only `queue: decode failed`.
 - An error the handler throws is logged as thrown.
 

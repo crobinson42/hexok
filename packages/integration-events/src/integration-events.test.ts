@@ -2,6 +2,7 @@ import {
   Queue,
   type QueueDisposition,
   type QueueHandler,
+  type QueuePublishOptions,
   type QueueSubscribeOptions,
 } from '@hexok/queue';
 import { Adapter, CodedError, EventHandler } from 'hexok';
@@ -76,16 +77,27 @@ class MemoryQueue extends Adapter(Queue) {
     Array<{ group: string; handler: QueueHandler<unknown> }>
   >();
 
-  async publish(topic: string, payload: unknown): Promise<string> {
+  /** Cannot delay, so it throws on `delayMs` and on a retry result, as the port requires. */
+  async publish(
+    topic: string,
+    payload: unknown,
+    options: QueuePublishOptions = {},
+  ): Promise<string> {
+    if (options.delayMs) throw new Error('memory queue: cannot delay');
     this.published.push({ topic, payload });
     const id = `${this.published.length}-0`;
     for (const { group, handler } of this.#handlers.get(topic) ?? []) {
+      let returned: Awaited<ReturnType<QueueHandler<unknown>>>;
       try {
-        const returned = await handler({ id, topic, payload, deliveries: 1 });
-        this.deliveries.push({ topic, group, disposition: returned ?? 'ack' });
+        returned = await handler({ id, topic, payload, deliveries: 1 });
       } catch {
         this.deliveries.push({ topic, group, disposition: 'threw' });
+        continue;
       }
+      if (typeof returned === 'object') {
+        throw new Error('memory queue: cannot delay a retry');
+      }
+      this.deliveries.push({ topic, group, disposition: returned ?? 'ack' });
     }
     return id;
   }

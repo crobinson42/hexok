@@ -13,6 +13,8 @@ import { createScheduleCoordinator } from './schedule.js';
 
 /** Infrastructure every process shares. Mail and SMS are created by `createChannelDeliveryServices`. */
 export type Runtime = {
+  /** The Redis every queue and repository uses. */
+  redisUrl: string;
   logger: Logger;
   quarantine: MemoryQuarantine;
   posts: RedisPosts;
@@ -40,6 +42,7 @@ export async function createRuntime(): Promise<Runtime> {
     logger,
   });
   return {
+    redisUrl: url,
     logger,
     quarantine,
     posts: new RedisPosts({ redis }),

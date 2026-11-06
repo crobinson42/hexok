@@ -28,6 +28,10 @@ import { SavePost } from './use-cases/posts/api/command/save-post.js';
 import { UnpublishPost } from './use-cases/posts/api/command/unpublish-post.js';
 import { EmailSubscribersHandler } from './use-cases/posts/event-handlers/email-subscribers.js';
 import { EmailUnpublishedHandler } from './use-cases/posts/event-handlers/email-unpublished.js';
+import {
+  BLOG_ORGANIZATION,
+  PostPublishedWebhookHandler,
+} from './use-cases/posts/event-handlers/post-published-webhook.js';
 import { PublishDuePosts } from './use-cases/posts/scheduled/publish-due-posts.js';
 import { SubscriberReminder } from './use-cases/posts/scheduled/subscriber-reminder.js';
 import { EndSession } from './use-cases/sessions/api/command/end-session.js';
@@ -637,6 +641,40 @@ function published(emailSubscribers: boolean): PostPublishedEvent {
     emailSubscribers,
   });
 }
+
+describe('PostPublishedWebhookHandler', () => {
+  it('publishes the public event, without internal fields, under a stable eventId', async () => {
+    const published: unknown[] = [];
+    const handler = new PostPublishedWebhookHandler({
+      webhooks: {
+        publish: async (input) => {
+          published.push({
+            organizationId: input.organizationId,
+            eventId: input.eventId,
+            token: input.event.token,
+            payload: input.event.payload,
+          });
+          return 'msg_test';
+        },
+      },
+    });
+    await handler.handle(
+      new PostPublishedEvent({
+        postId: 'post-1',
+        title: 'Hello',
+        emailSubscribers: true,
+      }),
+    );
+    expect(published).toEqual([
+      {
+        organizationId: BLOG_ORGANIZATION,
+        eventId: 'post.published:post-1',
+        token: 'post.published',
+        payload: { postId: 'post-1', title: 'Hello' },
+      },
+    ]);
+  });
+});
 
 describe('EmailSubscribersHandler', () => {
   async function handlerWithOneSubscriber(): Promise<{

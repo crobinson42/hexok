@@ -12,6 +12,8 @@ Internal use cases extend `InternalUseCase`. Scheduled use cases extend `Schedul
 
 `ScheduleCoordinator` runs `subscriber-reminder` daily at `0 0 * * *` UTC, and `publish-due-posts` every minute. The worker also runs `queue.maintain` hourly at `15 * * * *` UTC. That job removes queue consumers that have been idle for an hour and own no pending entries. It does not trim. Age trim stays on the publisher. A Redis lock keeps two workers from both running the same tick. Missed ticks are not replayed. `publish-due-posts` loads every scheduled post with `publishAt` at or before now, so a missed minute is caught on the next tick.
 
+The worker sends webhooks with `@hexok/webhooks`. `PostPublishedWebhookHandler` reads `PostPublishedEvent` and publishes `PostPublishedWebhook` from `domain/events/webhook-events.ts`. That catalog is separate from `DomainEvents`, so `emailSubscribers` never reaches a customer endpoint. The `eventId` is `post.published:<postId>`, so a retried handler sends the same `webhook-id`. Endpoints live in `MemoryWebhookEndpoints`, which a product replaces with its own store. `WEBHOOK_URL` and `WEBHOOK_SECRET` register one endpoint for `post.published`. Generate a secret with `generateSecret()`. `WEBHOOKS_ALLOW_PRIVATE=1` allows plain http and private addresses, for a receiver on this machine. The hooks log each delivery and failure, and disable an endpoint that answers 410. The sender runs on its own `RedisQueue` with the `webhooks:` prefix, one hour of retention, and a 35 second `stopTimeoutMs`. The worker starts it before the domain queue and stops it after, because domain handlers publish to it.
+
 Only the worker sends mail and SMS, so only the worker reads the mail and SMS env. Mail defaults to Resend. `RESEND_API_KEY` and `FROM_EMAIL` are required. `RESEND_SANDBOX=1` rewrites recipients to `delivered@resend.dev`. `EMAIL_PROVIDER=mailgun` needs `MAILGUN_API_KEY`, `MAILGUN_DOMAIN`, and `FROM_EMAIL`. SMS defaults to the console. `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, and `TWILIO_FROM` select Twilio. Each process keeps its own `MemoryQuarantine`. The Redis queue, Resend, Mailgun, and Twilio adapters park outages there. Console SMS does not. A park in the worker is not visible to HTTP. `SENTRY_DSN` and `NEW_RELIC_LICENSE_KEY` add those loggers beside JSON lines on stdout. Vendor SDKs load only when that env is set.
 
 Source is split by layer. Use cases stay grouped by feature and by who calls them:
@@ -32,6 +34,7 @@ src/servers/
   runtime/domain-events.ts     domain queue and publisher
   runtime/schedule.ts          schedule coordinator
   runtime/channel-delivery.ts  createChannelDeliveryServices
+  runtime/webhooks.ts          webhook sender, its queue, and its hooks
   api.ts                       createApi(ports): the API use cases
   rpc/contract.ts              apiContract, shared with TypeScript clients
   rpc/app.ts                   createApiApp and callerContext
@@ -44,7 +47,7 @@ src/app/use-cases/
   context.ts
   scheduled.ts
   posts/api/command/          save, publish, unpublish
-  posts/event-handlers/       email and SMS after publish and unpublish
+  posts/event-handlers/       email and SMS after publish and unpublish, and the post.published webhook
   posts/internal/             CommitPublishedPost
   posts/scheduled/            SubscriberReminder and PublishDuePosts
   sessions/api/command/       end session

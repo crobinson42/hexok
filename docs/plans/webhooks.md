@@ -315,3 +315,21 @@ Done. `webhooks.integration.test.ts` runs a real `RedisQueue` against a local se
 Decisions: the package gains `@hexok/test-redis` and `ioredis` as dev dependencies, for `runNode` and key cleanup. Neither is a runtime dependency. The child defines the same event catalog inline, because the plan allows no fixture file.
 
 For a reviewer: the crash test depends on timing. The child kills itself 300 ms after the hook, and the parent waits up to 8 s for the redelivery. It passed five runs in a row locally on Redis 8.0.
+
+### Phase 5: example and release (2026-11-05)
+
+Done. The app-template sends a `post.published` webhook. `domain/events/webhook-events.ts` holds a public `PostPublishedWebhook` and its `WebhookEvents` catalog, apart from `DomainEvents`. `infra/webhooks/memory-webhook-endpoints.ts` is the in-memory `WebhookEndpoints`. `PostPublishedWebhookHandler` publishes from the domain event. `servers/runtime/webhooks.ts` builds the sender on its own `RedisQueue` with hooks that log. `worker.ts` starts that queue and `webhooks.start()` before the domain queue, and stops them after it. The `@hexok/webhooks` README has the guarantees, retry, configuration, errors and logs tables, queue sizing, and "What it leaves to the application". The docs infrastructure page mentions the package. The three changesets are `@hexok/queue` major, `@hexok/queue-redis` major and `@hexok/webhooks` minor (new, 0.1.0).
+
+Checked by hand as well as by tests: with the built template, the HTTP process and worker on Redis 8.0, a `posts.publish` reached a local receiver with a valid signature and the envelope `{ type: 'post.published', timestamp, data: { postId, title } }`, without `emailSubscribers`. The success hook logged, and both processes stopped cleanly on `SIGTERM`.
+
+Decisions the plan left open:
+
+- **Template env.** `WEBHOOK_URL` and `WEBHOOK_SECRET` register one endpoint, and `WEBHOOKS_ALLOW_PRIVATE=1` sets `allowPrivate` and turns off `httpsOnly` for a local receiver. The app reads these. The package does not. They are in the template README. `.env.example` is ignored by `.gitignore` (`.env.*`) and is not tracked, so it is not updated.
+- **One organization.** The blog is single-tenant, so `BLOG_ORGANIZATION = 'blog'`. The `eventId` is `post.published:<postId>`, which follows the template's email idempotency keys. A post published a second time keeps its `webhook-id`, and receivers that dedupe will drop it. The handler's comment says so.
+- **The handler depends on `Pick<Webhooks<…>, 'publish'>`**, not a new app port, to keep the template change small.
+- **`Runtime` gains `redisUrl`**, so the worker builds the webhooks queue on the same Redis without reading `REDIS_URL` twice.
+- **No skill reference.** The hexok skill indexes modelling concepts. The plan asks for no webhooks reference, so none was added.
+
+For a reviewer:
+
+- **Shutdown order in `worker.ts`:** the runtime first, so domain handlers can still publish, then the webhooks sender and its queue. The webhooks queue's `stopTimeoutMs` is 35 s, which together with the domain queue's 10 s exceeds a default 30 s Kubernetes grace period. The package README says to fit it in the grace period. The template does not change the grace period.

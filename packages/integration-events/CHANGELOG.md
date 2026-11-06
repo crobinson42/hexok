@@ -1,5 +1,12 @@
 # @hexok/integration-events
 
+## 0.2.1
+
+### Patch Changes
+
+- Updated dependencies [[`8f45f44`](https://github.com/crobinson42/hexok/commit/8f45f4450ae01cc9ac376d5ddf026cfa458be2bf)]:
+  - @hexok/queue@2.0.0
+
 ## 0.2.0
 
 ### Minor Changes

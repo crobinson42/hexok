@@ -1,5 +1,11 @@
 # @hexok/queue
 
+## 2.0.0
+
+### Major Changes
+
+- [#23](https://github.com/crobinson42/hexok/pull/23) [`8f45f44`](https://github.com/crobinson42/hexok/commit/8f45f4450ae01cc9ac376d5ddf026cfa458be2bf) Thanks [@crobinson42](https://github.com/crobinson42)! - `publish` takes `delayMs`, `subscribe` takes `concurrency`, and a handler may return `{ retryInMs, payload? }` to acknowledge the entry and publish its replacement after a delay, in one step. Only the consumer group that returned the result handles the replacement. Every adapter must honour all three or throw. An adapter that cannot delay throws on `delayMs` and on a retry result.
+
 ## 1.0.0
 
 ### Major Changes

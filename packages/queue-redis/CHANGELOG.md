@@ -1,5 +1,16 @@
 # @hexok/queue-redis
 
+## 2.0.0
+
+### Major Changes
+
+- [#23](https://github.com/crobinson42/hexok/pull/23) [`8f45f44`](https://github.com/crobinson42/hexok/commit/8f45f4450ae01cc9ac376d5ddf026cfa458be2bf) Thanks [@crobinson42](https://github.com/crobinson42)! - Supports the new `@hexok/queue` options. A delayed publish goes to the sorted set `<delayedPrefix><topic>`, due on the Redis clock, and every subscription moves due entries into its stream every `promoteMs`, at most 1,000 a run and never past 90% of `maxLen`. A `{ retryInMs }` result acks the entry and adds its replacement in one script. The replacement names its group, and every other group on the topic acks it without calling its handler. A subscription logs an error after promote runs have found the stream at its mark for a minute. `concurrency` runs that many handlers at once from a slot pool that the read loop and `XAUTOCLAIM` share, and a read or claim asks only for free slots. `XAUTOCLAIM` keeps its cursor between runs and claims again while a full batch comes back. The documented ACL line adds `~hexok:queue-delayed:*` and `+zadd +zrangebyscore +zrem +xlen`. Update the ACL user before you deploy.
+
+### Patch Changes
+
+- Updated dependencies [[`8f45f44`](https://github.com/crobinson42/hexok/commit/8f45f4450ae01cc9ac376d5ddf026cfa458be2bf)]:
+  - @hexok/queue@2.0.0
+
 ## 1.1.3
 
 ### Patch Changes

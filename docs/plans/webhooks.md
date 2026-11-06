@@ -303,3 +303,15 @@ For a reviewer:
 - **`#hook`** races the hook against a timer and builds the hook's promise so it never rejects, so a hook that throws after its timeout is not an unhandled rejection. A hook that times out keeps running in the background. Only its signal tells it to stop.
 - **Fan-out is at least once.** A crash or a failed `publish` partway through a fan-out repeats it, and the endpoints already written get a second delivery with a new `deliveryId` and the same `webhook-id`.
 - **`package-lock.json`** in phase 2 also moved two workspace versions, `hexok` 2.2.3 to 2.2.4 and `integration-events` 0.0.0 to 0.1.0, that were stale on `main`. `npm install` did it when it linked the new workspace.
+
+### Phase 4: end to end on Redis (2026-11-05)
+
+Done. `webhooks.integration.test.ts` runs a real `RedisQueue` against a local server that checks every request with `verify()`. It skips without `REDIS_URL` and throws when `CI` is set without it, as `integration-events` does.
+
+- A publish arrives with a valid signature and the `webhook-id` that `publish` resolved.
+- With `retrySchedule: [600]` and `random: () => 0.5`, the retry arrives 600 ms after the 500, plus at most `promoteMs` and `blockMs` (50 each here), with the same `webhook-id`.
+- A child worker, started with `runNode`, writes its `webhookId` and `deliveryId` from `onWebhookCall` with `writeSync`, then sends `SIGKILL` to itself 300 ms into a send that the server never answers. A second worker with `visibilityMs: 1000` reclaims the pending delivery. It runs attempt 1 again with the same `deliveryId`, and the server receives the same `webhook-id`.
+
+Decisions: the package gains `@hexok/test-redis` and `ioredis` as dev dependencies, for `runNode` and key cleanup. Neither is a runtime dependency. The child defines the same event catalog inline, because the plan allows no fixture file.
+
+For a reviewer: the crash test depends on timing. The child kills itself 300 ms after the hook, and the parent waits up to 8 s for the redelivery. It passed five runs in a row locally on Redis 8.0.

@@ -47,6 +47,8 @@
   },
   "devDependencies": {
     "@hexok/queue-redis": "^1.1.3",
+    "@hexok/test-redis": "0.0.0",
+    "ioredis": "^6",
     "zod": "^4.1.5"
   }
 }

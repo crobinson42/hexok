@@ -19,6 +19,8 @@ const statuses = {
   ChannelsRequired: 400,
   ChannelsInvalid: 400,
   SmsRequiresPhone: 400,
+  WebhookRequiresUrl: 400,
+  WebhookUrlRejected: 400,
   Unauthenticated: 401,
   SignInRequired: 401,
   InternalCallerRequired: null,

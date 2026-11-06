@@ -2,6 +2,8 @@ import { pathToFileURL } from 'node:url';
 import { EmailSubscribersHandler } from '../app/use-cases/posts/event-handlers/email-subscribers.js';
 import { EmailUnpublishedHandler } from '../app/use-cases/posts/event-handlers/email-unpublished.js';
 import { PostPublishedWebhookHandler } from '../app/use-cases/posts/event-handlers/post-published-webhook.js';
+import { SubscriberPostPublishedWebhookHandler } from '../app/use-cases/posts/event-handlers/subscriber-post-published-webhook.js';
+import { SubscriberPostUnpublishedWebhookHandler } from '../app/use-cases/posts/event-handlers/subscriber-post-unpublished-webhook.js';
 import { PublishDuePosts } from '../app/use-cases/posts/scheduled/publish-due-posts.js';
 import { SubscriberReminder } from '../app/use-cases/posts/scheduled/subscriber-reminder.js';
 import { WelcomeSubscriberHandler } from '../app/use-cases/subscribers/event-handlers/welcome-subscriber.js';
@@ -40,15 +42,24 @@ export async function main(): Promise<void> {
     logger: runtime.logger,
   };
 
+  const publisher = { webhooks: webhooks.webhooks };
   const domainQueueHandlers = [
     new EmailSubscribersHandler(senders),
     new EmailUnpublishedHandler(senders),
-    new WelcomeSubscriberHandler({ email, sms, from, logger: runtime.logger }),
-    new PostPublishedWebhookHandler({ webhooks: webhooks.webhooks }),
+    new WelcomeSubscriberHandler({
+      email,
+      sms,
+      from,
+      logger: runtime.logger,
+      ...publisher,
+    }),
+    new PostPublishedWebhookHandler(publisher),
+    new SubscriberPostPublishedWebhookHandler(publisher),
+    new SubscriberPostUnpublishedWebhookHandler(publisher),
   ];
 
   runtime.scheduleCoordinator.register(
-    new SubscriberReminder(senders).registration(),
+    new SubscriberReminder({ ...senders, ...publisher }).registration(),
   );
   runtime.scheduleCoordinator.register(
     new PublishDuePosts({

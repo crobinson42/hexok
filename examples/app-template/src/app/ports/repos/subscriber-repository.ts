@@ -5,6 +5,7 @@ export abstract class SubscriberRepository extends Port(
   'SubscriberRepository',
 ) {
   abstract getByEmail(email: string): Promise<SubscriberEntity | null>;
+  abstract getById(id: string): Promise<SubscriberEntity | null>;
   abstract list(): Promise<readonly SubscriberEntity[]>;
   abstract save(subscriber: SubscriberEntity): Promise<void>;
 }

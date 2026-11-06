@@ -3,6 +3,7 @@ import { EmailError, EmailSender } from '@hexok/email';
 import { type Logger, MemoryLogger, NoopLogger } from '@hexok/logger';
 import type { SmsMessage, SmsReceipt } from '@hexok/sms';
 import { SmsError, SmsSender } from '@hexok/sms';
+import { WebhookError } from '@hexok/webhooks';
 import { asResult, createClient } from '@ts-pf/client';
 import { FetchLink } from '@ts-pf/client-http';
 import { Adapter, CodedError, type EventInstance } from 'hexok';
@@ -14,6 +15,7 @@ import type { DomainEvents } from '../domain/events/domain-events.js';
 import { PostPublishedEvent } from '../domain/events/post-published.js';
 import { PostUnpublishedEvent } from '../domain/events/post-unpublished.js';
 import { SubscriberJoinedEvent } from '../domain/events/subscriber-joined.js';
+import { BLOG_ORGANIZATION } from '../domain/events/webhook-events.js';
 import { createApi } from '../servers/api.js';
 import { createHttpHandler } from '../servers/http/handler.js';
 import { createApiApp } from '../servers/rpc/app.js';
@@ -28,14 +30,16 @@ import { SavePost } from './use-cases/posts/api/command/save-post.js';
 import { UnpublishPost } from './use-cases/posts/api/command/unpublish-post.js';
 import { EmailSubscribersHandler } from './use-cases/posts/event-handlers/email-subscribers.js';
 import { EmailUnpublishedHandler } from './use-cases/posts/event-handlers/email-unpublished.js';
-import {
-  BLOG_ORGANIZATION,
-  PostPublishedWebhookHandler,
-} from './use-cases/posts/event-handlers/post-published-webhook.js';
+import { PostPublishedWebhookHandler } from './use-cases/posts/event-handlers/post-published-webhook.js';
+import { SubscriberPostPublishedWebhookHandler } from './use-cases/posts/event-handlers/subscriber-post-published-webhook.js';
+import { SubscriberPostUnpublishedWebhookHandler } from './use-cases/posts/event-handlers/subscriber-post-unpublished-webhook.js';
 import { PublishDuePosts } from './use-cases/posts/scheduled/publish-due-posts.js';
 import { SubscriberReminder } from './use-cases/posts/scheduled/subscriber-reminder.js';
 import { EndSession } from './use-cases/sessions/api/command/end-session.js';
-import { SubscribeToPosts } from './use-cases/subscribers/api/command/subscribe.js';
+import {
+  type CheckWebhookUrl,
+  SubscribeToPosts,
+} from './use-cases/subscribers/api/command/subscribe.js';
 import { WelcomeSubscriberHandler } from './use-cases/subscribers/event-handlers/welcome-subscriber.js';
 
 const from = { email: 'blog@localhost', name: 'Blog' };
@@ -87,6 +91,14 @@ class InMemorySubscribers extends Adapter(SubscriberRepository) {
     return props === undefined
       ? null
       : SubscriberEntity.restore(structuredClone(props));
+  }
+
+  override async getById(id: string): Promise<SubscriberEntity | null> {
+    for (const props of this.#byEmail.values()) {
+      if (props.id === id)
+        return SubscriberEntity.restore(structuredClone(props));
+    }
+    return null;
   }
 
   override async list(): Promise<readonly SubscriberEntity[]> {
@@ -178,6 +190,44 @@ function senders(
   return { email, sms, from, logger };
 }
 
+const acceptWebhookUrl: CheckWebhookUrl = async () => {};
+
+const silentWebhooks = {
+  publish: async () => 'msg_test',
+};
+
+function recordingWebhooks() {
+  const published: Array<{
+    organizationId: string;
+    eventId: string;
+    endpointIds?: readonly string[];
+    token: string;
+    payload: unknown;
+  }> = [];
+  return {
+    published,
+    webhooks: {
+      async publish(input: {
+        organizationId: string;
+        eventId: string;
+        endpointIds?: readonly string[];
+        event: { token: string; payload: unknown };
+      }) {
+        published.push({
+          organizationId: input.organizationId,
+          eventId: input.eventId,
+          ...(input.endpointIds === undefined
+            ? {}
+            : { endpointIds: input.endpointIds }),
+          token: input.event.token,
+          payload: input.event.payload,
+        });
+        return 'msg_test';
+      },
+    },
+  };
+}
+
 function publishedEvent(
   event: EventInstance<typeof DomainEvents> | undefined,
 ): PostPublishedEvent {
@@ -195,7 +245,9 @@ async function expectDomainCode(
     | 'SignInRequired'
     | 'SmsRequiresPhone'
     | 'ChannelsRequired'
-    | 'ChannelsInvalid',
+    | 'ChannelsInvalid'
+    | 'WebhookRequiresUrl'
+    | 'WebhookUrlRejected',
   run: () => Promise<unknown>,
 ): Promise<void> {
   try {
@@ -225,6 +277,7 @@ function http() {
     subscribers: new InMemorySubscribers(),
     ...publishers,
     authenticator,
+    checkWebhookUrl: acceptWebhookUrl,
   });
   const handle = createHttpHandler(createApiApp(api), { authenticator });
   const fetch: typeof globalThis.fetch = (input, init) =>
@@ -580,6 +633,7 @@ describe('SubscribeToPosts', () => {
     const subscribe = new SubscribeToPosts({
       subscribers,
       domainEvents: publishers.domainEvents,
+      checkWebhookUrl: acceptWebhookUrl,
     });
     const first = await subscribe.execute(ctx, { email: 'ada@ex.com' });
     const second = await subscribe.execute(ctx, { email: 'ada@ex.com' });
@@ -605,6 +659,7 @@ describe('SubscribeToPosts', () => {
     const subscribe = new SubscribeToPosts({
       subscribers,
       domainEvents: recordingPublishers().domainEvents,
+      checkWebhookUrl: acceptWebhookUrl,
     });
     const both = await subscribe.execute(ctx, {
       email: 'ada@ex.com',
@@ -631,6 +686,66 @@ describe('SubscribeToPosts', () => {
         channels: ['email', 'email'],
       }),
     );
+  });
+
+  it('stores a webhook subscriber without email or sms delivery', async () => {
+    const subscribers = new InMemorySubscribers();
+    const subscribe = new SubscribeToPosts({
+      subscribers,
+      domainEvents: recordingPublishers().domainEvents,
+      checkWebhookUrl: acceptWebhookUrl,
+    });
+    const subscriber = await subscribe.execute(ctx, {
+      email: 'ada@ex.com',
+      channels: ['webhook'],
+      url: ' https://ada.example/hooks ',
+    });
+    expect(subscriber.props.channels).toEqual(['webhook']);
+    expect(subscriber.props.phone).toBeUndefined();
+    expect(subscriber.props.webhookUrl).toBe('https://ada.example/hooks');
+    expect(subscriber.props.webhookSecret?.startsWith('whsec_')).toBe(true);
+    const again = await subscribe.execute(ctx, {
+      email: 'ada@ex.com',
+      channels: ['email'],
+      url: 'https://other.example/hooks',
+    });
+    expect(again.props.id).toBe(subscriber.props.id);
+    expect(again.props.channels).toEqual(['webhook']);
+    expect(again.props.webhookUrl).toBe('https://ada.example/hooks');
+    expect(again.props.webhookSecret).toBe(subscriber.props.webhookSecret);
+  });
+
+  it('rejects a webhook without a url, and an unsafe url', async () => {
+    const subscribers = new InMemorySubscribers();
+    const subscribe = new SubscribeToPosts({
+      subscribers,
+      domainEvents: recordingPublishers().domainEvents,
+      checkWebhookUrl: async () => {
+        throw WebhookError.UnsafeUrl({ reason: 'blocked' });
+      },
+    });
+    await expectDomainCode('WebhookRequiresUrl', () =>
+      subscribe.execute(ctx, {
+        email: 'ada@ex.com',
+        channels: ['webhook'],
+      }),
+    );
+    try {
+      await subscribe.execute(ctx, {
+        email: 'bea@ex.com',
+        channels: ['webhook'],
+        url: 'http://127.0.0.1/hooks',
+      });
+      expect.fail('expected WebhookUrlRejected');
+    } catch (error) {
+      expect(DomainError.is(error) && error.code === 'WebhookUrlRejected').toBe(
+        true,
+      );
+      if (!DomainError.is(error) || error.code !== 'WebhookUrlRejected') {
+        throw error;
+      }
+      expect(error.data.reason).toBe('blocked');
+    }
   });
 });
 
@@ -670,6 +785,43 @@ describe('PostPublishedWebhookHandler', () => {
         organizationId: BLOG_ORGANIZATION,
         eventId: 'post.published:post-1',
         token: 'post.published',
+        payload: { postId: 'post-1', title: 'Hello' },
+      },
+    ]);
+  });
+});
+
+describe('SubscriberPostPublishedWebhookHandler', () => {
+  it('publishes once when emailSubscribers is true, and nothing when it is false', async () => {
+    const recorded = recordingWebhooks();
+    const handler = new SubscriberPostPublishedWebhookHandler({
+      webhooks: recorded.webhooks,
+    });
+    await handler.handle(published(false));
+    expect(recorded.published).toEqual([]);
+    await handler.handle(published(true));
+    expect(recorded.published).toEqual([
+      {
+        organizationId: BLOG_ORGANIZATION,
+        eventId: 'subscriber.post.published:post-1',
+        token: 'subscriber.post.published',
+        payload: { postId: 'post-1', title: 'Hello' },
+      },
+    ]);
+  });
+});
+
+describe('SubscriberPostUnpublishedWebhookHandler', () => {
+  it('publishes one public event for the removed post', async () => {
+    const recorded = recordingWebhooks();
+    await new SubscriberPostUnpublishedWebhookHandler({
+      webhooks: recorded.webhooks,
+    }).handle(new PostUnpublishedEvent({ postId: 'post-1', title: 'Hello' }));
+    expect(recorded.published).toEqual([
+      {
+        organizationId: BLOG_ORGANIZATION,
+        eventId: 'subscriber.post.unpublished:post-1',
+        token: 'subscriber.post.unpublished',
         payload: { postId: 'post-1', title: 'Hello' },
       },
     ]);
@@ -943,14 +1095,24 @@ describe('SubscriberReminder', () => {
       }),
     );
     const email = new RecordingEmail();
+    const recorded = recordingWebhooks();
 
     const sent = await new SubscriberReminder({
       subscribers,
       ...senders(email),
+      webhooks: recorded.webhooks,
     }).execute(internalCallCtx());
 
     expect(sent).toBe(1);
     const day = new Date().toISOString().slice(0, 10);
+    expect(recorded.published).toEqual([
+      {
+        organizationId: BLOG_ORGANIZATION,
+        eventId: `subscriber.reminder:${day}`,
+        token: 'subscriber.reminder',
+        payload: { day },
+      },
+    ]);
     expect(email.sent).toEqual([
       {
         to: ['ada@ex.com'],
@@ -972,14 +1134,17 @@ describe('SubscriberReminder', () => {
       }),
     );
     const email = new RecordingEmail();
+    const recorded = recordingWebhooks();
     const controller = new AbortController();
     controller.abort();
     const sent = await new SubscriberReminder({
       subscribers,
       ...senders(email),
+      webhooks: recorded.webhooks,
     }).execute(internalCallCtx(controller.signal));
     expect(sent).toBe(0);
     expect(email.sent).toEqual([]);
+    expect(recorded.published).toEqual([]);
   });
 
   it('registers a daily UTC job that runs the reminder', async () => {
@@ -995,6 +1160,7 @@ describe('SubscriberReminder', () => {
     const reminder = new SubscriberReminder({
       subscribers,
       ...senders(email),
+      webhooks: silentWebhooks,
     });
     const job = reminder.registration();
 
@@ -1040,7 +1206,10 @@ describe('WelcomeSubscriberHandler', () => {
   it('sends one welcome email to the new subscriber', async () => {
     const email = new RecordingEmail();
     const sms = new RecordingSms();
-    const handler = new WelcomeSubscriberHandler(senders(email, sms));
+    const handler = new WelcomeSubscriberHandler({
+      ...senders(email, sms),
+      webhooks: silentWebhooks,
+    });
     await handler.handle(
       new SubscriberJoinedEvent({
         subscriberId: 'sub-1',
@@ -1063,7 +1232,10 @@ describe('WelcomeSubscriberHandler', () => {
   it('texts a welcome when sms is the only channel', async () => {
     const email = new RecordingEmail();
     const sms = new RecordingSms();
-    const handler = new WelcomeSubscriberHandler(senders(email, sms));
+    const handler = new WelcomeSubscriberHandler({
+      ...senders(email, sms),
+      webhooks: silentWebhooks,
+    });
     await handler.handle(
       new SubscriberJoinedEvent({
         subscriberId: 'sub-1',
@@ -1075,6 +1247,29 @@ describe('WelcomeSubscriberHandler', () => {
     expect(email.sent).toEqual([]);
     expect(sms.sent).toEqual([
       { to: '+15550001111', body: 'You are subscribed.' },
+    ]);
+  });
+
+  it('publishes a welcome to that subscriber when webhook is a channel', async () => {
+    const recorded = recordingWebhooks();
+    await new WelcomeSubscriberHandler({
+      ...senders(new RecordingEmail()),
+      webhooks: recorded.webhooks,
+    }).handle(
+      new SubscriberJoinedEvent({
+        subscriberId: 'sub-1',
+        email: 'ada@ex.com',
+        channels: ['webhook'],
+      }),
+    );
+    expect(recorded.published).toEqual([
+      {
+        organizationId: BLOG_ORGANIZATION,
+        eventId: 'subscriber.welcome:sub-1',
+        endpointIds: ['sub-1'],
+        token: 'subscriber.welcome',
+        payload: { subscriberId: 'sub-1' },
+      },
     ]);
   });
 });

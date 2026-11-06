@@ -1,6 +1,6 @@
 {
   "name": "@hexok/integration-events",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Versioned events that cross product and service boundaries, over the hexok queue port.",
   "type": "module",
   "license": "MIT",
@@ -43,7 +43,7 @@
   },
   "dependencies": {
     "@hexok/queue": "^1.0.0",
-    "hexok": "^2.2.4"
+    "hexok": "^2.2.5"
   },
   "devDependencies": {
     "@hexok/queue-redis": "^1.1.3",

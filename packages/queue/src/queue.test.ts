@@ -7,6 +7,7 @@ import {
   Queue,
   type QueueHandler,
   type QueueMessage,
+  type QueuePublishOptions,
   type QueueSubscribeOptions,
   retryExhausted,
 } from './queue.js';
@@ -15,7 +16,13 @@ class MemoryQueue extends Adapter(Queue) {
   readonly published: Array<{ topic: string; payload: unknown }> = [];
   readonly #handlers = new Map<string, QueueHandler<unknown>>();
 
-  async publish(topic: string, payload: unknown): Promise<string> {
+  /** Cannot delay, so it throws on `delayMs` and on a retry result, as the port requires. */
+  async publish(
+    topic: string,
+    payload: unknown,
+    options: QueuePublishOptions = {},
+  ): Promise<string> {
+    if (options.delayMs) throw new Error('memory queue: cannot delay');
     this.published.push({ topic, payload });
     const id = String(this.published.length);
     const handler = this.#handlers.get(topic);
@@ -26,7 +33,10 @@ class MemoryQueue extends Adapter(Queue) {
         payload,
         deliveries: 1,
       };
-      await handler(message);
+      const returned = await handler(message);
+      if (typeof returned === 'object') {
+        throw new Error('memory queue: cannot delay a retry');
+      }
     }
     return id;
   }
@@ -93,5 +103,26 @@ describe('Queue', () => {
     });
     await queue.publish('jobs', { id: 'a' });
     expect(seen).toEqual(['1']);
+  });
+});
+
+describe('Queue options', () => {
+  it('types a retry result by the payload, and an adapter that cannot delay throws', async () => {
+    const queue = new MemoryQueue();
+    await queue.subscribe<{ attempt: number }>('jobs', {
+      consumerGroup: 'billing',
+      maxDeliveries: 'unlimited',
+      concurrency: 4,
+      handler: async (message) => ({
+        retryInMs: 1000,
+        payload: { attempt: message.payload.attempt + 1 },
+      }),
+    });
+    await expect(
+      queue.publish('jobs', { attempt: 1 }, { delayMs: 5 }),
+    ).rejects.toThrow('memory queue: cannot delay');
+    await expect(queue.publish('jobs', { attempt: 1 })).rejects.toThrow(
+      'memory queue: cannot delay a retry',
+    );
   });
 });

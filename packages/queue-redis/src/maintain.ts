@@ -70,6 +70,8 @@ export type MaintainRun = <T>(
 interface MaintainInput {
   readonly run: MaintainRun;
   readonly keyPrefix: string;
+  /** Delayed sets are not streams. A scan skips them when `keyPrefix` also covers them. */
+  readonly delayedPrefix: string;
   readonly options: RedisQueueMaintainOptions;
   readonly logger: LogSink;
 }
@@ -131,7 +133,9 @@ export async function maintainStreams(
   const now = Date.now();
   const keys = input.options.topics
     ? input.options.topics.map((topic) => `${input.keyPrefix}${topic}`)
-    : await scanKeys(input.run, input.keyPrefix);
+    : (await scanKeys(input.run, input.keyPrefix)).filter(
+        (key) => !key.startsWith(input.delayedPrefix),
+      );
   for (const key of keys) {
     await processKey(input, report, key, now);
   }

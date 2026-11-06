@@ -1,12 +1,14 @@
 import { pathToFileURL } from 'node:url';
 import { EmailSubscribersHandler } from '../app/use-cases/posts/event-handlers/email-subscribers.js';
 import { EmailUnpublishedHandler } from '../app/use-cases/posts/event-handlers/email-unpublished.js';
+import { PostPublishedWebhookHandler } from '../app/use-cases/posts/event-handlers/post-published-webhook.js';
 import { PublishDuePosts } from '../app/use-cases/posts/scheduled/publish-due-posts.js';
 import { SubscriberReminder } from '../app/use-cases/posts/scheduled/subscriber-reminder.js';
 import { WelcomeSubscriberHandler } from '../app/use-cases/subscribers/event-handlers/welcome-subscriber.js';
 import { createChannelDeliveryServices } from './runtime/channel-delivery.js';
 import { createPublishers } from './runtime/domain-events.js';
 import { createRuntime } from './runtime/index.js';
+import { createWebhooks } from './runtime/webhooks.js';
 import { onShutdown } from './utils/shutdown.js';
 import {
   assertDistinctHandlerGroups,
@@ -15,9 +17,16 @@ import {
 
 export async function main(): Promise<void> {
   const runtime = await createRuntime();
+  const webhooks = createWebhooks(runtime);
   // Registered before start, so a signal during startup still stops what has started.
-  onShutdown(runtime.logger, () => runtime.stop());
+  // Domain handlers publish webhooks, so the webhooks queue stops after them.
+  onShutdown(runtime.logger, async () => {
+    await runtime.stop();
+    await webhooks.stop();
+  });
   /** Adapters connect in `start`. `register` and `subscribe` need that connection. Scheduled jobs publish to the queue, so the queue starts first and stops last. */
+  await webhooks.queue.start();
+  await webhooks.webhooks.start();
   await runtime.domainEventsQueue.start();
   await runtime.scheduleCoordinator.start();
 
@@ -35,6 +44,7 @@ export async function main(): Promise<void> {
     new EmailSubscribersHandler(senders),
     new EmailUnpublishedHandler(senders),
     new WelcomeSubscriberHandler({ email, sms, from, logger: runtime.logger }),
+    new PostPublishedWebhookHandler({ webhooks: webhooks.webhooks }),
   ];
 
   runtime.scheduleCoordinator.register(

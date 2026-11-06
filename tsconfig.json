@@ -18,6 +18,7 @@
     { "path": "packages/email-mailgun" },
     { "path": "packages/sms" },
     { "path": "packages/sms-twilio" },
+    { "path": "packages/webhooks" },
     { "path": "packages/schedule-coordinator" },
     { "path": "packages/schedule-coordinator-redis" },
     { "path": "examples/extend" },

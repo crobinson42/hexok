@@ -46,10 +46,15 @@ export class IntegrationPublisher<C extends ContractDefinition> {
    * earlier version in the topic, newest first. Every copy has the same `id`,
    * `time`, and `subject`. Resolves the `id`.
    *
+   * Each payload is validated in its JSON form, the form the queue carries,
+   * and that JSON form is what is sent, so a consumer parsing it with the
+   * same schema accepts it. A `Date` arrives as a string, so a `z.date()`
+   * field fails here and not at every consumer.
+   *
    * Throws when the message is not in the contract, or when it has a newer
    * version. Throws `CodedError` `VALIDATION` before publishing anything when
-   * a payload or a downgraded payload fails its schema. A queue failure
-   * rejects, and copies already published stay published.
+   * a payload or a downgraded payload is not JSON or fails its schema. A
+   * queue failure rejects, and copies already published stay published.
    */
   async publish(
     event: ContractEvent<C>,
@@ -89,7 +94,10 @@ export class IntegrationPublisher<C extends ContractDefinition> {
   }
 }
 
-/** The payload at each version, newest first. Each payload is validated before it is downgraded. */
+/**
+ * The payload at each version, newest first. Each version's JSON copy is
+ * validated and sent. The schema's output is the input to the next downgrade.
+ */
 function chain(
   newest: MessageConstructor,
   payload: unknown,
@@ -98,20 +106,33 @@ function chain(
   let message: MessageConstructor | undefined = newest;
   let current = payload;
   while (message !== undefined) {
-    const parsed = validate(message.schema, current);
+    const json = toJson(message, current);
+    const parsed = validate(message.schema, json);
     if (!parsed.ok) {
       throw validationError(
-        `integration-events: "${message.token}" v${message.version} validation failed`,
+        `integration-events: ${describe(message)} validation failed`,
         parsed.issues,
       );
     }
-    versions.push({ message, payload: current });
+    versions.push({ message, payload: json });
     const downgrade: Downgrade | undefined = message.downgrade;
     if (downgrade === undefined) break;
-    current = downgrade.map(current as never);
+    current = downgrade.map(parsed.value as never);
     message = downgrade.to;
   }
   return versions;
+}
+
+/** The payload after a JSON round trip. Throws `VALIDATION` when it has no JSON form, such as a `bigint` or a cycle. */
+function toJson(message: MessageConstructor, payload: unknown): unknown {
+  try {
+    return JSON.parse(JSON.stringify(payload));
+  } catch (error) {
+    const reason = error instanceof Error ? `: ${error.message}` : '';
+    throw validationError(
+      `integration-events: ${describe(message)} payload is not JSON${reason}`,
+    );
+  }
 }
 
 function describe(event: object): string {

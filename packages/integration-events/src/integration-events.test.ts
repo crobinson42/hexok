@@ -64,6 +64,13 @@ class MemoryQueue extends Adapter(Queue) {
     topic: string;
     options: QueueSubscribeOptions<unknown>;
   }> = [];
+  readonly unsubscribed: Array<{ topic: string; consumerGroup: string }> = [];
+  /** The 1-based `subscribe` call that rejects with `subscribeError`. */
+  failSubscribeAt: number | undefined;
+  readonly subscribeError = new Error('subscribe failed');
+  /** When set, `unsubscribe` rejects with it. */
+  unsubscribeError: Error | undefined;
+  #subscribeCalls = 0;
   readonly #handlers = new Map<
     string,
     Array<{ group: string; handler: QueueHandler<unknown> }>
@@ -87,6 +94,10 @@ class MemoryQueue extends Adapter(Queue) {
     topic: string,
     options: QueueSubscribeOptions<T>,
   ): Promise<void> {
+    this.#subscribeCalls += 1;
+    if (this.#subscribeCalls === this.failSubscribeAt) {
+      throw this.subscribeError;
+    }
     const subscriptions = this.#handlers.get(topic) ?? [];
     subscriptions.push({
       group: options.consumerGroup,
@@ -99,7 +110,18 @@ class MemoryQueue extends Adapter(Queue) {
     });
   }
 
-  async unsubscribe(): Promise<void> {}
+  async unsubscribe(
+    topic: string,
+    options: { readonly consumerGroup: string },
+  ): Promise<void> {
+    this.unsubscribed.push({ topic, consumerGroup: options.consumerGroup });
+    if (this.unsubscribeError) throw this.unsubscribeError;
+    const subscriptions = this.#handlers.get(topic) ?? [];
+    this.#handlers.set(
+      topic,
+      subscriptions.filter((s) => s.group !== options.consumerGroup),
+    );
+  }
 }
 
 const time = new Date('2026-11-05T12:00:00.000Z');
@@ -227,6 +249,107 @@ describe('IntegrationPublisher', () => {
       message: 'integration-events: "n" v1 validation failed',
     });
     expect(queue.published).toEqual([]);
+  });
+
+  describe('sends the JSON form it validates', () => {
+    class Plan extends Message(
+      'plan',
+      1,
+      z.object({ id: z.string(), tier: z.string() }),
+    ) {}
+    const mapped: unknown[] = [];
+    class PlanV2 extends Message(
+      'plan',
+      2,
+      z.object({ id: z.string(), tier: z.string().default('free') }),
+      {
+        downgrade: {
+          to: Plan,
+          map: (v2) => {
+            mapped.push(v2);
+            return { id: v2.id, tier: v2.tier };
+          },
+        },
+      },
+    ) {}
+    class Big extends Message('big', 1, z.object({ cents: z.number() })) {}
+    class BigV2 extends Message('big', 2, z.object({ cents: z.bigint() }), {
+      downgrade: { to: Big, map: (v2) => ({ cents: Number(v2.cents) }) },
+    }) {}
+    class Scheduled extends Message(
+      'scheduled',
+      1,
+      z.object({ at: z.date() }),
+    ) {}
+    class Charged extends Message(
+      'charged',
+      1,
+      z.object({ cents: z.string().transform(Number) }),
+    ) {}
+    class Plans extends Contract('plans', {
+      plans: [Plan, PlanV2],
+      big: [Big, BigV2],
+      scheduled: [Scheduled],
+      charged: [Charged],
+    }) {}
+
+    let plans: IntegrationPublisher<typeof Plans>;
+
+    beforeEach(() => {
+      mapped.length = 0;
+      plans = new IntegrationPublisher(Plans, { queue });
+    });
+
+    it('sends the input, so a consumer with the same schema accepts it', async () => {
+      await plans.publish(new Charged({ cents: '500' } as never));
+
+      const data = (
+        queue.published[0]?.payload as { data?: unknown } | undefined
+      )?.data;
+      expect(data).toEqual({ cents: '500' });
+      expect(Charged.parse(data).payload).toEqual({ cents: 500 });
+    });
+
+    it('downgrades the schema output', async () => {
+      await plans.publish(new PlanV2({ id: 'p_1' } as never));
+
+      expect(mapped).toEqual([{ id: 'p_1', tier: 'free' }]);
+      expect(queue.published[0]?.payload).toHaveProperty('data', {
+        id: 'p_1',
+      });
+      expect(queue.published[1]?.payload).toHaveProperty('data', {
+        id: 'p_1',
+        tier: 'free',
+      });
+    });
+
+    it('rejects a Date, which arrives as a string', async () => {
+      const error = await plans
+        .publish(new Scheduled({ at: time }))
+        .catch((caught: unknown) => caught);
+
+      expect(error).toBeInstanceOf(CodedError);
+      expect(error).toMatchObject({
+        code: 'VALIDATION',
+        message: 'integration-events: "scheduled" v1 validation failed',
+      });
+      expect(queue.published).toEqual([]);
+    });
+
+    it('rejects a payload that is not JSON before publishing any version', async () => {
+      const error = await plans
+        .publish(new BigV2({ cents: 500n }))
+        .catch((caught: unknown) => caught);
+
+      expect(error).toBeInstanceOf(CodedError);
+      expect(error).toMatchObject({
+        code: 'VALIDATION',
+        message: expect.stringContaining(
+          'integration-events: "big" v2 payload is not JSON: ',
+        ),
+      });
+      expect(queue.published).toEqual([]);
+    });
   });
 });
 
@@ -406,10 +529,29 @@ describe('IntegrationSubscriber', () => {
           name: 'Error',
           message: 'integration-events: entry is not an integration event',
         },
+        attempts: 1,
         occurredAt: expect.any(Date),
         context: { group: 'crm:sync-invoice' },
       },
     ]);
+  });
+
+  it('parks the delivery count as attempts', async () => {
+    await subscriber.subscribe({
+      maxDeliveries: 5,
+      handlers: [new SyncInvoice()],
+    });
+    const handler = queue.subscribed[0]?.options.handler;
+
+    await expect(
+      handler?.({
+        id: '7-0',
+        topic: 'billing.invoices',
+        payload: null,
+        deliveries: 3,
+      }),
+    ).resolves.toBe('drop');
+    expect(parked[0]?.attempts).toBe(3);
   });
 
   it('parks and drops data its schema rejects', async () => {
@@ -436,7 +578,31 @@ describe('IntegrationSubscriber', () => {
     });
   });
 
-  it('logs a failed park and still drops', async () => {
+  it('logs and drops with no quarantine sink', async () => {
+    const unparked = new IntegrationSubscriber(Billing, {
+      queue,
+      service: 'crm',
+      logger: {
+        error: (message, fields) =>
+          logged.push({
+            message: message instanceof Error ? message.message : message,
+            fields,
+          }),
+      },
+    });
+    await unparked.subscribe({
+      maxDeliveries: 1,
+      handlers: [new SyncInvoice()],
+    });
+    await queue.publish('billing.invoices', null);
+
+    expect(queue.deliveries[0]?.disposition).toBe('drop');
+    expect(logged.map((entry) => entry.message)).toEqual([
+      'integration-events: entry is not an integration event',
+    ]);
+  });
+
+  it('logs a failed park and throws so the queue retries', async () => {
     const failing = new IntegrationSubscriber(Billing, {
       queue,
       service: 'crm',
@@ -457,13 +623,44 @@ describe('IntegrationSubscriber', () => {
       maxDeliveries: 1,
       handlers: [new SyncInvoice()],
     });
-    await queue.publish('billing.invoices', null);
+    const handler = queue.subscribed[0]?.options.handler;
 
-    expect(queue.deliveries[0]?.disposition).toBe('drop');
+    await expect(
+      handler?.({
+        id: '1-0',
+        topic: 'billing.invoices',
+        payload: null,
+        deliveries: 1,
+      }),
+    ).rejects.toThrow('quarantine down');
     expect(logged.map((entry) => entry.message)).toEqual([
       'integration-events: entry is not an integration event',
       'quarantine down',
     ]);
+  });
+
+  it('throws an Error when the park rejects with a non-Error', async () => {
+    const failing = new IntegrationSubscriber(Billing, {
+      queue,
+      service: 'crm',
+      quarantine: {
+        park: () => Promise.reject('down'),
+      },
+    });
+    await failing.subscribe({
+      maxDeliveries: 1,
+      handlers: [new SyncInvoice()],
+    });
+    const handler = queue.subscribed[0]?.options.handler;
+
+    await expect(
+      handler?.({
+        id: '1-0',
+        topic: 'billing.invoices',
+        payload: null,
+        deliveries: 1,
+      }),
+    ).rejects.toThrow(new Error('integration-events: park failed'));
   });
 
   it('lets a handler throw so the queue retries', async () => {
@@ -518,6 +715,72 @@ describe('IntegrationSubscriber', () => {
     await expect(
       subscriber.subscribe({ maxDeliveries: 1, handlers: [new Twin()] }),
     ).rejects.toThrow(message);
+  });
+
+  it('rejects one of two concurrent subscribes of the same handler', async () => {
+    const results = await Promise.allSettled([
+      subscriber.subscribe({ maxDeliveries: 1, handlers: [new SyncInvoice()] }),
+      subscriber.subscribe({ maxDeliveries: 1, handlers: [new SyncInvoice()] }),
+    ]);
+
+    const rejected = results.filter((r) => r.status === 'rejected');
+    expect(rejected).toHaveLength(1);
+    expect(rejected[0]?.reason).toEqual(
+      new Error(
+        'integration-events: group "crm:sync-invoice" on topic "billing.invoices" is already subscribed. Give each handler its own token',
+      ),
+    );
+    expect(
+      queue.subscribed.filter(
+        (s) => s.options.consumerGroup === 'crm:sync-invoice',
+      ),
+    ).toHaveLength(1);
+  });
+
+  it('unsubscribes what it subscribed when a queue subscribe fails', async () => {
+    const handlers = [
+      new SyncInvoice(),
+      new CustomerHandler(),
+      new FailingHandler(),
+    ];
+    queue.failSubscribeAt = 2;
+
+    await expect(
+      subscriber.subscribe({ maxDeliveries: 1, handlers }),
+    ).rejects.toBe(queue.subscribeError);
+    expect(queue.unsubscribed).toEqual([
+      { topic: 'billing.invoices', consumerGroup: 'crm:sync-invoice' },
+    ]);
+
+    await expect(
+      subscriber.subscribe({ maxDeliveries: 1, handlers }),
+    ).resolves.toHaveLength(3);
+  });
+
+  it('keeps a group reserved when its rollback unsubscribe fails', async () => {
+    const handlers = [new SyncInvoice(), new CustomerHandler()];
+    queue.failSubscribeAt = 2;
+    queue.unsubscribeError = new Error('unsubscribe failed');
+
+    await expect(
+      subscriber.subscribe({ maxDeliveries: 1, handlers }),
+    ).rejects.toBe(queue.subscribeError);
+    expect(logged).toContainEqual({
+      message: 'unsubscribe failed',
+      fields: { topic: 'billing.invoices', group: 'crm:sync-invoice' },
+    });
+
+    await expect(
+      subscriber.subscribe({ maxDeliveries: 1, handlers: [new SyncInvoice()] }),
+    ).rejects.toThrow(
+      '"crm:sync-invoice" on topic "billing.invoices" is already subscribed',
+    );
+    await expect(
+      subscriber.subscribe({
+        maxDeliveries: 1,
+        handlers: [new CustomerHandler()],
+      }),
+    ).resolves.toHaveLength(1);
   });
 
   it('rejects a bad service name', () => {

@@ -24,6 +24,8 @@ describe('toRpcError', () => {
     [DomainError.ChannelsRequired(), 400],
     [DomainError.ChannelsInvalid(), 400],
     [DomainError.SmsRequiresPhone(), 400],
+    [DomainError.WebhookRequiresUrl(), 400],
+    [DomainError.WebhookUrlRejected({ reason: 'blocked' }), 400],
   ])('keeps the code, message, and data of %s', (error, status) => {
     const rpc = toRpcError(error);
     if (!isPFError(rpc)) throw new Error('expected PFError');

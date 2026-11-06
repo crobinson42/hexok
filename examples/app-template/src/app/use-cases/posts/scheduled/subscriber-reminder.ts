@@ -4,6 +4,11 @@ import type { Logger } from '@hexok/logger';
 import { SmsError, type SmsSender } from '@hexok/sms';
 import type { UseCase } from 'hexok';
 import type { SubscriberEntity } from '../../../../domain/entities/subscriber.js';
+import {
+  BLOG_ORGANIZATION,
+  SubscriberReminderWebhook,
+} from '../../../../domain/events/webhook-events.js';
+import type { WebhookPublisher } from '../../../ports/events/webhook-publisher.js';
 import type { SubscriberRepository } from '../../../ports/repos/subscriber-repository.js';
 import type { InternalUseCase } from '../../context.js';
 import { ScheduledUseCase } from '../../scheduled.js';
@@ -32,13 +37,21 @@ export class SubscriberReminder extends ScheduledUseCase(
       sms: SmsSender;
       from: EmailAddress;
       logger: Logger;
+      webhooks: WebhookPublisher;
     },
   ) {
     super();
   }
 
   async execute(ctx: UseCase.Ctx<typeof InternalUseCase>): Promise<number> {
+    if (ctx.signal?.aborted) return 0;
     const day = new Date().toISOString().slice(0, 10);
+    // One publish. The endpoint port fans out. A throw fails the tick, and a missed day is not replayed.
+    await this.deps.webhooks.publish({
+      organizationId: BLOG_ORGANIZATION,
+      eventId: `${SubscriberReminderWebhook.token}:${day}`,
+      event: new SubscriberReminderWebhook({ day }),
+    });
     const listed = await this.deps.subscribers.list();
     let delivered = 0;
     for (const subscriber of listed) {

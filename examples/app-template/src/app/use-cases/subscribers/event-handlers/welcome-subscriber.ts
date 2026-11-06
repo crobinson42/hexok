@@ -4,6 +4,11 @@ import type { Logger } from '@hexok/logger';
 import { SmsError, type SmsSender } from '@hexok/sms';
 import { EventHandler } from 'hexok';
 import { SubscriberJoinedEvent } from '../../../../domain/events/subscriber-joined.js';
+import {
+  BLOG_ORGANIZATION,
+  SubscriberWelcomeWebhook,
+} from '../../../../domain/events/webhook-events.js';
+import type { WebhookPublisher } from '../../../ports/events/webhook-publisher.js';
 
 export class WelcomeSubscriberHandler extends EventHandler(
   'email.welcome',
@@ -15,6 +20,7 @@ export class WelcomeSubscriberHandler extends EventHandler(
       sms: SmsSender;
       from: EmailAddress;
       logger: Logger;
+      webhooks: WebhookPublisher;
     },
   ) {
     super();
@@ -52,5 +58,14 @@ export class WelcomeSubscriberHandler extends EventHandler(
         this.deps.logger.error(error, log);
       }
     }
+    if (!event.payload.channels.includes('webhook')) return;
+    await this.deps.webhooks.publish({
+      organizationId: BLOG_ORGANIZATION,
+      eventId: `${SubscriberWelcomeWebhook.token}:${event.payload.subscriberId}`,
+      endpointIds: [event.payload.subscriberId],
+      event: new SubscriberWelcomeWebhook({
+        subscriberId: event.payload.subscriberId,
+      }),
+    });
   }
 }

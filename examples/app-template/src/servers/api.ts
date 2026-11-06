@@ -6,13 +6,17 @@ import { PublishPost } from '../app/use-cases/posts/api/command/publish-post.js'
 import { SavePost } from '../app/use-cases/posts/api/command/save-post.js';
 import { UnpublishPost } from '../app/use-cases/posts/api/command/unpublish-post.js';
 import { EndSession } from '../app/use-cases/sessions/api/command/end-session.js';
-import { SubscribeToPosts } from '../app/use-cases/subscribers/api/command/subscribe.js';
+import {
+  type CheckWebhookUrl,
+  SubscribeToPosts,
+} from '../app/use-cases/subscribers/api/command/subscribe.js';
 
 export type ApiPorts = {
   posts: PostRepository;
   subscribers: SubscriberRepository;
   domainEvents: DomainEventPublisher;
   authenticator: Authenticator;
+  checkWebhookUrl: CheckWebhookUrl;
 };
 
 /**
@@ -33,6 +37,7 @@ export function createApi(ports: ApiPorts) {
     subscribeToPosts: new SubscribeToPosts({
       subscribers: ports.subscribers,
       domainEvents: ports.domainEvents,
+      checkWebhookUrl: ports.checkWebhookUrl,
     }),
     endSession: new EndSession({ authenticator: ports.authenticator }),
   };

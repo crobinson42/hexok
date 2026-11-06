@@ -17,9 +17,20 @@ export const domainErrorDefs = {
   InternalCallerRequired: {
     message: 'This use case only runs from inside the application',
   },
-  ChannelsRequired: { message: 'Choose email, sms, or both' },
-  ChannelsInvalid: { message: 'channels must be email, sms, or both' },
+  ChannelsRequired: {
+    message: 'Choose email, sms, webhook, or a combination',
+  },
+  ChannelsInvalid: {
+    message: 'channels must be email, sms, webhook, or a combination',
+  },
   SmsRequiresPhone: { message: 'SMS requires a phone' },
+  WebhookRequiresUrl: { message: 'A webhook requires a url' },
+  WebhookUrlRejected: {
+    message: 'Webhook URL is not allowed',
+    data: z.object({
+      reason: z.enum(['invalid', 'scheme', 'blocked', 'unresolved']),
+    }),
+  },
   Unauthenticated: { message: 'The token is not valid' },
   SignInRequired: { message: 'This call needs a signed-in caller' },
 } satisfies ErrorMap;

@@ -3,6 +3,7 @@ import { createApi } from '../api.js';
 import { createApiApp } from '../rpc/app.js';
 import { createPublishers } from '../runtime/domain-events.js';
 import { createRuntime } from '../runtime/index.js';
+import { createWebhookUrlChecker } from '../runtime/webhooks.js';
 import { onShutdown } from '../utils/shutdown.js';
 import { createHttpHandler } from './handler.js';
 
@@ -20,6 +21,7 @@ const api = createApi({
   subscribers: runtime.subscribers,
   ...createPublishers(runtime),
   authenticator: runtime.authenticator,
+  checkWebhookUrl: createWebhookUrlChecker(runtime),
 });
 
 const server = serve({

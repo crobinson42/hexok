@@ -1,20 +1,16 @@
-import type { Webhooks } from '@hexok/webhooks';
 import { EventHandler } from 'hexok';
 import { PostPublishedEvent } from '../../../../domain/events/post-published.js';
-import { PostPublishedWebhook } from '../../../../domain/events/webhook-events.js';
-
-/** The blog has one organization. A multi-tenant product passes the tenant that owns the post. */
-export const BLOG_ORGANIZATION = 'blog';
+import {
+  BLOG_ORGANIZATION,
+  PostPublishedWebhook,
+} from '../../../../domain/events/webhook-events.js';
+import type { WebhookPublisher } from '../../../ports/events/webhook-publisher.js';
 
 export class PostPublishedWebhookHandler extends EventHandler(
   'webhooks.post-published',
   PostPublishedEvent,
 ) {
-  constructor(
-    private readonly deps: {
-      webhooks: Pick<Webhooks<PostPublishedWebhook>, 'publish'>;
-    },
-  ) {
+  constructor(private readonly deps: { webhooks: WebhookPublisher }) {
     super();
   }
 
@@ -25,7 +21,7 @@ export class PostPublishedWebhookHandler extends EventHandler(
   async handle(event: PostPublishedEvent): Promise<void> {
     await this.deps.webhooks.publish({
       organizationId: BLOG_ORGANIZATION,
-      eventId: `post.published:${event.payload.postId}`,
+      eventId: `${PostPublishedWebhook.token}:${event.payload.postId}`,
       event: new PostPublishedWebhook({
         postId: event.payload.postId,
         title: event.payload.title,

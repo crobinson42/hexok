@@ -24,6 +24,11 @@ export class RedisSubscribers extends Adapter(SubscriberRepository) {
     return row === undefined ? null : SubscriberEntity.restore(row);
   }
 
+  override async getById(id: string): Promise<SubscriberEntity | null> {
+    const row = (await this.#load()).find((item) => item.id === id);
+    return row === undefined ? null : SubscriberEntity.restore(row);
+  }
+
   override async list(): Promise<readonly SubscriberEntity[]> {
     return (await this.#load()).map((row) => SubscriberEntity.restore(row));
   }

@@ -1,0 +1,52 @@
+{
+  "name": "@hexok/webhooks",
+  "version": "0.0.0",
+  "description": "Outbound webhooks for hexok: Standard Webhooks signing, SSRF-safe sends, and retries over the queue port.",
+  "type": "module",
+  "license": "MIT",
+  "sideEffects": false,
+  "keywords": [
+    "hexok",
+    "webhooks",
+    "standard-webhooks",
+    "queue"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/crobinson42/hexok.git",
+    "directory": "packages/webhooks"
+  },
+  "homepage": "https://crobinson42.github.io/hexok/",
+  "bugs": {
+    "url": "https://github.com/crobinson42/hexok/issues"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "default": "./dist/index.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc -b",
+    "test": "vitest run",
+    "type-check": "tsc --noEmit -p tsconfig.check.json",
+    "lint": "biome check .",
+    "clean": "rm -rf dist *.tsbuildinfo"
+  },
+  "dependencies": {
+    "@hexok/queue": "^1.0.0",
+    "hexok": "^2.2.4"
+  },
+  "devDependencies": {
+    "@hexok/queue-redis": "^1.1.3",
+    "zod": "^4.1.5"
+  }
+}

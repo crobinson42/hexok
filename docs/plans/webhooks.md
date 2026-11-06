@@ -261,3 +261,22 @@ For a reviewer:
 - **`FakeRedis` in `redis-queue.test.ts` learned the new scripts.** Every subscription now runs the promote script every `promoteMs`, as the plan requires, even with the new options omitted. The fake threw `unknown script` for any script it did not model, which failed one existing test that advances fake timers past 1 s. The fake now replies 0 to the promote script and models the retry script and `ZADD`. No existing test body or assertion changed. Confirm this reading of "passes unchanged".
 - **The slot pool and `stop()`** in `redis-queue.ts`: `#freeSlots`, `#takeSlot`, `#releaseSlot`, `#handleBatch`, and `handlersOf`, which now waits for `running` after the read loop and recovery runs end. This is the recovery and stop code the plan calls delicate.
 - **A default deployment.** With `maxLen` 10,000 and one day of retention, a topic that writes more than about 9,000 entries a day sits at the mark, and its delayed entries wait until the age trim brings it down. The webhooks queue sizing in the plan avoids this. Other users of `delayMs` need the same sizing. The README states it.
+
+### Phase 2: signing and HTTP (2026-11-05)
+
+Done. `packages/webhooks` exists with `signing.ts`, `http.ts`, their tests, a short README, and the `@hexok/webhooks` changeset. The Standard Webhooks vector matches. The 15 s cut-off test runs at the real default and takes 15 s.
+
+Decisions the plan left open:
+
+- **Function shapes.** `sign({ secret, id, timestamp, body })` takes `timestamp` in whole seconds. `verify({ secrets, id, timestamp, signature, body, now? })` takes the three header values as received and returns a boolean. It does not throw on bad input. A `whsec_` prefix is optional on input, as in the reference library.
+- **`WebhookResult` lives in `http.ts`**, because `send` produces it. `webhooks.ts` imports it for the hook types, and `index.ts` exports it. The file list is unchanged.
+- **`http.ts` `checkUrl`** returns hexok's `Result<URL, UnsafeUrlReason>` with `invalid`, `scheme`, `blocked` or `unresolved`. Phase 3's `Webhooks.checkUrl` turns a failure into `WebhookError.UnsafeUrl`. This keeps `http.ts` free of the error catalog and of an import cycle.
+- **`send` never rejects.** A URL that fails the scheme or literal check returns `error: 'blocked'` without a connection. Aborting the caller's signal returns `cancelled`. Error codes map to `dns`, `tls` or `connection`.
+- **One private address blocks the host.** This follows the "Done when" item. The resolver is called once, by the socket's `lookup`, and nothing resolves ahead of it.
+- **The blocked ranges** are the IPv4 and IPv6 special-use ranges: loopback, private, link-local, CGNAT, documentation, benchmarking, multicast, reserved, unique-local, NAT64 and 6to4. `BlockList` matches IPv4 rules against IPv4-mapped IPv6 too.
+- **New package version.** It is `0.0.0` with a minor changeset, so it publishes as 0.1.0. It depends on `@hexok/queue` `^1.0.0`, the workspace version. Changesets moves that range to `^2.0.0` when it versions the major. `package-lock.json` gains the workspace link.
+
+For a reviewer:
+
+- **`agent: false`.** Every send opens a new TCP and TLS connection. A keep-alive pool would let a socket opened under one check, or one `allowPrivate` setting, carry a later request. At millions of sends a day this costs a handshake per send. A per-instance agent that checks the address on every new socket would remove that cost. It is not in the plan, so it is not built.
+- **`http.ts` `send`** settles once from four events: response `end`, response `error`, response `close` without completion, and request `error`. Review that state handling.

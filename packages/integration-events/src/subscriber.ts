@@ -28,6 +28,7 @@ export interface ParkInput {
     readonly message: string;
     readonly code?: string;
   };
+  readonly attempts?: number;
   readonly occurredAt: Date;
   readonly context?: Readonly<Record<string, string>>;
 }
@@ -121,30 +122,49 @@ export class IntegrationSubscriber<C extends ContractDefinition> {
    * before it subscribes any. Throws when a handler's message is not in the
    * contract, or when two handlers would share a group on one topic.
    *
+   * When a queue subscribe fails, the handlers this call already subscribed
+   * are unsubscribed and the error is rethrown. A failed subscribe leaves
+   * nothing subscribed and can be retried. A group whose unsubscribe also
+   * fails stays reserved, so subscribing it again on this instance throws.
+   *
    * A delivery of another type or version is acked and skipped. A payload
    * that is not an envelope, or data its schema rejects, is logged, parked
-   * when a quarantine sink is set, and dropped. A throw from `handle` follows
-   * the queue's retry rules.
+   * when a quarantine sink is set, and dropped. When the park fails, the
+   * delivery throws and the queue retries it. With no quarantine sink, it is
+   * logged and dropped. A throw from `handle` follows the queue's retry rules.
    */
   async subscribe(options: SubscribeOptions<C>): Promise<Subscription[]> {
     const plans = this.#plan(options.handlers);
-    const subscriptions: Subscription[] = [];
-    for (const plan of plans) {
-      const { topic, group } = plan.subscription;
-      await this.#queue.subscribe(topic, {
-        consumerGroup: group,
-        maxDeliveries: options.maxDeliveries,
-        ...(options.startFrom !== undefined
-          ? { startFrom: options.startFrom }
-          : {}),
-        handler: (message) => this.#deliver(plan, message),
-      });
-      this.#groups.add(groupKey(topic, group));
-      subscriptions.push(plan.subscription);
+    // Reserve every group before any await, so a concurrent call sees them.
+    const keys = plans.map(({ subscription }) =>
+      groupKey(subscription.topic, subscription.group),
+    );
+    for (const key of keys) this.#groups.add(key);
+    const subscribed: Subscription[] = [];
+    try {
+      for (const plan of plans) {
+        const { topic, group } = plan.subscription;
+        await this.#queue.subscribe(topic, {
+          consumerGroup: group,
+          maxDeliveries: options.maxDeliveries,
+          ...(options.startFrom !== undefined
+            ? { startFrom: options.startFrom }
+            : {}),
+          handler: (message) => this.#deliver(plan, message),
+        });
+        subscribed.push(plan.subscription);
+      }
+    } catch (error) {
+      const stuck = await this.#rollback(subscribed);
+      for (const key of keys) {
+        if (!stuck.has(key)) this.#groups.delete(key);
+      }
+      throw error;
     }
-    return subscriptions;
+    return subscribed;
   }
 
+  /** Checks every handler against the contract and this instance's groups. */
   #plan(handlers: readonly IntegrationHandler<C>[]): Plan[] {
     const planned = new Map<string, Plan>();
     for (const handler of handlers) {
@@ -175,6 +195,31 @@ export class IntegrationSubscriber<C extends ContractDefinition> {
       });
     }
     return [...planned.values()];
+  }
+
+  /** Unsubscribes each subscription. Resolves the group keys whose unsubscribe failed. */
+  async #rollback(
+    subscriptions: readonly Subscription[],
+  ): Promise<Set<string>> {
+    const results = await Promise.allSettled(
+      subscriptions.map(({ topic, group }) =>
+        this.#queue.unsubscribe(topic, { consumerGroup: group }),
+      ),
+    );
+    const stuck = new Set<string>();
+    results.forEach((result, index) => {
+      const subscription = subscriptions[index];
+      if (result.status === 'fulfilled' || subscription === undefined) return;
+      const { topic, group } = subscription;
+      stuck.add(groupKey(topic, group));
+      this.#logger?.error(
+        result.reason instanceof Error
+          ? result.reason
+          : new Error('integration-events: unsubscribe failed'),
+        { topic, group },
+      );
+    });
+    return stuck;
   }
 
   async #deliver(
@@ -230,16 +275,17 @@ export class IntegrationSubscriber<C extends ContractDefinition> {
           error instanceof CodedError
             ? { name: error.name, message: error.message, code: error.code }
             : { name: error.name, message: error.message },
+        attempts: delivery.deliveries,
         occurredAt: new Date(),
         context: { group },
       });
     } catch (parkError) {
-      this.#logger?.error(
+      const failure =
         parkError instanceof Error
           ? parkError
-          : new Error('integration-events: park failed'),
-        { topic, group, id: delivery.id },
-      );
+          : new Error('integration-events: park failed');
+      this.#logger?.error(failure, { topic, group, id: delivery.id });
+      throw failure;
     }
   }
 }

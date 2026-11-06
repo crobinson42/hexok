@@ -28,6 +28,8 @@ export class Billing extends Contract('billing', {
 
 `Message(type, version, schema)` is a hexok `Event` with a static and instance `version`. `parse` and `EventHandler` work on it.
 
+Contract schemas describe JSON, the form the queue carries. `Date`, `bigint`, `Map`, and `Set` do not survive it. Use strings and numbers, such as an ISO string for a time. A `z.date()` field fails at `publish`.
+
 `Contract(name, topics)` maps each key to the message classes on that topic. The queue topic is `<name>.<key>`, here `billing.invoices`. Names match `/^[A-Za-z0-9_-]+$/`. `Contract` throws when a topic is empty, when a class is not a `Message`, when a class is in two topics, or when two classes share a type and version in one topic.
 
 ## Publish
@@ -39,7 +41,7 @@ const billing = new IntegrationPublisher(Billing, { queue });
 await billing.publish(new InvoicePaid({ invoiceId: 'inv_1', amountCents: 500 }));
 ```
 
-`publish` takes any message in the contract and finds its topic. It validates the payload and throws `CodedError` `VALIDATION` before anything is sent. It resolves the envelope `id`.
+`publish` takes any message in the contract and finds its topic. It validates the JSON form of the payload and sends that JSON form, so a consumer parsing it with the same schema accepts it. Keys the schema would strip are sent, so leave out what consumers should not see. A payload the schema rejects, or one that is not JSON, such as a `bigint` or a cycle, throws `CodedError` `VALIDATION` before anything is sent. It resolves the envelope `id`.
 
 Pass `{ id, time, subject }` to set those envelope attributes. `id` defaults to a random UUID. Pass a stable id, such as an outbox row id, so a retried publish carries the same id. `subject` is usually the aggregate id.
 
@@ -68,12 +70,12 @@ await billing.subscribe({ maxDeliveries: 10, handlers: [new SyncInvoice(deps)] }
 
 `service` names the consuming application. Each handler subscribes to the topic of its message with its own consumer group, `<service>:<handler token>`. Two services never share a group, so each receives every event. A failing handler does not redeliver to the others.
 
-`subscribe` checks every handler before it subscribes any. It throws when a handler's message is not in the contract, or when two handlers would share a group on one topic. It resolves `{ topic, group, type, version }` for each subscription. `maxDeliveries` and `startFrom` pass through to `Queue.subscribe`.
+`subscribe` checks every handler and reserves every group before it subscribes any. It throws when a handler's message is not in the contract, or when two handlers would share a group on one topic, even across concurrent calls. When a queue subscribe fails, the handlers that call subscribed are unsubscribed and the error is rethrown. A failed `subscribe` leaves nothing subscribed and can be retried. A group whose unsubscribe also fails stays reserved, and subscribing it again on that instance throws. It resolves `{ topic, group, type, version }` for each subscription. `maxDeliveries` and `startFrom` pass through to `Queue.subscribe`.
 
 For each delivery:
 
 - An event of another type or version is acked and skipped.
-- A payload that is not an envelope, or data the message schema rejects, is logged, parked, and dropped. Pass a structural `logger` and `quarantine`. `@hexok/logger` and `@hexok/quarantine` fit them. A parked record has `source: 'integration-events'`, `operation: 'deliver'`, `subject` `topic:id`, and `context.group`. A schema rejection has `error.code` `VALIDATION`.
+- A payload that is not an envelope, or data the message schema rejects, is logged, parked, and dropped. Pass a structural `logger` and `quarantine`. `@hexok/logger` and `@hexok/quarantine` fit them. A parked record has `source: 'integration-events'`, `operation: 'deliver'`, `subject` `topic:id`, `context.group`, and `attempts`, the delivery count. A schema rejection has `error.code` `VALIDATION`. When the park fails, the delivery throws, and the queue retries it up to `maxDeliveries`. Without a `quarantine`, the entry is logged and dropped. Each handler has its own group, so a malformed entry is parked once for each handler on its topic.
 - `handle` receives the event and an `IntegrationMeta` of `{ id, source, time, subject }`. A throw follows the queue's retry rules.
 
 Delivery is at least once. Make handlers idempotent with `meta.id`.
@@ -100,13 +102,15 @@ export class Billing extends Contract('billing', {
 }) {}
 ```
 
-`map` is typed from both schemas. One `publish` of v2 sends v2, then v1. Every copy has the same `id`, `time`, and `subject`. Each payload is validated before it is downgraded, and a failure throws before anything is sent. A queue failure rejects `publish`, and copies already sent stay sent.
+`map` is typed from both schemas. One `publish` of v2 sends v2, then v1. Every copy has the same `id`, `time`, and `subject`. Each payload is validated before it is downgraded, and `map` receives the schema's output. A failure throws before anything is sent. A queue failure rejects `publish`, and copies already sent stay sent.
 
 `publish` accepts only the newest version. An older version is a type error, and it throws at runtime. `ContractEvent` leaves it out.
 
 The versions of one type in a topic form a chain. Each version downgrades to the one before it. `Contract` throws when a version has no downgrade, skips a version, or downgrades to a version that is not in the topic.
 
 To retire v1, move every consumer to v2. Then remove v1 from the topic and the downgrade from v2. Publish that as a major version of the contract.
+
+Retire a version only after its consumers move. A handler for a version the producer no longer sends receives nothing, and nothing is logged. A consumer that updates to the contract without that version throws at `subscribe`, because its handler's message is no longer in the contract.
 
 ## Envelope
 
@@ -133,4 +137,5 @@ The queue payload is a CloudEvents 1.0 event in structured JSON mode, with a `ve
 - Backfill. A new consumer reaches only the entries the queue still holds. Load earlier state from the producer another way.
 - Order. A queue can redeliver an entry after newer ones. Put an aggregate version or timestamp in the payload, and ignore a change older than the state you hold.
 - The outbox. A crash between a database commit and `publish` loses the event. A transactional outbox prevents that. Pass the outbox row id as `id`.
+- Read cost. Every handler reads every entry on its topic, each version copy and each type, and skips the ones that are not its own. Keep topics narrow, such as one per aggregate.
 - Topic ownership. Grant the producer write access to its topics and consumers read access, in the broker.

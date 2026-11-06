@@ -169,21 +169,52 @@ local now = tonumber(time[1]) * 1000 + math.floor(tonumber(time[2]) / 1000)
 `;
 
 /**
- * A delayed-set member: `<id>:<sensitive flag>:<encoded payload>`.
+ * A delayed-set member: `<id>:<sensitive flag>:<group byte length>:<group>:<encoded payload>`.
  * The random id keeps two identical payloads from merging into one member.
+ * A retry names the group that returned it, so only that group handles the replacement. A delayed publish names no group.
  */
 export function delayedMember(
   encoded: string,
   sensitive: boolean,
+  group = '',
 ): { readonly id: string; readonly member: string } {
   const id = randomUUID();
-  return { id, member: `${id}:${sensitive ? '1' : '0'}:${encoded}` };
+  const flag = sensitive ? '1' : '0';
+  return {
+    id,
+    member: `${id}:${flag}:${Buffer.byteLength(group)}:${group}:${encoded}`,
+  };
+}
+
+/** Adds `ARGV[2]` to the delayed set `KEYS[1]`, due `ARGV[1]` ms from now on the Redis clock. */
+export const addDelayedScript = `${redisNow}
+redis.call('ZADD', KEYS[1], now + tonumber(ARGV[1]), ARGV[2])
+return 1
+`;
+
+/** Adds a member to the delayed set, timed by Redis, so a publisher's clock cannot make it due early. */
+export async function addDelayed(
+  commands: Redis,
+  delayedKey: string,
+  entry: { readonly delayMs: number; readonly member: string },
+): Promise<void> {
+  const reply = await commands.eval(
+    addDelayedScript,
+    1,
+    delayedKey,
+    entry.delayMs,
+    entry.member,
+  );
+  if (reply !== 1) {
+    throw new Error('queue: the delayed add script replied unexpectedly');
+  }
 }
 
 /**
  * Moves due members of the delayed set `KEYS[1]` into the stream `KEYS[2]`, oldest due first, and replies how many it moved.
  * It moves at most `ARGV[3]`, and never past the back-pressure mark `ARGV[2]`. It replies -1 and moves nothing while the stream is at the mark.
  * Due is measured on the Redis clock. Each `XADD` trims with `MAXLEN ~ ARGV[1]`, as `publish()` does.
+ * A member that names a group gets a `group` field, which every other group acks without handling.
  */
 // Atomic, so two subscriptions promoting at once move each member once.
 export const promoteDueScript = `${redisNow}
@@ -195,12 +226,18 @@ local due = redis.call('ZRANGEBYSCORE', KEYS[1], '-inf', now, 'LIMIT', 0, math.m
 for _, member in ipairs(due) do
   local first = string.find(member, ':', 1, true)
   local second = string.find(member, ':', first + 1, true)
-  local payload = string.sub(member, second + 1)
+  local third = string.find(member, ':', second + 1, true)
+  local length = tonumber(string.sub(member, second + 1, third - 1))
+  local fields = {'payload', string.sub(member, third + length + 2)}
   if string.sub(member, first + 1, second - 1) == '1' then
-    redis.call('XADD', KEYS[2], 'MAXLEN', '~', ARGV[1], '*', 'payload', payload, 'sensitive', '1')
-  else
-    redis.call('XADD', KEYS[2], 'MAXLEN', '~', ARGV[1], '*', 'payload', payload)
+    table.insert(fields, 'sensitive')
+    table.insert(fields, '1')
   end
+  if length > 0 then
+    table.insert(fields, 'group')
+    table.insert(fields, string.sub(member, third + 1, third + length))
+  end
+  redis.call('XADD', KEYS[2], 'MAXLEN', '~', ARGV[1], '*', unpack(fields))
   redis.call('ZREM', KEYS[1], member)
 end
 return #due

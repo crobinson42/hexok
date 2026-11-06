@@ -4,6 +4,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { ParkInput } from './park.js';
 import {
   ackDeletedScript,
+  addDelayedScript,
   deleteIdleStreamScript,
   destroyIdleGroupScript,
   promoteDueScript,
@@ -168,8 +169,15 @@ class FakeRedis extends EventEmitter {
     this.calls.push(['eval', ...args]);
     this.scripts.push(script);
     if (script === ackDeletedScript) return [];
-    // Nothing is due in the delayed set.
-    if (script === promoteDueScript) return 0;
+    if (script === addDelayedScript) {
+      if (!this.failAddDelayed) return 1;
+      const error = Object.assign(new Error('delayed add failed'), {
+        command: { name: 'eval', args: args.map(String) },
+      });
+      error.name = 'ReplyError';
+      throw error;
+    }
+    if (script === promoteDueScript) return this.promoteReply;
     if (script === retryLaterScript) return this.retryReply;
     const path = args.slice(1, 4).map(String);
     for (let depth = 1; depth <= 3; depth += 1) {
@@ -202,19 +210,10 @@ class FakeRedis extends EventEmitter {
   /** What the retry script replies: 1 acked and added the replacement, 0 the entry was no longer pending. */
   retryReply: unknown = 1;
 
-  failZadd = false;
+  /** What the promote script replies: how many entries moved, or -1 at the back-pressure mark. Nothing is due by default. */
+  promoteReply = 0;
 
-  zadd(...args: unknown[]): Promise<number> {
-    this.calls.push(['zadd', ...args]);
-    if (this.failZadd) {
-      const error = Object.assign(new Error('zadd failed'), {
-        command: { name: 'zadd', args: args.map(String) },
-      });
-      error.name = 'ReplyError';
-      return Promise.reject(error);
-    }
-    return Promise.resolve(1);
-  }
+  failAddDelayed = false;
 
   xack(...args: unknown[]): Promise<number> {
     this.calls.push(['xack', ...args]);
@@ -3134,23 +3133,19 @@ describe('RedisQueue delayed entries, retry results, and slots', () => {
     return { queue, commands };
   }
 
-  it('ZADDs a delayed publish with its due time and a unique member, and does not XADD', async () => {
+  it('adds a delayed publish with a script timed by Redis and a unique member, and does not XADD', async () => {
     const { queue, commands } = await started();
-    const before = Date.now();
     const first = await queue.publish('jobs', { n: 1 }, { delayMs: 5000 });
     const second = await queue.publish(
       'jobs',
       { n: 1 },
-      { delayMs: 5000, sensitive: true },
+      { delayMs: 4999.2, sensitive: true },
     );
-    const zadds = commands.calls.filter((call) => call[0] === 'zadd');
-    expect(zadds).toHaveLength(2);
-    const [key, score, member] = zadds[0]?.slice(1) ?? [];
-    expect(key).toBe('hexok:queue-delayed:jobs');
-    expect(Number(score)).toBeGreaterThanOrEqual(before + 5000);
-    expect(Number(score)).toBeLessThanOrEqual(Date.now() + 5000);
-    expect(member).toBe(`${first}:0:{"n":1}`);
-    expect(zadds[1]?.[3]).toBe(`${second}:1:{"n":1}`);
+    expect(commands.scripts).toEqual([addDelayedScript, addDelayedScript]);
+    expect(commands.calls.filter((call) => call[0] === 'eval')).toEqual([
+      ['eval', 1, 'hexok:queue-delayed:jobs', 5000, `${first}:0:0::{"n":1}`],
+      ['eval', 1, 'hexok:queue-delayed:jobs', 5000, `${second}:1:0::{"n":1}`],
+    ]);
     expect(first).not.toBe(second);
     expect(commands.calls.some((call) => call[0] === 'xadd')).toBe(false);
     await queue.publish('jobs', { n: 2 }, { delayMs: 0 });
@@ -3167,11 +3162,11 @@ describe('RedisQueue delayed entries, retry results, and slots', () => {
       );
     }
     expect(encode).not.toHaveBeenCalled();
-    expect(commands.calls.some((call) => call[0] === 'zadd')).toBe(false);
+    expect(commands.calls.some((call) => call[0] === 'eval')).toBe(false);
     await queue.stop();
   });
 
-  it('scrubs a failed ZADD of the member, and parks it like a failed XADD', async () => {
+  it('scrubs a failed delayed add of the member, and parks it like a failed XADD', async () => {
     const parked: ParkInput[] = [];
     const { queue, commands } = await started({
       quarantine: {
@@ -3181,19 +3176,22 @@ describe('RedisQueue delayed entries, retry results, and slots', () => {
         },
       },
     });
-    commands.failZadd = true;
+    commands.failAddDelayed = true;
     const error: unknown = await queue
       .publish('jobs', { secret: 'abc' }, { delayMs: 10 })
       .catch((caught: unknown) => caught);
     expect(error).toBeInstanceOf(Error);
     expect(textOf(error)).not.toContain('abc');
-    expect(error).toMatchObject({ name: 'ReplyError', message: 'zadd failed' });
+    expect(error).toMatchObject({
+      name: 'ReplyError',
+      message: 'delayed add failed',
+    });
     expect(parked[0]).toMatchObject({
       source: 'queue',
       operation: 'publish',
       subject: 'jobs',
       payload: { secret: 'abc' },
-      error: { name: 'ReplyError', message: 'zadd failed' },
+      error: { name: 'ReplyError', message: 'delayed add failed' },
     });
     await queue
       .publish('jobs', { secret: 'abc' }, { delayMs: 10, sensitive: true })
@@ -3280,10 +3278,10 @@ describe('RedisQueue delayed entries, retry results, and slots', () => {
       ],
     ]);
     expect(String(retries[0]?.[7])).toMatch(
-      /^[0-9a-f-]{36}:0:\{"attempt":1\}$/,
+      /^[0-9a-f-]{36}:0:7:billing:\{"attempt":1\}$/,
     );
     expect(String(retries[1]?.[7])).toMatch(
-      /^[0-9a-f-]{36}:1:\{"attempt":2\}$/,
+      /^[0-9a-f-]{36}:1:7:billing:\{"attempt":2\}$/,
     );
     expect(commands.calls.some((call) => call[0] === 'xack')).toBe(false);
     await queue.stop();
@@ -3309,6 +3307,88 @@ describe('RedisQueue delayed entries, retry results, and slots', () => {
     expect(logs.calls[0]?.[1]).toMatchObject({
       message: 'queue: retryInMs must be a finite number, zero or more',
     });
+    await queue.stop();
+  });
+
+  it('acks a retry replacement that names another group without calling the handler', async () => {
+    vi.useFakeTimers();
+    const { queue, commands } = await started();
+    const seen: string[] = [];
+    await subscribe(queue, 'jobs', {
+      consumerGroup: 'billing',
+      handler: async ({ id }) => {
+        seen.push(id);
+      },
+    });
+    FakeRedis.instances[1]?.pending?.resolve([
+      [
+        'hexok:queue:jobs',
+        [
+          ['8-1', ['payload', '{}', 'group', 'email']],
+          ['8-2', ['payload', '{}', 'group', 'billing']],
+          ['8-3', ['payload', '{}']],
+        ],
+      ],
+    ]);
+    await vi.advanceTimersByTimeAsync(0);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(seen).toEqual(['8-2', '8-3']);
+    expect(commands.calls.filter((call) => call[0] === 'xack')).toEqual([
+      ['xack', 'hexok:queue:jobs', 'billing', '8-1'],
+      ['xack', 'hexok:queue:jobs', 'billing', '8-2'],
+      ['xack', 'hexok:queue:jobs', 'billing', '8-3'],
+    ]);
+    await queue.stop();
+  });
+
+  it('logs an error once promote runs have been held at the mark for a minute, then every minute', async () => {
+    vi.useFakeTimers();
+    const logs = recordingLogger();
+    const { queue, commands } = await started({
+      logger: logs.sink,
+      promoteMs: 1000,
+    });
+    commands.promoteReply = -1;
+    await subscribe(queue, 'jobs', {
+      consumerGroup: 'billing',
+      handler: async () => {},
+    });
+    const held = () =>
+      logs.calls.filter(
+        (call) =>
+          call[0] === 'error' &&
+          call[1] instanceof Error &&
+          call[1].message.includes('back-pressure mark'),
+      );
+    // The first held run is at 1 s, so the log is due at 61 s.
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(held()).toHaveLength(0);
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(held()).toEqual([
+      [
+        'error',
+        new Error(
+          'queue: delayed entries are waiting because the stream is at its back-pressure mark, 90% of maxLen',
+        ),
+        {
+          adapter: 'queue',
+          connection: 'commands',
+          topic: 'jobs',
+          group: 'billing',
+          heldMs: 60_000,
+        },
+      ],
+    ]);
+    await vi.advanceTimersByTimeAsync(59_000);
+    expect(held()).toHaveLength(1);
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(held()).toHaveLength(2);
+    // A run that moves entries ends the hold, and the next hold starts its own minute.
+    commands.promoteReply = 0;
+    await vi.advanceTimersByTimeAsync(1000);
+    commands.promoteReply = -1;
+    await vi.advanceTimersByTimeAsync(59_000);
+    expect(held()).toHaveLength(2);
     await queue.stop();
   });
 

@@ -40,6 +40,7 @@ import {
 } from './park.js';
 import {
   ackDeleted,
+  addDelayed,
   delayedMember,
   promoteDue,
   releaseConsumer,
@@ -134,6 +135,9 @@ interface Subscription {
   recovery: ReturnType<typeof setInterval> | undefined;
   promote: ReturnType<typeof setInterval> | undefined;
   promoting: boolean;
+  /** When promote runs started finding the stream at its back-pressure mark, and when that was last logged. */
+  heldSince: number | undefined;
+  heldLoggedAt: number | undefined;
   /** Where the next `XAUTOCLAIM` resumes. */
   claimCursor: string;
   /** `XAUTOCLAIM` runs. */
@@ -143,10 +147,11 @@ interface Subscription {
   readonly finish: () => void;
 }
 
-/** One handler call. `active` turns false when the handler returns. */
+/** One handler call. `active` turns false when the handler returns. `run` is its entry's dispatch, in `running`. */
 interface HandlerCall {
   readonly sub: Subscription;
   active: boolean;
+  run: Promise<void> | undefined;
 }
 
 type StreamEntry = [string, string[]];
@@ -162,6 +167,9 @@ const PROMOTE_MAX = 1000;
 
 /** A promote run never fills a stream past this share of `maxLen`, so `MAXLEN ~` does not trim entries it just moved. */
 const BACK_PRESSURE = 0.9;
+
+/** How long promote runs find the stream at its mark before a subscription logs it, and how often it logs again. */
+const HELD_LOG_MS = 60_000;
 
 const noopSink: LogSink = {
   debug() {},
@@ -251,10 +259,16 @@ async function createGroup(
   }
 }
 
-/** The subscription's read loop, its `XAUTOCLAIM` runs, then every handler they started. */
-async function handlersOf(sub: Subscription): Promise<void> {
+/**
+ * The subscription's read loop, its `XAUTOCLAIM` runs, then every handler they started.
+ * `caller` is a handler of `sub` that called `stop()` or `unsubscribe()`. Its own run is left out, so it does not wait for itself.
+ */
+async function handlersOf(
+  sub: Subscription,
+  caller?: HandlerCall,
+): Promise<void> {
   await Promise.all([sub.done, ...sub.recovering]);
-  await Promise.all(sub.running);
+  await Promise.all([...sub.running].filter((run) => run !== caller?.run));
 }
 
 /** Throws unless `value` is a finite number of milliseconds, zero or more. */
@@ -426,7 +440,7 @@ export class RedisQueue extends Adapter(Queue) {
   }
 
   /**
-   * `ZADD`s the entry to the topic's delayed set, due `delayMs` from now on this process's clock, and resolves the member's id.
+   * Adds the entry to the topic's delayed set, due `delayMs` from now on the Redis clock, and resolves the member's id.
    * A subscription's promote run moves it into the stream once it is due.
    */
   async #publishLater(
@@ -439,7 +453,10 @@ export class RedisQueue extends Adapter(Queue) {
     const { id, member } = delayedMember(encoded, sensitive);
     try {
       await this.#lifecycle.run('publish', ({ commands }) =>
-        commands.zadd(this.#delayedKey(topic), Date.now() + delayMs, member),
+        addDelayed(commands, this.#delayedKey(topic), {
+          delayMs: Math.ceil(delayMs),
+          member,
+        }),
       );
     } catch (error) {
       await this.#parkPublish(topic, payload, error, {
@@ -506,6 +523,8 @@ export class RedisQueue extends Adapter(Queue) {
       recovery: undefined,
       promote: undefined,
       promoting: false,
+      heldSince: undefined,
+      heldLoggedAt: undefined,
       claimCursor: '0-0',
       recovering: new Set(),
       done,
@@ -560,9 +579,10 @@ export class RedisQueue extends Adapter(Queue) {
       this.#lifecycle.run('unsubscribe', command, { signal: deadline.signal });
     sub.ack = run;
     try {
-      if (!this.#calledFrom(sub)) {
-        await settledOrAborted(handlersOf(sub), deadline.signal);
-      }
+      await settledOrAborted(
+        handlersOf(sub, this.#callerOf(sub)),
+        deadline.signal,
+      );
       sub.ack = undefined;
       if (deadline.signal.aborted) {
         this.#keep(
@@ -608,8 +628,10 @@ export class RedisQueue extends Adapter(Queue) {
         sub.ack = stopRun;
       }
       // Handlers finish before consumers are released. `signal` aborts when stop() stops waiting.
-      const others = subs.filter((sub) => !this.#calledFrom(sub));
-      await settledOrAborted(Promise.all(others.map(handlersOf)), signal);
+      await settledOrAborted(
+        Promise.all(subs.map((sub) => handlersOf(sub, this.#callerOf(sub)))),
+        signal,
+      );
       for (const sub of subs) sub.ack = undefined;
       if (signal.aborted) {
         for (const sub of subs) {
@@ -848,12 +870,14 @@ export class RedisQueue extends Adapter(Queue) {
         sub.inflight.delete(id);
         continue;
       }
-      const run = this.#dispatch(sub, id, fields, counts.get(id)).finally(
+      const call: HandlerCall = { sub, active: false, run: undefined };
+      const run = this.#dispatch(call, id, fields, counts.get(id)).finally(
         () => {
           sub.running.delete(run);
           this.#releaseSlot(sub);
         },
       );
+      call.run = run;
       sub.running.add(run);
     }
   }
@@ -891,11 +915,18 @@ export class RedisQueue extends Adapter(Queue) {
   }
 
   async #dispatch(
-    sub: Subscription,
+    call: HandlerCall,
     id: string,
     fields: string[],
     deliveries: number | undefined,
   ): Promise<void> {
+    const { sub } = call;
+    // A retry replacement belongs to the group that returned it. Every other group acks it unhandled.
+    const owner = fieldOf(fields, 'group');
+    if (owner !== undefined && owner !== sub.group) {
+      await this.#settle(sub, id, 'ack');
+      return;
+    }
     const raw = fieldOf(fields, 'payload');
     if (raw === undefined) {
       await this.#parkDeliver(sub, id, {
@@ -943,7 +974,7 @@ export class RedisQueue extends Adapter(Queue) {
     let thrownError: unknown;
     let returned: QueueDisposition | QueueRetryIn<unknown> | void;
     try {
-      const call: HandlerCall = { sub, active: true };
+      call.active = true;
       try {
         returned = await this.#handling.run(call, () =>
           sub.handler({ id, topic: sub.topic, payload, deliveries }),
@@ -951,9 +982,9 @@ export class RedisQueue extends Adapter(Queue) {
       } finally {
         call.active = false;
       }
-      if (typeof returned === 'object') {
+      if (typeof returned === 'object' && returned !== null) {
         // A bad retryInMs or a replacement that fails to encode throws here, and counts as a handler throw.
-        const replacement = this.#replacement(returned, raw, fields);
+        const replacement = this.#replacement(sub, returned, raw, fields);
         await this.#retryLater(sub, id, replacement);
         return;
       }
@@ -977,8 +1008,12 @@ export class RedisQueue extends Adapter(Queue) {
     await this.#settle(sub, id, disposition);
   }
 
-  /** The delayed-set member that replaces an entry. It keeps the entry's `sensitive` flag, and its payload when the result has none. */
+  /**
+   * The delayed-set member that replaces an entry. It keeps the entry's `sensitive` flag, and its payload when the result has none.
+   * It names the subscription's group, so the other groups on the topic do not handle it again.
+   */
   #replacement(
+    sub: Subscription,
     result: QueueRetryIn<unknown>,
     raw: string,
     fields: string[],
@@ -989,7 +1024,7 @@ export class RedisQueue extends Adapter(Queue) {
     const sensitive = fieldOf(fields, 'sensitive') === '1';
     return {
       delayMs: Math.ceil(result.retryInMs),
-      member: delayedMember(encoded, sensitive).member,
+      member: delayedMember(encoded, sensitive, sub.group).member,
     };
   }
 
@@ -1137,8 +1172,9 @@ export class RedisQueue extends Adapter(Queue) {
   /** Moves the topic's due delayed entries into its stream. */
   async #promote(sub: Subscription): Promise<void> {
     if (sub.abort.signal.aborted) return;
+    let moved: number;
     try {
-      await this.#lifecycle.run('subscribe', ({ commands }) =>
+      moved = await this.#lifecycle.run('subscribe', ({ commands }) =>
         promoteDue(commands, sub.delayedKey, sub.key, {
           maxLen: this.#maxLen,
           mark: Math.floor(this.#maxLen * BACK_PRESSURE),
@@ -1147,7 +1183,34 @@ export class RedisQueue extends Adapter(Queue) {
       );
     } catch (error) {
       this.#logFailure(error, 'promote script', this.#fields(sub, 'commands'));
+      return;
     }
+    this.#noteHeld(sub, moved === -1);
+  }
+
+  /** Logs an error once the stream has been at its back-pressure mark for `HELD_LOG_MS`, then once every `HELD_LOG_MS` while it stays there. */
+  #noteHeld(sub: Subscription, held: boolean): void {
+    if (!held) {
+      sub.heldSince = undefined;
+      sub.heldLoggedAt = undefined;
+      return;
+    }
+    const now = Date.now();
+    sub.heldSince ??= now;
+    if (now - sub.heldSince < HELD_LOG_MS) return;
+    if (
+      sub.heldLoggedAt !== undefined &&
+      now - sub.heldLoggedAt < HELD_LOG_MS
+    ) {
+      return;
+    }
+    sub.heldLoggedAt = now;
+    this.#logger.error(
+      new Error(
+        'queue: delayed entries are waiting because the stream is at its back-pressure mark, 90% of maxLen',
+      ),
+      { ...this.#fields(sub, 'commands'), heldMs: now - sub.heldSince },
+    );
   }
 
   /** Recreates a group deleted under a running subscription. Logs a failure and returns false, unless the queue is stopping. */
@@ -1216,10 +1279,10 @@ export class RedisQueue extends Adapter(Queue) {
     return { adapter: ADAPTER, connection, topic: sub.topic, group: sub.group };
   }
 
-  /** Whether a handler of `sub` is the caller and has not yet returned. */
-  #calledFrom(sub: Subscription): boolean {
+  /** The handler call of `sub` that is the caller and has not yet returned, if there is one. */
+  #callerOf(sub: Subscription): HandlerCall | undefined {
     const call = this.#handling.getStore();
-    return call?.active === true && call.sub === sub;
+    return call?.active === true && call.sub === sub ? call : undefined;
   }
 
   #key(topic: string): string {

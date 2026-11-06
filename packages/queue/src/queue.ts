@@ -20,6 +20,7 @@ export interface QueueMessage<T> {
 /**
  * Acknowledges the entry and publishes its replacement `retryInMs` from now, in one step.
  * The replacement carries `payload`, or the same payload when it is omitted, and starts at delivery 1.
+ * Only the consumer group that returned the result handles the replacement. Other groups on the topic do not see it again.
  */
 export interface QueueRetryIn<T> {
   readonly retryInMs: number;

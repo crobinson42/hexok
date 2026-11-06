@@ -13,6 +13,7 @@ import type { ParkInput } from './park.js';
 import { RedisQueue } from './redis-queue.js';
 import {
   ackDeleted,
+  addDelayed,
   delayedMember,
   deleteIdleStream,
   destroyIdleGroup,
@@ -1287,6 +1288,50 @@ describe.each(recoveryTargets)(
     );
 
     it.skipIf(!url)(
+      'the add script scores on the Redis clock, and promote gives a member that names a group a group field',
+      async () => {
+        const admin = new Redis(url ?? '');
+        const stream = `${newPrefix()}jobs`;
+        const delayed = `${newDelayedPrefix()}jobs`;
+        try {
+          const before = await redisNow(admin);
+          const plain = delayedMember('{"n":1}', false).member;
+          await addDelayed(admin, delayed, { delayMs: 5000, member: plain });
+          const score = Number(await admin.zscore(delayed, plain));
+          expect(score).toBeGreaterThanOrEqual(before + 5000);
+          expect(score).toBeLessThanOrEqual((await redisNow(admin)) + 5000);
+          await admin.del(delayed);
+          const now = await redisNow(admin);
+          await admin.zadd(
+            delayed,
+            now - 1,
+            plain,
+            now - 1,
+            delayedMember('{"a":"b:c"}', true, 'billing').member,
+            now - 1,
+            delayedMember('{}', false, 'team:é').member,
+          );
+          const limits = { maxLen: 10_000, mark: 9000, max: 1000 };
+          expect(await promoteDue(admin, delayed, stream, limits)).toBe(3);
+          const fields = (await admin.xrange(stream, '-', '+')).map(
+            ([, entry]) => entry,
+          );
+          expect(fields).toHaveLength(3);
+          expect(fields).toEqual(
+            expect.arrayContaining([
+              ['payload', '{"n":1}'],
+              ['payload', '{"a":"b:c"}', 'sensitive', '1', 'group', 'billing'],
+              ['payload', '{}', 'group', 'team:é'],
+            ]),
+          );
+        } finally {
+          await admin.del(stream, delayed);
+          await admin.quit();
+        }
+      },
+    );
+
+    it.skipIf(!url)(
       'the retry script acks the entry and adds its replacement in one call, once',
       async () => {
         const admin = new Redis(url ?? '');
@@ -1391,7 +1436,7 @@ describe.skipIf(!process.env.REDIS_URL)(
       const dueAt = Date.now() + 800;
       await queue.publish('jobs', { n: 1 }, { delayMs: 800 });
       await waitFor(() => receivedAt > 0);
-      // The due time is on this clock and promotion on the Redis clock. The container's skew is a few milliseconds.
+      // The due time and promotion are on the Redis clock. The container's skew from this clock is a few milliseconds.
       expect(receivedAt).toBeGreaterThanOrEqual(dueAt - 20);
       expect(receivedAt).toBeLessThanOrEqual(dueAt + 200 + 200 + 100);
     });
@@ -1491,6 +1536,160 @@ describe.skipIf(!process.env.REDIS_URL)(
         { payload: { attempt: 2 }, deliveries: 1 },
       ]);
       expect(await redis.zcard(`${config.delayedPrefix}jobs`)).toBe(0);
+    });
+
+    it('a delayed publish is due on the Redis clock when the publisher clock is behind', async () => {
+      const config = {
+        keyPrefix: newPrefix(),
+        delayedPrefix: newDelayedPrefix(),
+      };
+      const queue = queueOf(config);
+      await queue.start();
+      const redis = probe();
+      const before = await redisNow(redis);
+      const behind = Date.now() - 60_000;
+      const clock = vi.spyOn(Date, 'now').mockReturnValue(behind);
+      try {
+        await queue.publish('jobs', { n: 1 }, { delayMs: 800 });
+      } finally {
+        clock.mockRestore();
+      }
+      const [, score] = await redis.zrange(
+        `${config.delayedPrefix}jobs`,
+        '0',
+        '-1',
+        'WITHSCORES',
+      );
+      expect(Number(score)).toBeGreaterThanOrEqual(before + 800);
+      expect(Number(score)).toBeLessThanOrEqual((await redisNow(redis)) + 800);
+    });
+
+    it('a retry goes back only to the group that returned it', async () => {
+      const config = {
+        keyPrefix: newPrefix(),
+        delayedPrefix: newDelayedPrefix(),
+        promoteMs: 50,
+      };
+      const queue = queueOf(config);
+      await queue.start();
+      const billing: unknown[] = [];
+      const email: unknown[] = [];
+      await queue.subscribe<{ attempt: number }>('jobs', {
+        consumerGroup: 'billing',
+        maxDeliveries: 'unlimited',
+        handler: async (message) => {
+          billing.push(message.payload);
+          if (message.payload.attempt === 1) {
+            return { retryInMs: 200, payload: { attempt: 2 } };
+          }
+          return 'ack';
+        },
+      });
+      await queue.subscribe<{ attempt: number }>('jobs', {
+        consumerGroup: 'email',
+        maxDeliveries: 'unlimited',
+        handler: async (message) => {
+          email.push(message.payload);
+        },
+      });
+      await queue.publish('jobs', { attempt: 1 });
+      await waitFor(() => billing.length === 2);
+      // The replacement is in the stream, so email has read it by the time it reads past it.
+      await queue.publish('jobs', { attempt: 3 });
+      await waitFor(() => email.length === 2 && billing.length === 3);
+      expect(billing).toEqual([{ attempt: 1 }, { attempt: 2 }, { attempt: 3 }]);
+      expect(email).toEqual([{ attempt: 1 }, { attempt: 3 }]);
+      const redis = probe();
+      for (const group of ['billing', 'email']) {
+        expect(
+          (await redis.xpending(`${config.keyPrefix}jobs`, group))[0],
+        ).toBe(0);
+      }
+    });
+
+    it('stop() and unsubscribe() from a handler wait for its sibling handlers and ack them', async () => {
+      for (const end of ['stop', 'unsubscribe'] as const) {
+        const config = {
+          keyPrefix: newPrefix(),
+          delayedPrefix: newDelayedPrefix(),
+          stopTimeoutMs: 5000,
+        };
+        const queue = queueOf(config);
+        await queue.start();
+        for (let i = 0; i < 3; i += 1) await queue.publish('jobs', { i });
+        let started = 0;
+        const finished: number[] = [];
+        let endedAt = 0;
+        let callerId = '';
+        await queue.subscribe<{ i: number }>('jobs', {
+          consumerGroup: 'workers',
+          maxDeliveries: 'unlimited',
+          concurrency: 3,
+          handler: async (message) => {
+            started += 1;
+            if (message.payload.i !== 0) {
+              await sleepMs(400);
+              finished.push(Date.now());
+              return;
+            }
+            callerId = message.id;
+            await waitFor(() => started === 3);
+            if (end === 'stop') await queue.stop();
+            else await queue.unsubscribe('jobs', { consumerGroup: 'workers' });
+            endedAt = Date.now();
+          },
+        });
+        await waitFor(() => endedAt > 0);
+        expect(finished).toHaveLength(2);
+        for (const at of finished) expect(endedAt).toBeGreaterThanOrEqual(at);
+        // Only the caller's own entry stays pending.
+        const pending = await probe().xpending(
+          `${config.keyPrefix}jobs`,
+          'workers',
+          '-',
+          '+',
+          10,
+        );
+        expect(
+          pending.map((row) => (Array.isArray(row) ? row[0] : undefined)),
+        ).toEqual([callerId]);
+      }
+    });
+
+    it('acks a plain JavaScript handler that returns null', async () => {
+      const keyPrefix = newPrefix();
+      const delayedPrefix = newDelayedPrefix();
+      keys.push(`${keyPrefix}jobs`, `${delayedPrefix}jobs`);
+      const result = await runQueue(
+        `
+const queue = new RedisQueue({
+  redis: process.env.REDIS_URL,
+  keyPrefix: process.env.KEY_PREFIX,
+  delayedPrefix: process.env.DELAYED_PREFIX,
+  blockMs: 50,
+});
+await queue.start();
+let calls = 0;
+await queue.subscribe('jobs', {
+  consumerGroup: 'workers',
+  maxDeliveries: 'unlimited',
+  handler: async () => {
+    calls += 1;
+    return null;
+  },
+});
+await queue.publish('jobs', {});
+while (calls === 0) await new Promise((resolve) => setTimeout(resolve, 20));
+await queue.stop();
+console.log(calls);
+`,
+        { KEY_PREFIX: keyPrefix, DELAYED_PREFIX: delayedPrefix },
+      );
+      expect(result.stderr).toBe('');
+      expect(result.stdout.trim()).toBe('1');
+      expect((await probe().xpending(`${keyPrefix}jobs`, 'workers'))[0]).toBe(
+        0,
+      );
     });
 
     it('with concurrency 5 runs five slow handlers at once, reclaims none, and stop waits for all of them', async () => {

@@ -40,18 +40,20 @@ Delivery is at least once. A message can reach a handler more than once, so make
 
 ### Delayed entries
 
-`publish(topic, payload, { delayMs })` adds the entry to the sorted set `<delayedPrefix><topic>`, scored with its due time on this process's clock, and resolves the member's id. It does not `XADD`. Omitted or 0 publishes now.
+`publish(topic, payload, { delayMs })` adds the entry to the sorted set `<delayedPrefix><topic>`, scored with its due time on the Redis clock, and resolves the member's id. It does not `XADD`. A script reads Redis `TIME`, so a publisher whose clock is ahead cannot make an entry due early. Omitted or 0 publishes now.
 
-- A member is a random id, the `sensitive` flag, and the encoded payload, so two identical payloads stay two entries.
+- A member is a random id, the `sensitive` flag, the group of a retry, and the encoded payload, so two identical payloads stay two entries.
 - Every subscription runs one script every `promoteMs` that moves due members into the stream with `XADD … MAXLEN ~`, oldest first, at most 1,000 a run. Due is measured on the Redis clock. A due entry reaches a free slot within `promoteMs` plus `blockMs`.
 - The script is atomic, so two subscriptions promoting the same topic move each member once.
-- A run never fills the stream past 90% of `maxLen`, and skips while the stream is at that mark, so `MAXLEN ~` does not trim the entries it moves. `XLEN` counts acknowledged entries until the age trim removes them. Size `maxLen` and `retentionMs` so a busy stream stays under the mark, or delayed entries wait.
+- A run never fills the stream past 90% of `maxLen`, and skips while the stream is at that mark, so `MAXLEN ~` does not trim the entries it moves. `XLEN` counts acknowledged entries until the age trim removes them. Size `maxLen` and `retentionMs` so a busy stream stays under the mark, or delayed entries wait. A subscription logs an error after promote runs have found the stream at its mark for one minute, and again every minute it stays there.
+- With `trim: false`, or on a topic no running instance publishes to, nothing removes acknowledged entries, so a stream at its mark stays there. Run `maintain({ retentionMs })` on such a topic.
 - Only a subscription promotes. A delayed entry on a topic with no running subscriber waits in its set. It survives every restart, because it lives in Redis.
 
 ### Retry results
 
 A handler may return `{ retryInMs, payload? }`. One script acks the entry and adds its replacement to the delayed set, due `retryInMs` from now on the Redis clock. A retry is never lost or doubled.
 
+- The replacement goes only to the group that returned the result. It carries a `group` field, and every other group on the topic acks it without calling its handler or counting a delivery.
 - The replacement carries `payload`, or the entry's own payload when it is omitted. It keeps the entry's `sensitive` flag. It is a new entry, so its delivery count starts at 1, and `maxDeliveries` does not count across it.
 - When the entry is no longer pending, such as when another consumer acked it, the script adds nothing.
 - A `retryInMs` that is not a finite number, zero or more, or a `payload` that fails to encode, counts as a handler throw and follows `onError`.
@@ -83,7 +85,7 @@ There is no dead-letter stream. An optional `quarantine` sink parks a failed enc
 5. A command still pending rejects with `StoppedBeforeReply`.
 6. It sends `QUIT` on the commands connection, and disconnects it if `QUIT` does not settle in the time left.
 
-A handler that calls `unsubscribe()` on its own subscription, or `stop()`, is not waited for, since it would wait for itself. Its entry is not acked and stays pending for another consumer.
+A handler that calls `unsubscribe()` on its own subscription, or `stop()`, is not waited for, since it would wait for itself. Its entry is not acked and stays pending for another consumer. The subscription's other handlers are waited for and acked.
 
 ### Kept consumers
 
@@ -129,6 +131,7 @@ Every log carries `adapter: 'queue'`. `connection` is `commands` or `blocking`, 
 | A failed `XACK` | `error` | `adapter`, `connection`, `topic`, `group`, `id` |
 | A failed retry script | `error` | `adapter`, `connection`, `topic`, `group`, `id` |
 | A failed promote script | `error` | `adapter`, `connection`, `topic`, `group` |
+| Delayed entries held at the back-pressure mark for a minute, then every minute | `error` | `adapter`, `connection`, `topic`, `group`, `heldMs` |
 | A failed age trim, after a publish or on the minute | `error` | `adapter`, `connection`, `topic` |
 | A background command that `stop()` cut short | `warn` | the failed command's fields, plus `code` |
 | `stop()` or `unsubscribe()` kept a consumer | `warn` | `adapter`, `connection`, `topic`, `group`, `consumer`, `reason` |
@@ -189,7 +192,7 @@ The key patterns follow `keyPrefix` and `delayedPrefix`. Scripts run with this u
 
 | Used by | Rules |
 | --- | --- |
-| `publish()` | `+xadd`, `+zadd` with `delayMs`, and `+xtrim` unless `trim` is `false` |
+| `publish()` | `+xadd`, `+eval +time +zadd` with `delayMs`, and `+xtrim` unless `trim` is `false` |
 | The promote script, in every subscription | `+eval +xlen +time +zrangebyscore +xadd +zrem` |
 | The retry script, for a `{ retryInMs }` result | `+eval +xack +time +zadd` |
 | `subscribe()`, reads, and acks | `+xgroup\|create +xreadgroup +xack +xpending +xclaim +xautoclaim` |

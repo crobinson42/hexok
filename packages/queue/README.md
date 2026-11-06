@@ -10,6 +10,6 @@ import { Queue, type QueueHandler } from '@hexok/queue';
 
 Pass `{ sensitive: true }` as the third `publish` argument for a payload that holds a secret, such as a one-time code or a reset link. An adapter then parks and logs that message without its payload.
 
-Pass `{ delayMs }` to `publish` to deliver no sooner than that many milliseconds from now. Omitted or 0 publishes now. A handler may return `{ retryInMs, payload? }` to acknowledge the entry and publish its replacement after `retryInMs`, in one step. The replacement carries `payload`, or the same payload when it is omitted, and starts at delivery 1. `concurrency` on `subscribe` sets how many handlers of that subscription run at once. It defaults to 1.
+Pass `{ delayMs }` to `publish` to deliver no sooner than that many milliseconds from now. Omitted or 0 publishes now. A handler may return `{ retryInMs, payload? }` to acknowledge the entry and publish its replacement after `retryInMs`, in one step. The replacement carries `payload`, or the same payload when it is omitted, and starts at delivery 1. Only the consumer group that returned the result handles the replacement. `concurrency` on `subscribe` sets how many handlers of that subscription run at once. It defaults to 1.
 
 An adapter honours `delayMs`, `concurrency`, and a retry result, or throws. An adapter that cannot delay throws on `delayMs` and on a retry result. It never delivers early.

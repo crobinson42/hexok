@@ -14,6 +14,7 @@ export {
 export {
   type WebhookCall,
   type WebhookEndpoint,
+  type WebhookEndpointRetry,
   WebhookEndpoints,
   WebhookError,
   type WebhookEvent,

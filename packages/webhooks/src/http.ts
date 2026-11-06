@@ -16,7 +16,7 @@ export interface WebhookResult {
     | 'blocked'
     | 'cancelled';
   readonly durationMs: number;
-  /** The first 20 KB of the response body. */
+  /** The start of the response body, up to `maxResponseBytes`. */
   readonly responseBody: string;
 }
 
@@ -35,6 +35,8 @@ export interface HttpOptions {
   readonly allowPrivate: boolean;
   /** One deadline over DNS, connect, TLS, and the response body. */
   readonly timeoutMs: number;
+  /** How much of the response body is read and kept. The rest is not read. */
+  readonly maxResponseBytes: number;
   readonly resolve: WebhookResolver;
 }
 
@@ -51,8 +53,6 @@ export interface SendOutcome {
   readonly result: WebhookResult;
   readonly retryAfterMs?: number;
 }
-
-const RESPONSE_CAP_BYTES = 20 * 1024;
 
 /** The operating system resolver, `/etc/hosts` included. */
 export const systemResolver: WebhookResolver = (hostname) =>
@@ -79,9 +79,10 @@ for (const [network, prefix] of [
   blocked.addSubnet(network, prefix, 'ipv4');
 }
 for (const [network, prefix] of [
-  ['::', 128],
-  ['::1', 128],
+  // Unspecified, loopback, and the deprecated IPv4-compatible addresses such as ::7f00:1.
+  ['::', 96],
   ['64:ff9b::', 96],
+  ['64:ff9b:1::', 48],
   ['100::', 64],
   ['2001:db8::', 32],
   ['2002::', 16],
@@ -232,7 +233,7 @@ export async function send(
       if (settled) return;
       settled = true;
       const responseBody = Buffer.concat(chunks)
-        .subarray(0, RESPONSE_CAP_BYTES)
+        .subarray(0, options.maxResponseBytes)
         .toString('utf8');
       const base = { durationMs: elapsed(), responseBody };
       const withStatus = status === undefined ? base : { ...base, status };
@@ -252,7 +253,7 @@ export async function send(
       response.on('data', (chunk: Buffer) => {
         chunks.push(chunk);
         bytes += chunk.length;
-        if (bytes < RESPONSE_CAP_BYTES) return;
+        if (bytes < options.maxResponseBytes) return;
         // The rest of a large body is not read.
         finish(outcome);
         response.destroy();

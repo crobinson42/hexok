@@ -21,8 +21,16 @@ import { sign, webhookId } from './signing.js';
 export interface WebhookEndpoint {
   readonly id: string;
   readonly url: string;
-  /** whsec_ secrets, newest first. Return two during a rotation window. */
+  /** whsec_ secrets, newest first. Return two during a rotation window. An endpoint with none is not sent to. */
   readonly secrets: readonly string[];
+  /** Overrides `retrySchedule` and `maxAttempts` for this endpoint. Read on every attempt, so a change applies to the next one. */
+  readonly retry?: WebhookEndpointRetry;
+}
+
+/** An endpoint's own retry policy. A field left out uses the `Webhooks` config. */
+export interface WebhookEndpointRetry {
+  readonly schedule?: readonly number[];
+  readonly maxAttempts?: number;
 }
 
 export abstract class WebhookEndpoints extends Port('WebhookEndpoints') {
@@ -114,8 +122,24 @@ export interface WebhooksConfig {
   readonly timeoutMs?: number;
   /** How long each hook may run. Default 10000. */
   readonly hookTimeoutMs?: number;
-  /** The delay before each attempt after the first, in milliseconds. Its length plus one is the number of attempts. */
+  /**
+   * The delay before each attempt after the first, in milliseconds. Default 5 s, 5 min, 30 min, 2 h, 5 h, 10 h, 10 h.
+   * When `maxAttempts` needs more delays than it has, its last delay repeats.
+   */
   readonly retrySchedule?: readonly number[];
+  /** Attempts per delivery, the first included. Default the schedule's length plus one, 8. */
+  readonly maxAttempts?: number;
+  /** Each scheduled delay varies by up to this share either way. Default 0.2. 0 gives exact delays. */
+  readonly retryJitter?: number;
+  /**
+   * The longest delay a `Retry-After` on a 429, 502, 503, or 504 can set. A `Retry-After` never makes the delay shorter than the schedule's.
+   * Default twice the scheduled delay.
+   */
+  readonly maxRetryAfterMs?: number;
+  /** Whether a failed attempt gets another. Default retries every failure. A 410 always ends retries. A throw counts as true. */
+  readonly shouldRetry?: (result: WebhookResult) => boolean;
+  /** How much of each response body is read and kept in `responseBody`. Default 20480, 20 KB. */
+  readonly maxResponseBytes?: number;
   /** The largest serialized payload `publish` accepts. Default 262144, 256 KB. */
   readonly maxPayloadBytes?: number;
   /** Refuses `http:` endpoints. Default true. */
@@ -188,22 +212,68 @@ const CANCELLED: WebhookResult = {
   responseBody: '',
 };
 
+/** How one delivery retries. */
+export interface RetryPolicy {
+  readonly schedule: readonly number[];
+  readonly maxAttempts: number;
+  readonly jitter: number;
+  /** Undefined caps a `Retry-After` at twice the scheduled delay. */
+  readonly maxRetryAfterMs: number | undefined;
+}
+
 /**
  * Milliseconds until the attempt after `attempt`, or undefined when `attempt` was the last.
- * The schedule's delay gets ±20% jitter from `random`. A `retryAfterMs` replaces it, clamped between the delay and twice it.
+ * Past the schedule's end, its last delay repeats. The delay gets ±`jitter` from `random`.
+ * A `retryAfterMs` replaces it, no shorter than the delay and no longer than `maxRetryAfterMs`.
  */
 export function retryDelayMs(
   attempt: number,
-  schedule: readonly number[],
+  policy: RetryPolicy,
   random: number,
   retryAfterMs?: number,
 ): number | undefined {
-  const base = schedule[attempt - 1];
+  if (attempt >= policy.maxAttempts) return undefined;
+  const base = policy.schedule[Math.min(attempt, policy.schedule.length) - 1];
   if (base === undefined) return undefined;
   if (retryAfterMs !== undefined) {
-    return Math.min(Math.max(retryAfterMs, base), base * 2);
+    const cap = Math.max(base, policy.maxRetryAfterMs ?? base * 2);
+    return Math.min(Math.max(retryAfterMs, base), cap);
   }
-  return Math.round(base * (0.8 + 0.4 * random));
+  return Math.round(base * (1 - policy.jitter + 2 * policy.jitter * random));
+}
+
+/** Why a schedule and attempt count cannot work together, or undefined when they can. */
+function retryProblem(
+  schedule: readonly number[],
+  maxAttempts: number,
+): string | undefined {
+  if (!schedule.every((delay) => Number.isFinite(delay) && delay >= 0)) {
+    return 'every retrySchedule delay must be a finite number, zero or more';
+  }
+  if (!Number.isSafeInteger(maxAttempts) || maxAttempts < 1) {
+    return 'maxAttempts must be a positive integer';
+  }
+  if (maxAttempts > 1 && schedule.length === 0) {
+    return 'maxAttempts above 1 needs at least one retrySchedule delay';
+  }
+  return undefined;
+}
+
+function assertPositiveInteger(name: string, value: number): void {
+  if (!Number.isSafeInteger(value) || value < 1) {
+    throw new Error(`webhooks: ${name} must be a positive integer`);
+  }
+}
+
+function assertPositive(name: string, value: number): void {
+  if (!(Number.isFinite(value) && value > 0)) {
+    throw new Error(`webhooks: ${name} must be a finite number above 0`);
+  }
+}
+
+/** Over the per-endpoint cap, a delivery waits 1 to 5 s, doubling with each push-back in a row, up to 60 s. */
+function pushbackMs(pushbacks: number, random: number): number {
+  return Math.min(Math.floor((1000 + random * 4000) * 2 ** pushbacks), 60_000);
 }
 
 /** Our own failures back off from 30 s, doubling to 5 min. */
@@ -233,6 +303,8 @@ interface DeliveryEntry extends EntryBase {
   readonly endpointId: string;
   readonly deliveryId: string;
   readonly attempt: number;
+  /** Push-backs over the per-endpoint cap in a row. An attempt resets it. */
+  readonly pushbacks: number;
 }
 
 type Entry = EventEntry | DeliveryEntry;
@@ -289,19 +361,28 @@ function entryOf(value: unknown): Entry | undefined {
     value.kind !== 'delivery' ||
     !('endpointId' in value) ||
     !('deliveryId' in value) ||
-    !('attempt' in value)
+    !('attempt' in value) ||
+    !('pushbacks' in value)
   ) {
     return undefined;
   }
-  const { endpointId, deliveryId, attempt } = value;
+  const { endpointId, deliveryId, attempt, pushbacks } = value;
   if (
     typeof endpointId !== 'string' ||
     typeof deliveryId !== 'string' ||
-    !isCount(attempt, 1)
+    !isCount(attempt, 1) ||
+    !isCount(pushbacks, 0)
   ) {
     return undefined;
   }
-  return { kind: 'delivery', ...base, endpointId, deliveryId, attempt };
+  return {
+    kind: 'delivery',
+    ...base,
+    endpointId,
+    deliveryId,
+    attempt,
+    pushbacks,
+  };
 }
 
 /** The Standard Webhooks envelope, `{ type, timestamp, data }`, serialized. */
@@ -322,7 +403,8 @@ export class Webhooks<E extends WebhookEvent> {
   readonly #concurrency: number;
   readonly #endpointConcurrency: number;
   readonly #hookTimeoutMs: number;
-  readonly #retrySchedule: readonly number[];
+  readonly #retry: RetryPolicy;
+  readonly #shouldRetry: (result: WebhookResult) => boolean;
   readonly #maxPayloadBytes: number;
   readonly #now: () => Date;
   readonly #random: () => number;
@@ -332,6 +414,7 @@ export class Webhooks<E extends WebhookEvent> {
   /** Aborts every send on `stop()`. */
   #stopping = new AbortController();
 
+  /** Throws when a number in `config` is out of range. */
   constructor(deps: WebhooksDeps<E>, config: WebhooksConfig = {}) {
     this.#events = deps.events;
     this.#queue = deps.queue;
@@ -341,16 +424,44 @@ export class Webhooks<E extends WebhookEvent> {
     this.#concurrency = config.concurrency ?? 50;
     this.#endpointConcurrency = config.endpointConcurrency ?? 5;
     this.#hookTimeoutMs = config.hookTimeoutMs ?? 10_000;
-    this.#retrySchedule = config.retrySchedule ?? RETRY_SCHEDULE;
     this.#maxPayloadBytes = config.maxPayloadBytes ?? 256 * 1024;
     this.#now = config.now ?? (() => new Date());
     this.#random = config.random ?? Math.random;
+    this.#shouldRetry = config.shouldRetry ?? (() => true);
     this.#http = {
       httpsOnly: config.httpsOnly ?? true,
       allowPrivate: config.allowPrivate ?? false,
       timeoutMs: config.timeoutMs ?? 15_000,
+      maxResponseBytes: config.maxResponseBytes ?? 20 * 1024,
       resolve: config.resolve ?? systemResolver,
     };
+    const schedule = config.retrySchedule ?? RETRY_SCHEDULE;
+    this.#retry = {
+      schedule,
+      maxAttempts: config.maxAttempts ?? schedule.length + 1,
+      jitter: config.retryJitter ?? 0.2,
+      maxRetryAfterMs: config.maxRetryAfterMs,
+    };
+    assertPositiveInteger('concurrency', this.#concurrency);
+    assertPositiveInteger('endpointConcurrency', this.#endpointConcurrency);
+    assertPositiveInteger('maxPayloadBytes', this.#maxPayloadBytes);
+    assertPositiveInteger('maxResponseBytes', this.#http.maxResponseBytes);
+    assertPositive('timeoutMs', this.#http.timeoutMs);
+    assertPositive('hookTimeoutMs', this.#hookTimeoutMs);
+    const problem = retryProblem(schedule, this.#retry.maxAttempts);
+    if (problem !== undefined) throw new Error(`webhooks: ${problem}`);
+    const { jitter, maxRetryAfterMs } = this.#retry;
+    if (!(Number.isFinite(jitter) && jitter >= 0 && jitter <= 1)) {
+      throw new Error('webhooks: retryJitter must be a number from 0 to 1');
+    }
+    if (
+      maxRetryAfterMs !== undefined &&
+      !(Number.isFinite(maxRetryAfterMs) && maxRetryAfterMs >= 0)
+    ) {
+      throw new Error(
+        'webhooks: maxRetryAfterMs must be a finite number, zero or more',
+      );
+    }
   }
 
   /**
@@ -401,10 +512,14 @@ export class Webhooks<E extends WebhookEvent> {
     if (!checked.ok) throw WebhookError.UnsafeUrl({ reason: checked.code });
   }
 
-  /** Sends the event once, now, to this endpoint, with the same checks. No queue, retries, or hooks. */
+  /**
+   * Sends the event once, now, to this endpoint, with the same checks. No queue, retries, or hooks.
+   * An endpoint with no secrets is not sent to, and the result is `cancelled`.
+   */
   async sendTest(input: WebhookTest<E>): Promise<WebhookResult> {
     const timestamp = this.#now().toISOString();
     const { data } = this.#prepare(input.event, timestamp);
+    if (input.endpoint.secrets.length === 0) return CANCELLED;
     const id = webhookId(input.endpoint.id, randomUUID());
     const body = bodyOf(input.event.token, timestamp, data);
     return (await this.#send(input.endpoint, id, body)).result;
@@ -459,43 +574,53 @@ export class Webhooks<E extends WebhookEvent> {
       : this.#deliver(entry, event);
   }
 
-  /** Publishes one delivery entry per endpoint. */
+  /**
+   * Publishes one delivery entry per endpoint.
+   * A failed publish retries the event with only the endpoints not yet published, so the others are not sent to twice.
+   */
   async #fanOut(entry: EventEntry, event: E): Promise<Outcome> {
+    let endpointIds: readonly string[];
     try {
-      const endpointIds =
+      endpointIds =
         entry.endpointIds ??
         (
           await this.#endpoints.subscribed(entry.organizationId, event.token)
         ).map((endpoint) => endpoint.id);
-      for (const endpointId of endpointIds) {
-        const delivery: DeliveryEntry = {
-          kind: 'delivery',
-          organizationId: entry.organizationId,
-          eventId: entry.eventId,
-          key: entry.key,
-          data: entry.data,
-          timestamp: entry.timestamp,
-          failures: 0,
-          endpointId,
-          deliveryId: randomUUID(),
-          attempt: 1,
-        };
-        await this.#queue.publish(TOPIC, delivery);
-      }
-      return 'ack';
     } catch (error) {
       return this.#ownFailure(entry, error);
     }
+    for (const [index, endpointId] of endpointIds.entries()) {
+      const delivery: DeliveryEntry = {
+        kind: 'delivery',
+        organizationId: entry.organizationId,
+        eventId: entry.eventId,
+        key: entry.key,
+        data: entry.data,
+        timestamp: entry.timestamp,
+        failures: 0,
+        endpointId,
+        deliveryId: randomUUID(),
+        attempt: 1,
+        pushbacks: 0,
+      };
+      try {
+        await this.#queue.publish(TOPIC, delivery);
+      } catch (error) {
+        const rest = { ...entry, endpointIds: endpointIds.slice(index) };
+        return this.#ownFailure(rest, error);
+      }
+    }
+    return 'ack';
   }
 
-  /** Over the per-endpoint cap, the delivery is pushed back 1 to 5 s without counting an attempt. */
+  /** Over the per-endpoint cap, the delivery is pushed back without counting an attempt. */
   async #deliver(entry: DeliveryEntry, event: E): Promise<Outcome> {
     const slot = `${entry.organizationId}\0${entry.endpointId}`;
     const active = this.#active.get(slot) ?? 0;
     if (active >= this.#endpointConcurrency) {
       return {
-        retryInMs: 1000 + Math.floor(this.#random() * 4000),
-        payload: entry,
+        retryInMs: pushbackMs(entry.pushbacks, this.#random()),
+        payload: { ...entry, pushbacks: entry.pushbacks + 1 },
       };
     }
     this.#active.set(slot, active + 1);
@@ -528,7 +653,14 @@ export class Webhooks<E extends WebhookEvent> {
       attempt: entry.attempt,
     };
     const fields = this.#fields(entry);
-    if (endpoint === null) {
+    if (endpoint?.secrets.length === 0) {
+      this.#logger.error(
+        new Error(`webhooks: endpoint ${entry.endpointId} has no secrets`),
+        fields,
+      );
+    }
+    // A missing endpoint, or one with no secrets to sign with, ends the delivery with no request.
+    if (endpoint === null || endpoint.secrets.length === 0) {
       await this.#hook('onWebhookFailure', call, fields, (withSignal) =>
         this.#hooks.onWebhookFailure?.(withSignal, CANCELLED, {
           attempt: entry.attempt,
@@ -560,14 +692,15 @@ export class Webhooks<E extends WebhookEvent> {
       result.status !== undefined && THROTTLED.has(result.status)
         ? outcome.retryAfterMs
         : undefined;
-    const delayMs = gone
-      ? undefined
-      : retryDelayMs(
-          entry.attempt,
-          this.#retrySchedule,
-          this.#random(),
-          retryAfterMs,
-        );
+    const delayMs =
+      gone || !this.#retries(result, fields)
+        ? undefined
+        : retryDelayMs(
+            entry.attempt,
+            this.#policyOf(endpoint, fields),
+            this.#random(),
+            retryAfterMs,
+          );
     const info: WebhookFailureInfo =
       delayMs === undefined
         ? { attempt: entry.attempt, exhausted: true, gone }
@@ -583,8 +716,49 @@ export class Webhooks<E extends WebhookEvent> {
     if (delayMs === undefined) return 'ack';
     return {
       retryInMs: delayMs,
-      payload: { ...entry, attempt: entry.attempt + 1, failures: 0 },
+      payload: {
+        ...entry,
+        attempt: entry.attempt + 1,
+        failures: 0,
+        pushbacks: 0,
+      },
     };
+  }
+
+  /** `shouldRetry`'s answer. A throw is logged and counts as true. */
+  #retries(result: WebhookResult, fields: Record<string, unknown>): boolean {
+    try {
+      return this.#shouldRetry(result);
+    } catch (error) {
+      this.#logger.error(
+        error instanceof Error
+          ? error
+          : new Error('webhooks: shouldRetry failed'),
+        fields,
+      );
+      return true;
+    }
+  }
+
+  /** The config's retry policy with the endpoint's overrides. An override that cannot work is logged and ignored. */
+  #policyOf(
+    endpoint: WebhookEndpoint,
+    fields: Record<string, unknown>,
+  ): RetryPolicy {
+    if (endpoint.retry === undefined) return this.#retry;
+    const schedule = endpoint.retry.schedule ?? this.#retry.schedule;
+    const maxAttempts =
+      endpoint.retry.maxAttempts ??
+      (endpoint.retry.schedule === undefined
+        ? this.#retry.maxAttempts
+        : schedule.length + 1);
+    const problem = retryProblem(schedule, maxAttempts);
+    if (problem === undefined) return { ...this.#retry, schedule, maxAttempts };
+    this.#logger.error(
+      new Error(`webhooks: endpoint retry ignored, ${problem}`),
+      fields,
+    );
+    return this.#retry;
   }
 
   /** Signs with every secret and sends. The stop signal aborts it. */

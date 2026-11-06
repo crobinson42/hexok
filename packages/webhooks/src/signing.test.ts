@@ -58,6 +58,16 @@ describe('verify', () => {
     }
   });
 
+  it('uses toleranceMs in place of 5 minutes, and is false for a tolerance that is not a number zero or more', () => {
+    const later = new Date(at.getTime() + 600_000);
+    expect(verify({ ...valid, now: later })).toBe(false);
+    expect(verify({ ...valid, now: later, toleranceMs: 900_000 })).toBe(true);
+    expect(verify({ ...valid, now: later, toleranceMs: 599_000 })).toBe(false);
+    expect(verify({ ...valid, toleranceMs: 0 })).toBe(true);
+    expect(verify({ ...valid, toleranceMs: -1 })).toBe(false);
+    expect(verify({ ...valid, toleranceMs: Number.NaN })).toBe(false);
+  });
+
   it('accepts either of two secrets, and either of two signatures', () => {
     const next = generateSecret();
     expect(verify({ ...valid, secrets: [next, secret] })).toBe(true);

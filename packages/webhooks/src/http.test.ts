@@ -37,12 +37,19 @@ const local: HttpOptions = {
   httpsOnly: false,
   allowPrivate: true,
   timeoutMs: 15_000,
+  maxResponseBytes: 20 * 1024,
   resolve: async () => [{ address: '127.0.0.1', family: 4 }],
 };
 
 /** The production defaults, with a resolver that never reaches the network. */
 function strict(resolve: WebhookResolver): HttpOptions {
-  return { httpsOnly: true, allowPrivate: false, timeoutMs: 15_000, resolve };
+  return {
+    httpsOnly: true,
+    allowPrivate: false,
+    timeoutMs: 15_000,
+    maxResponseBytes: 20 * 1024,
+    resolve,
+  };
 }
 
 /** The result of one send. */
@@ -136,7 +143,7 @@ describe('send', () => {
     expect(result.responseBody).toBe('x'.repeat(20 * 1024));
   });
 
-  it('blocks private IP literals, IPv4-mapped IPv6 included, without resolving', async () => {
+  it('blocks private IP literals, IPv4-mapped, IPv4-compatible, and NAT64 IPv6 included, without resolving', async () => {
     const resolve = vi.fn<WebhookResolver>(async () => []);
     for (const url of [
       'https://127.0.0.1',
@@ -145,6 +152,9 @@ describe('send', () => {
       'https://[::ffff:10.0.0.1]',
       'https://0.0.0.0',
       'https://[fd00::1]',
+      'https://[::7f00:1]',
+      'https://[::a00:1]',
+      'https://[64:ff9b:1::a00:1]',
     ]) {
       expect(await sent(post(url), strict(resolve))).toMatchObject({
         error: 'blocked',

@@ -13,8 +13,10 @@ import {
 import { Adapter, Event, EventCatalog } from 'hexok';
 import { afterEach, describe, expect, it } from 'vitest';
 import { z } from 'zod';
+import type { WebhookResult } from './http.js';
 import { verify } from './signing.js';
 import {
+  type RetryPolicy,
   retryDelayMs,
   type WebhookEndpoint,
   WebhookEndpoints,
@@ -22,6 +24,7 @@ import {
   type WebhookFailureInfo,
   type WebhookHooks,
   Webhooks,
+  type WebhooksConfig,
 } from './webhooks.js';
 
 class ReportSubmitted extends Event(
@@ -50,12 +53,15 @@ class DelayQueue extends Adapter(Queue) {
   }> = [];
   subscription: QueueSubscribeOptions<unknown> | undefined;
   unsubscribed = 0;
+  /** A publish whose payload matches throws instead. */
+  failOn: ((payload: unknown) => boolean) | undefined;
 
   async publish(
     topic: string,
     payload: unknown,
     options: QueuePublishOptions = {},
   ): Promise<string> {
+    if (this.failOn?.(payload)) throw new Error('queue down');
     this.published.push({ topic, payload, delayMs: options.delayMs ?? 0 });
     return `${this.published.length}-0`;
   }
@@ -193,6 +199,7 @@ async function setup(
     url?: string;
     hooks?: WebhookHooks<TestEvent>;
     hookTimeoutMs?: number;
+    config?: WebhooksConfig;
   } = {},
 ) {
   const queue = new DelayQueue();
@@ -222,6 +229,7 @@ async function setup(
       ...(options.hookTimeoutMs === undefined
         ? {}
         : { hookTimeoutMs: options.hookTimeoutMs }),
+      ...options.config,
     },
   );
   await webhooks.start();
@@ -264,20 +272,101 @@ function field(value: unknown, name: string): unknown {
 }
 
 describe('retryDelayMs', () => {
-  const schedule = [5_000, 300_000];
+  const policy: RetryPolicy = {
+    schedule: [5_000, 300_000],
+    maxAttempts: 3,
+    jitter: 0.2,
+    maxRetryAfterMs: undefined,
+  };
 
-  it('follows the schedule with ±20% jitter and ends after its last entry', () => {
-    expect(retryDelayMs(1, schedule, 0.5)).toBe(5_000);
-    expect(retryDelayMs(1, schedule, 0)).toBe(4_000);
-    expect(retryDelayMs(1, schedule, 0.999_999)).toBe(6_000);
-    expect(retryDelayMs(2, schedule, 0.5)).toBe(300_000);
-    expect(retryDelayMs(3, schedule, 0.5)).toBeUndefined();
+  it('follows the schedule with ±20% jitter and ends at maxAttempts', () => {
+    expect(retryDelayMs(1, policy, 0.5)).toBe(5_000);
+    expect(retryDelayMs(1, policy, 0)).toBe(4_000);
+    expect(retryDelayMs(1, policy, 0.999_999)).toBe(6_000);
+    expect(retryDelayMs(2, policy, 0.5)).toBe(300_000);
+    expect(retryDelayMs(3, policy, 0.5)).toBeUndefined();
   });
 
-  it('clamps Retry-After between the delay and twice it', () => {
-    expect(retryDelayMs(1, schedule, 0.5, 1_000)).toBe(5_000);
-    expect(retryDelayMs(1, schedule, 0.5, 7_000)).toBe(7_000);
-    expect(retryDelayMs(1, schedule, 0.5, 60_000)).toBe(10_000);
+  it('repeats the last delay past the schedule, and stops early under a smaller maxAttempts', () => {
+    const longer = { ...policy, maxAttempts: 5 };
+    expect(retryDelayMs(3, longer, 0.5)).toBe(300_000);
+    expect(retryDelayMs(4, longer, 0.5)).toBe(300_000);
+    expect(retryDelayMs(5, longer, 0.5)).toBeUndefined();
+    expect(retryDelayMs(1, { ...policy, maxAttempts: 1 }, 0.5)).toBeUndefined();
+    expect(retryDelayMs(1, { ...policy, schedule: [] }, 0.5)).toBeUndefined();
+  });
+
+  it('applies the configured jitter', () => {
+    expect(retryDelayMs(1, { ...policy, jitter: 0 }, 0)).toBe(5_000);
+    expect(retryDelayMs(1, { ...policy, jitter: 0.5 }, 0)).toBe(2_500);
+    expect(retryDelayMs(1, { ...policy, jitter: 0.5 }, 0.999_999)).toBe(7_500);
+  });
+
+  it('clamps Retry-After between the delay and maxRetryAfterMs, twice the delay by default', () => {
+    expect(retryDelayMs(1, policy, 0.5, 1_000)).toBe(5_000);
+    expect(retryDelayMs(1, policy, 0.5, 7_000)).toBe(7_000);
+    expect(retryDelayMs(1, policy, 0.5, 60_000)).toBe(10_000);
+    const capped = { ...policy, maxRetryAfterMs: 3_600_000 };
+    expect(retryDelayMs(1, capped, 0.5, 60_000)).toBe(60_000);
+    expect(retryDelayMs(1, capped, 0.5, 7_200_000)).toBe(3_600_000);
+    // A cap below the delay never shortens it.
+    expect(
+      retryDelayMs(1, { ...policy, maxRetryAfterMs: 1_000 }, 0.5, 60_000),
+    ).toBe(5_000);
+  });
+});
+
+describe('Webhooks config', () => {
+  it('throws on a number out of range', () => {
+    const deps = {
+      events: TestEvents,
+      queue: new DelayQueue(),
+      endpoints: new MemoryEndpoints(),
+      logger: recordingLogger(),
+    };
+    const cases: Array<[WebhooksConfig, string]> = [
+      [{ concurrency: 0 }, 'webhooks: concurrency must be a positive integer'],
+      [
+        { endpointConcurrency: 1.5 },
+        'webhooks: endpointConcurrency must be a positive integer',
+      ],
+      [
+        { maxPayloadBytes: -1 },
+        'webhooks: maxPayloadBytes must be a positive integer',
+      ],
+      [
+        { maxResponseBytes: 0 },
+        'webhooks: maxResponseBytes must be a positive integer',
+      ],
+      [{ timeoutMs: 0 }, 'webhooks: timeoutMs must be a finite number above 0'],
+      [
+        { hookTimeoutMs: Number.POSITIVE_INFINITY },
+        'webhooks: hookTimeoutMs must be a finite number above 0',
+      ],
+      [
+        { retrySchedule: [1000, Number.NaN] },
+        'webhooks: every retrySchedule delay must be a finite number, zero or more',
+      ],
+      [{ maxAttempts: 0 }, 'webhooks: maxAttempts must be a positive integer'],
+      [
+        { retrySchedule: [], maxAttempts: 2 },
+        'webhooks: maxAttempts above 1 needs at least one retrySchedule delay',
+      ],
+      [
+        { retryJitter: 1.5 },
+        'webhooks: retryJitter must be a number from 0 to 1',
+      ],
+      [
+        { maxRetryAfterMs: -1 },
+        'webhooks: maxRetryAfterMs must be a finite number, zero or more',
+      ],
+    ];
+    for (const [config, message] of cases) {
+      expect(() => new Webhooks(deps, config)).toThrow(message);
+    }
+    expect(
+      () => new Webhooks(deps, { retrySchedule: [], maxAttempts: 1 }),
+    ).not.toThrow();
   });
 });
 
@@ -372,6 +461,46 @@ describe('Webhooks fan-out', () => {
       'ep_9',
     ]);
     expect(ctx.endpoints.subscribedCalls).toBe(0);
+  });
+
+  it('a failed publish mid fan-out retries only the endpoints not yet published', async () => {
+    const ctx = await setup();
+    for (const id of ['ep_1', 'ep_2', 'ep_3', 'ep_4', 'ep_5']) {
+      ctx.endpoints.rows.set(id, {
+        id,
+        url: `https://${id}.example.com/in`,
+        secrets: [secret],
+        events: ['report.submitted'],
+      });
+    }
+    await ctx.webhooks.publish({
+      organizationId: 'org_1',
+      eventId: 'e1',
+      event: report(),
+    });
+    const [entry] = ctx.queue.take();
+    ctx.queue.failOn = (payload) => field(payload, 'endpointId') === 'ep_3';
+    const first = await ctx.queue.run(entry);
+    expect(first).toMatchObject({
+      retryInMs: 30_000,
+      payload: {
+        kind: 'event',
+        failures: 1,
+        endpointIds: ['ep_3', 'ep_4', 'ep_5'],
+      },
+    });
+    expect(ctx.logger.errors[0]?.message).toBe('queue down');
+    ctx.queue.failOn = undefined;
+    expect(await ctx.queue.run(field(first, 'payload'))).toBe('ack');
+    expect(ctx.queue.take().map((item) => field(item, 'endpointId'))).toEqual([
+      'ep_1',
+      'ep_2',
+      'ep_3',
+      'ep_4',
+      'ep_5',
+    ]);
+    // The retry used the ids it carried.
+    expect(ctx.endpoints.subscribedCalls).toBe(1);
   });
 
   it('a throwing subscribed() is retried with backoff', async () => {
@@ -505,11 +634,15 @@ describe('Webhooks delivery', () => {
         },
       },
     });
-    let [entry] = await fannedOut(ctx);
+    const [fanned] = await fannedOut(ctx);
+    // An attempt resets the push-back count.
+    let entry: unknown = patched(fanned, { pushbacks: 2 });
     const delays: number[] = [];
     for (let attempt = 1; attempt <= 7; attempt += 1) {
       const outcome = await ctx.queue.run(entry);
-      expect(outcome).toMatchObject({ payload: { attempt: attempt + 1 } });
+      expect(outcome).toMatchObject({
+        payload: { attempt: attempt + 1, pushbacks: 0 },
+      });
       delays.push(Number(field(outcome, 'retryInMs')));
       entry = field(outcome, 'payload');
     }
@@ -545,13 +678,154 @@ describe('Webhooks delivery', () => {
     expect(failures).toEqual([{ attempt: 1, exhausted: true, gone: true }]);
   });
 
-  it('honours Retry-After on a 503, clamped to twice the delay', async () => {
+  it('honours Retry-After on a 503, clamped to twice the delay or to maxRetryAfterMs', async () => {
     const server = await endpointServer((res) =>
       res.writeHead(503, { 'retry-after': '3600' }).end(),
     );
     const ctx = await setup({ url: server.url });
     const [delivery] = await fannedOut(ctx);
     expect(await ctx.queue.run(delivery)).toMatchObject({ retryInMs: 10_000 });
+    const capped = await setup({
+      url: server.url,
+      config: { maxRetryAfterMs: 7_200_000 },
+    });
+    const [later] = await fannedOut(capped);
+    expect(await capped.queue.run(later)).toMatchObject({
+      retryInMs: 3_600_000,
+    });
+  });
+
+  it('maxAttempts and retryJitter set the attempts and exact delays', async () => {
+    const server = await endpointServer((res) => res.writeHead(500).end());
+    const failures: WebhookFailureInfo[] = [];
+    const ctx = await setup({
+      url: server.url,
+      config: { retrySchedule: [1_000], maxAttempts: 3, retryJitter: 0 },
+      hooks: {
+        onWebhookFailure: (_call, _result, info) => void failures.push(info),
+      },
+    });
+    let [entry] = await fannedOut(ctx);
+    for (let attempt = 1; attempt <= 2; attempt += 1) {
+      const outcome = await ctx.queue.run(entry);
+      expect(outcome).toMatchObject({ retryInMs: 1_000 });
+      entry = field(outcome, 'payload');
+    }
+    expect(await ctx.queue.run(entry)).toBe('ack');
+    expect(failures.map((info) => info.exhausted)).toEqual([
+      false,
+      false,
+      true,
+    ]);
+  });
+
+  it('shouldRetry ends retries for the failures it refuses, and a throw counts as true', async () => {
+    const server = await endpointServer((res) => res.writeHead(400).end());
+    const failures: WebhookFailureInfo[] = [];
+    const seen: WebhookResult[] = [];
+    const ctx = await setup({
+      url: server.url,
+      config: {
+        shouldRetry: (result) => {
+          seen.push(result);
+          return result.status !== 400;
+        },
+      },
+      hooks: {
+        onWebhookFailure: (_call, _result, info) => void failures.push(info),
+      },
+    });
+    const [delivery] = await fannedOut(ctx);
+    expect(await ctx.queue.run(delivery)).toBe('ack');
+    expect(seen).toEqual([expect.objectContaining({ status: 400 })]);
+    expect(failures).toEqual([{ attempt: 1, exhausted: true, gone: false }]);
+
+    const throwing = await setup({
+      url: server.url,
+      config: {
+        shouldRetry: () => {
+          throw new Error('policy broke');
+        },
+      },
+    });
+    const [again] = await fannedOut(throwing);
+    expect(await throwing.queue.run(again)).toMatchObject({ retryInMs: 5_000 });
+    expect(throwing.logger.errors[0]?.message).toBe('policy broke');
+  });
+
+  it('an endpoint retry policy overrides the config, and one that cannot work is logged and ignored', async () => {
+    const server = await endpointServer((res) => res.writeHead(500).end());
+    const ctx = await setup({ url: server.url });
+    const row = ctx.endpoints.rows.get('ep_1');
+    if (!row) throw new Error('missing endpoint');
+    ctx.endpoints.rows.set('ep_1', {
+      ...row,
+      retry: { schedule: [2_000], maxAttempts: 2 },
+    });
+    const [delivery] = await fannedOut(ctx);
+    const first = await ctx.queue.run(delivery);
+    expect(first).toMatchObject({ retryInMs: 2_000 });
+    expect(await ctx.queue.run(field(first, 'payload'))).toBe('ack');
+
+    // A schedule alone sets the attempts to its length plus one.
+    ctx.endpoints.rows.set('ep_1', { ...row, retry: { schedule: [] } });
+    const [single] = await fannedOut(ctx, 'report.submitted:r2:1');
+    expect(await ctx.queue.run(single)).toBe('ack');
+
+    ctx.endpoints.rows.set('ep_1', { ...row, retry: { maxAttempts: 0 } });
+    const [broken] = await fannedOut(ctx, 'report.submitted:r3:1');
+    expect(await ctx.queue.run(broken)).toMatchObject({ retryInMs: 5_000 });
+    expect(ctx.logger.errors.map((error) => error.message)).toEqual([
+      'webhooks: endpoint retry ignored, maxAttempts must be a positive integer',
+    ]);
+  });
+
+  it('keeps maxResponseBytes of the response body', async () => {
+    const server = await endpointServer((res) =>
+      res.writeHead(200).end('x'.repeat(100)),
+    );
+    const bodies: string[] = [];
+    const ctx = await setup({
+      url: server.url,
+      config: { maxResponseBytes: 10 },
+      hooks: {
+        onWebhookSuccess: (_call, result) =>
+          void bodies.push(result.responseBody),
+      },
+    });
+    const [delivery] = await fannedOut(ctx);
+    expect(await ctx.queue.run(delivery)).toBe('ack');
+    expect(bodies).toEqual(['x'.repeat(10)]);
+  });
+
+  it('an endpoint with no secrets is not sent to, reports cancelled, and is logged', async () => {
+    const server = await endpointServer();
+    const failures: Array<{ url: string; error: unknown }> = [];
+    const ctx = await setup({
+      url: server.url,
+      hooks: {
+        onWebhookFailure: (call, result, info) => {
+          failures.push({ url: call.endpoint.url, error: result.error });
+          expect(info).toEqual({ attempt: 1, exhausted: true, gone: false });
+        },
+      },
+    });
+    const row = ctx.endpoints.rows.get('ep_1');
+    if (!row) throw new Error('missing endpoint');
+    ctx.endpoints.rows.set('ep_1', { ...row, secrets: [] });
+    const [delivery] = await fannedOut(ctx);
+    expect(await ctx.queue.run(delivery)).toBe('ack');
+    expect(failures).toEqual([{ url: server.url, error: 'cancelled' }]);
+    expect(ctx.logger.errors.map((error) => error.message)).toEqual([
+      'webhooks: endpoint ep_1 has no secrets',
+    ]);
+    expect(
+      await ctx.webhooks.sendTest({
+        endpoint: { id: 'ep_1', url: server.url, secrets: [] },
+        event: report(),
+      }),
+    ).toEqual({ error: 'cancelled', durationMs: 0, responseBody: '' });
+    expect(server.received).toEqual([]);
   });
 
   it('get() returning null sends nothing and reports cancelled', async () => {
@@ -632,7 +906,19 @@ describe('Webhooks delivery', () => {
       await new Promise((resolve) => setTimeout(resolve, 5));
     const sixth = deliveries[5];
     const pushed = await ctx.queue.run(sixth);
-    expect(pushed).toEqual({ retryInMs: 3000, payload: sixth });
+    expect(pushed).toEqual({
+      retryInMs: 3000,
+      payload: patched(sixth, { pushbacks: 1 }),
+    });
+    // Each push-back in a row doubles the wait, up to 60 s.
+    expect(await ctx.queue.run(field(pushed, 'payload'))).toEqual({
+      retryInMs: 6000,
+      payload: patched(sixth, { pushbacks: 2 }),
+    });
+    expect(await ctx.queue.run(patched(sixth, { pushbacks: 5 }))).toEqual({
+      retryInMs: 60_000,
+      payload: patched(sixth, { pushbacks: 6 }),
+    });
     expect(server.received).toHaveLength(5);
     holding = false;
     for (const res of held) res.writeHead(200).end();

@@ -42,11 +42,14 @@ class MongoWebhookEndpoints extends Adapter(WebhookEndpoints) {
 }
 ```
 
-A `WebhookEndpoint` is `{ id, url, secrets }`. `secrets` holds `whsec_` secrets, newest first. Return two during a rotation window, and each request carries a signature for each.
+A `WebhookEndpoint` is `{ id, url, secrets, retry? }`. `secrets` holds `whsec_` secrets, newest first. Return two during a rotation window, and each request carries a signature for each. An endpoint with no secrets is not sent to. See [Hooks](#hooks).
+
+`retry` is `{ schedule?, maxAttempts? }`, the endpoint's own retry policy, such as a longer window for one plan. A field left out uses the config. A `schedule` without `maxAttempts` gives its length plus one attempts. `get` returns it before every attempt, so a change applies to the next attempt. A policy that cannot work, such as `maxAttempts: 0`, is logged and the config's is used.
 
 - `subscribed` is called once per publish, by the worker.
 - `get` is called before every attempt. At volume, cache it briefly. A cached secret lags a rotation by the cache time, which is safe while the old secret stays in the window.
 - A throw from either is the sender's own failure. It is retried with backoff, and no attempt is counted.
+- Both must return. There is no timeout on them, and a call that hangs holds a concurrency slot.
 
 ## Publish
 
@@ -118,12 +121,13 @@ const hooks: WebhookHooks<EventInstance<typeof WebhookEvents>> = {
 | `attempt` | 1-based. |
 | `signal` | Aborted when this hook's timeout passes. |
 
-`WebhookResult` is `{ status?, error?, durationMs, responseBody }`. `status` is absent when no response arrived. `responseBody` is the first 20 KB. `error` is one of `http`, `timeout`, `dns`, `tls`, `connection`, `blocked`, or `cancelled`. `WebhookFailureInfo` is `{ attempt, exhausted, gone, nextAttemptAt? }`.
+`WebhookResult` is `{ status?, error?, durationMs, responseBody }`. `status` is absent when no response arrived. `responseBody` is the first `maxResponseBytes`, 20 KB by default. `error` is one of `http`, `timeout`, `dns`, `tls`, `connection`, `blocked`, or `cancelled`. `WebhookFailureInfo` is `{ attempt, exhausted, gone, nextAttemptAt? }`.
 
 - Hooks run in order, `onWebhookCall`, then the send, then `onWebhookSuccess` or `onWebhookFailure`. Each is awaited before the queue entry settles, up to `hookTimeoutMs`. Its `signal` aborts at the timeout.
 - A hook that throws or times out is logged and changes nothing else. A hook that times out keeps running until it returns.
 - Hooks run at least once. A crash after a hook and before the entry settles repeats that attempt and its hooks. `deliveryId` and `attempt` together are an idempotent key for a log row.
 - When `get` returns null, no request is sent. `onWebhookFailure` runs with `error: 'cancelled'` and `exhausted: true`, so a log row that shows a next attempt can be closed.
+- When `get` returns an endpoint with no secrets, the same happens, `call.endpoint.url` is set, and the sender logs an error.
 - A slow hook holds a concurrency slot for up to its timeout.
 
 ## Endpoint forms
@@ -138,7 +142,7 @@ const result = await webhooks.sendTest({ endpoint, event: new ReportSubmitted(sa
 
 - `checkUrl` runs the sender's URL check: the scheme, then every address the host resolves to. It throws `WebhookError.UnsafeUrl` with `data.reason` of `invalid`, `scheme`, `blocked`, or `unresolved`. The sender checks again at connect time, so a host that later resolves to a private address still fails.
 - `generateSecret` returns `whsec_` and 32 random bytes in base64.
-- `sendTest` sends the event once, now, to the endpoint passed in, with the same checks. It uses no queue, no retries, and no hooks, and resolves the `WebhookResult`. Its `webhook-id` is random, so a receiver never dedupes a test against a real event.
+- `sendTest` sends the event once, now, to the endpoint passed in, with the same checks. It uses no queue, no retries, and no hooks, and resolves the `WebhookResult`. Its `webhook-id` is random, so a receiver never dedupes a test against a real event. An endpoint with no secrets is not sent to, and the result is `cancelled`.
 
 ## Guarantees
 
@@ -146,11 +150,11 @@ Delivery is at least once from a successful `publish`. A receiver can get an eve
 
 - Every entry is a queue entry, so a delivery survives a worker crash and a restart of every worker. A worker killed mid-send leaves its entry pending, and another worker sends the same attempt with the same `webhook-id` and `deliveryId`.
 - A 2xx is success. Any other status, and every send error, is a failure.
-- A failure is retried on the schedule below. The retry is a queue retry result, so the entry is acked and its replacement scheduled in one step. A retry is never lost or doubled.
-- A 410 Gone stops the delivery. The failure info has `gone` and `exhausted` set. The product disables the endpoint.
+- A failure is retried on the schedule below, unless `shouldRetry` refuses it. The retry is a queue retry result, so the entry is acked and its replacement scheduled in one step. A retry is never lost or doubled.
+- A 410 Gone stops the delivery, whatever `shouldRetry` says. The failure info has `gone` and `exhausted` set. The product disables the endpoint.
 - A 3xx is a failure. Redirects are never followed.
 - There is no order per endpoint. Retries and parallel sends reorder deliveries.
-- A fan-out that fails partway is retried whole. The endpoints already written get a second delivery with the same `webhook-id`.
+- A fan-out that fails partway is retried with only the endpoints not yet written. When a publish wrote its entry and still threw, such as on a timeout, that one endpoint gets two deliveries with the same `webhook-id`.
 
 ## Retries
 
@@ -165,21 +169,34 @@ Delivery is at least once from a successful `publish`. A receiver can get an eve
 | 7 | 10 h |
 | 8 | 10 h |
 
-Eight attempts over about 27.5 hours. Each delay gets ±20% jitter. On a 429, 502, 503, or 504, a `Retry-After` in seconds or as an HTTP date replaces the delay, clamped between the delay and twice it. The 8th failure reports `exhausted: true`.
+This is the default: eight attempts over about 27.5 hours. Each delay gets ±20% jitter. On a 429, 502, 503, or 504, a `Retry-After` in seconds or as an HTTP date replaces the delay. It is never shorter than the delay, and never longer than `maxRetryAfterMs`, twice the delay by default. The last failure reports `exhausted: true`.
+
+`retrySchedule`, `maxAttempts`, `retryJitter`, `maxRetryAfterMs`, and `shouldRetry` change it. When `maxAttempts` needs more delays than the schedule has, the last delay repeats, so `retrySchedule: [5_000, 300_000, 1_800_000]` with `maxAttempts: 20` retries every 30 minutes after the third attempt. An endpoint's `retry` overrides the schedule and the attempts for that endpoint.
+
+```ts
+new Webhooks(deps, {
+  maxAttempts: 5,
+  // A 4xx other than 408 and 429 is the receiver's error, and another attempt will not fix it.
+  shouldRetry: (result) =>
+    result.status === undefined || result.status >= 500 || result.status === 408 || result.status === 429,
+});
+```
+
+`shouldRetry` gets the failed `WebhookResult`. False ends the delivery with `exhausted: true`. A throw is logged and counts as true.
 
 The sender's own failures, a throw from `subscribed`, `get`, or the fan-out's queue publish, are retried at 30 s, doubling to 5 min, with no attempt counted. An entry that no longer parses, such as one for an event removed from the catalog, is logged and dropped.
 
-Over the per-endpoint cap, a delivery is pushed back 1 to 5 s without counting an attempt. The cap is per process, so N worker processes send up to N times `endpointConcurrency` requests at once to one endpoint.
+Over the per-endpoint cap, a delivery is pushed back without counting an attempt. The first push-back waits 1 to 5 s, and each one in a row doubles that, up to 60 s. An attempt resets it. The cap is per process, so N worker processes send up to N times `endpointConcurrency` requests at once to one endpoint.
 
 ## Sending
 
 Each send is one `POST` with `content-type: application/json` and the headers `webhook-id`, `webhook-timestamp`, and `webhook-signature`. The body is `{ type, timestamp, data }`. `type` is the event token, `timestamp` is the publish time as an ISO string, and `data` is the validated JSON form. `webhook-timestamp` is the send time of each attempt, in seconds.
 
 - One deadline, `timeoutMs`, covers DNS, connect, TLS, and the response body. A server that trickles its response is cut off at the deadline.
-- Only public addresses are allowed, IP literals included, unless `allowPrivate` is set. The socket's `lookup` resolves the host and checks every address. A host with any address that is not public fails as `blocked`, and the connection goes only to an address that passed, so DNS rebinding cannot slip past. An IP literal, IPv4-mapped IPv6 included, is checked before connecting.
+- Only public addresses are allowed, IP literals included, unless `allowPrivate` is set. The socket's `lookup` resolves the host and checks every address. A host with any address that is not public fails as `blocked`, and the connection goes only to an address that passed, so DNS rebinding cannot slip past. An IP literal, IPv4-mapped IPv6 included, is checked before connecting. The blocked ranges include the IPv4-compatible IPv6 addresses, such as `::7f00:1`, and the NAT64 prefixes.
 - `httpsOnly` refuses `http:` URLs.
 - A send opens its own connection and never reuses a pooled one. A pooled socket would skip the address check for that request.
-- The first 20 KB of the response body is kept. The rest is not read.
+- The first `maxResponseBytes` of the response body is kept, 20 KB by default. The rest is not read.
 
 ## Signing
 
@@ -197,7 +214,7 @@ const valid = verify({
 ```
 
 - `sign` returns `v1,` and the base64 HMAC-SHA256 of `<id>.<timestamp>.<body>`, keyed with the base64 part of the `whsec_` secret. `timestamp` is whole seconds.
-- `verify` accepts a header of space-separated signatures and a list of secrets. One match is enough. It checks lengths before `timingSafeEqual`. It returns false for a malformed header, a malformed timestamp, or a timestamp more than 5 minutes from now.
+- `verify` accepts a header of space-separated signatures and a list of secrets. One match is enough. It checks lengths before `timingSafeEqual`. It returns false for a malformed header, a malformed timestamp, or a timestamp further from now than `toleranceMs`, 5 minutes by default. A `toleranceMs` that is not a number zero or more returns false.
 - `webhookId(organizationId, eventId)` is the id `publish` uses. It never holds a dot.
 
 ## Configuration
@@ -210,7 +227,12 @@ const valid = verify({
 | `endpointConcurrency` | `5` | Sends at once to one endpoint per worker process. Keeps one dead endpoint from filling every slot. |
 | `timeoutMs` | `15000` | One deadline over DNS, connect, TLS, and the response body. The spec range is 15 to 30 seconds. |
 | `hookTimeoutMs` | `10000` | How long each hook may run before it is logged and its signal aborts. |
-| `retrySchedule` | the table above | The delay before each attempt after the first, in milliseconds. Its length plus one is the number of attempts. |
+| `retrySchedule` | the table above | The delay before each attempt after the first, in milliseconds. Past its end, the last delay repeats. |
+| `maxAttempts` | the schedule's length plus one, `8` | Attempts per delivery, the first included. |
+| `retryJitter` | `0.2` | Each scheduled delay varies by up to this share either way. `0` gives exact delays. |
+| `maxRetryAfterMs` | twice the delay | The longest delay a `Retry-After` can set. |
+| `shouldRetry` | retries every failure | Whether a failed attempt gets another. A 410 always ends retries. |
+| `maxResponseBytes` | `20480` | How much of each response body is read and kept, 20 KB. The product stores it in its delivery log. |
 | `maxPayloadBytes` | `262144` | The largest serialized envelope `publish` accepts, 256 KB. |
 | `httpsOnly` | `true` | Refuses `http:` endpoints. |
 | `allowPrivate` | `false` | Allows private, loopback, and link-local addresses. For local development and tests. |
@@ -220,7 +242,9 @@ const valid = verify({
 
 `httpsOnly` and `allowPrivate` come from the config only. The package never reads the environment.
 
-These are fixed: the 20 KB response cap, ±20% jitter, the Retry-After clamp, the 1 to 5 s push-back, the 30 s to 5 min own-failure backoff, and the 5 minute `verify` tolerance.
+The constructor throws when a number is out of range, such as a `concurrency` that is not a positive integer or a negative delay.
+
+These are fixed: the push-back over the per-endpoint cap and the 30 s to 5 min own-failure backoff. They protect the queue, and a receiver never sees them.
 
 ### Errors
 
@@ -240,6 +264,9 @@ The `logger` dep is structural. `@hexok/logger` and `console` fit it. Every log 
 | --- | --- |
 | A queue entry no longer parses and is dropped | `package`, `id`, the queue entry id |
 | `subscribed`, `get`, or the fan-out's queue publish throws | `package`, `organizationId`, `eventId`, and the delivery fields on a delivery |
+| `get` returned an endpoint with no secrets | the delivery fields |
+| An endpoint's `retry` cannot work and is ignored | the delivery fields |
+| `shouldRetry` throws | the delivery fields |
 | A hook throws | the delivery fields, plus `hook` |
 | A hook does not finish within `hookTimeoutMs` | the delivery fields, plus `hook` |
 

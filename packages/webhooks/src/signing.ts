@@ -6,7 +6,7 @@ import {
 } from 'node:crypto';
 
 /** How far `webhook-timestamp` may be from now, either way, for {@link verify} to accept it. */
-const TOLERANCE_SECONDS = 5 * 60;
+const TOLERANCE_MS = 5 * 60 * 1000;
 
 const SECRET_PREFIX = 'whsec_';
 
@@ -34,6 +34,8 @@ export interface VerifyInput {
   readonly body: string;
   /** Defaults to now. */
   readonly now?: Date;
+  /** How far the timestamp may be from now. Default 300000, 5 minutes. */
+  readonly toleranceMs?: number;
 }
 
 /** The Standard Webhooks `v1,<base64>` signature of `<id>.<timestamp>.<body>`, an HMAC-SHA256 under the secret's key. */
@@ -49,14 +51,16 @@ export function sign(input: SignInput): string {
 }
 
 /**
- * True when one `v1` signature in the header matches one of the secrets and the timestamp is within 5 minutes of now.
- * A malformed header or timestamp is false, not a throw.
+ * True when one `v1` signature in the header matches one of the secrets and the timestamp is within `toleranceMs` of now.
+ * A malformed header or timestamp, or a `toleranceMs` that is not a number zero or more, is false, not a throw.
  */
 export function verify(input: VerifyInput): boolean {
+  const toleranceMs = input.toleranceMs ?? TOLERANCE_MS;
+  if (!(toleranceMs >= 0)) return false;
   if (!/^\d+$/.test(input.timestamp)) return false;
   const timestamp = Number(input.timestamp);
-  const now = Math.floor((input.now ?? new Date()).getTime() / 1000);
-  if (Math.abs(now - timestamp) > TOLERANCE_SECONDS) return false;
+  const now = (input.now ?? new Date()).getTime();
+  if (Math.abs(now - timestamp * 1000) > toleranceMs) return false;
   const received = input.signature
     .split(' ')
     .filter((part) => part.startsWith('v1,'))

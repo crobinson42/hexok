@@ -333,3 +333,41 @@ Decisions the plan left open:
 For a reviewer:
 
 - **Shutdown order in `worker.ts`:** the runtime first, so domain handlers can still publish, then the webhooks sender and its queue. The webhooks queue's `stopTimeoutMs` is 35 s, which together with the domain queue's 10 s exceeds a default 30 s Kubernetes grace period. The package README says to fit it in the grace period. The template does not change the grace period.
+
+### Review fixes and configurable retries (2026-11-05)
+
+A `/code-review` run on the branch found 10 issues, and its subagent found 3 more. The requester approved fixing them and making the retry policy configurable. Where this entry differs from an earlier one, this entry is current.
+
+`@hexok/queue-redis`:
+
+- **A retry goes back only to its own group.** Before, the replacement went into the topic's shared delayed set and stream, so every group on the topic handled it again. Now the delayed member is `<id>:<sensitive>:<group byte length>:<group>:<payload>`. Promote writes a `group` field, and every other group acks the entry without calling its handler or counting a delivery. A plain delayed publish names no group. The `@hexok/queue` port doc says the same.
+- **A delayed publish is timed on Redis.** `addDelayedScript` reads `TIME` and runs `ZADD`. Before, the score came from the publisher's clock, so a clock running behind could deliver an entry early. The ACL line does not change. The `publish()` row lists `+eval +time +zadd`.
+- **`stop()` or `unsubscribe()` from a handler waits for its sibling handlers.** With `concurrency` above 1, those siblings were not awaited or acked. `handlersOf` now leaves out only the caller's own run.
+- **A handler that returns `null` is acked.** Before, `typeof null === 'object'` treated it as a malformed retry result.
+- **Held promotion is logged.** After one minute at the back-pressure mark, a subscription logs an error, then once a minute after that. The 90% mark itself does not change. The README warns about `trim: false` and topics no running instance publishes to.
+
+`@hexok/webhooks`:
+
+- **The retry policy is configurable.** The new options are `maxAttempts` (default schedule length plus one), `retryJitter` (0.2), `maxRetryAfterMs` (twice the delay), `shouldRetry` (retry everything), and `maxResponseBytes` (20480). `verify` takes `toleranceMs` (300000). Past the end of the schedule, its last delay repeats. A `Retry-After` never shortens the scheduled delay. A 410 always ends retries.
+- **Per-endpoint retries.** `WebhookEndpoint.retry` is `{ schedule?, maxAttempts? }`, read from `get()` on every attempt. A `schedule` with no `maxAttempts` gives its length plus one attempts. A policy that cannot work is logged, and the config's policy is used.
+- **Config validation.** The constructor throws a plain `Error`, as queue-redis does for its config, when a number is out of range or the schedule and attempts cannot work together.
+- **Push-backs grow.** Delivery entries carry `pushbacks`. Over the per-endpoint cap, the wait is 1 to 5 s, doubling with each push-back in a row, up to 60 s. An attempt resets it. The old fixed 1 to 5 s let one dead endpoint add about 1,000 stream entries a second.
+- **A fan-out that fails partway retries only the rest.** The retried event carries `endpointIds` for the endpoints not yet published, starting with the one that failed. Only that endpoint can get two deliveries, and only when its publish wrote the entry before it threw.
+- **An endpoint with no secrets** is not sent to. The sender logs an error, and `onWebhookFailure` gets `cancelled` with `exhausted: true`. `sendTest` returns `cancelled`.
+- **Blocklist.** `::/96` replaces `::/128` and `::1/128`, which also blocks IPv4-compatible addresses. `64:ff9b:1::/48` is added.
+- The README now says that `subscribed()` and `get()` must return.
+
+Still fixed, because they protect the queue or are protocol: the own-failure backoff, the push-back, the 90% mark and the 1,000-entry promote limit, the topic and group names, and the Standard Webhooks headers, signature, envelope, and `webhook-id`.
+
+Tests: every fix has a test that fails without it. For stop-from-a-handler and the `null` return, I checked that by reverting the fix. No queue or queue-redis test that predates this branch changed. Tests that changed are from this branch: the phase 1 delayed-publish tests (member format and the add script), the phase 3 push-back test (it now expects `pushbacks`), and the `retryDelayMs` tests (it takes a policy). `retryDelayMs` and `HttpOptions` are not exported from `index.ts`.
+
+Left as follow-ups:
+
+- Fan-out awaits one publish per endpoint, in sequence.
+- The `FakeRedis` `xreadgroup` in the unit tests ignores `COUNT`. Changing it means editing a test fake that predates this branch.
+
+For a reviewer:
+
+- The `group` field check at the top of `#dispatch`.
+- The member format parse in `promoteDueScript`. The script tests on 8.0 and 6.2 cover a group name with `:` and a multibyte character.
+- The `null` test runs as plain JavaScript in a child process, so the test file needs no cast.

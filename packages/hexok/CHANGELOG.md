@@ -1,5 +1,11 @@
 # hexok
 
+## 2.2.5
+
+### Patch Changes
+
+- [#21](https://github.com/crobinson42/hexok/pull/21) [`b671d05`](https://github.com/crobinson42/hexok/commit/b671d05d2da64ef685a7aaf91b8a579dcda60073) Thanks [@crobinson42](https://github.com/crobinson42)! - The integration events skill reference says contract schemas describe JSON, and covers retiring a version.
+
 ## 2.2.4
 
 ### Patch Changes

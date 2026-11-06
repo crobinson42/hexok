@@ -25,6 +25,8 @@ export class Blog extends Contract('blog', {
 
 `Message(type, version, schema)` is an `Event` with a `version`. `Contract(name, topics)` maps each key to its messages. The queue topic is `<name>.<key>`, here `blog.posts`.
 
+Contract schemas describe JSON. `Date`, `bigint`, `Map`, and `Set` do not survive the queue. Use strings and numbers, such as an ISO string for a time. `publish` validates the JSON form of the payload and sends that form, so keys the schema would strip are still sent. A payload that is not JSON or fails its schema throws `VALIDATION` before anything is sent.
+
 ## Producer
 
 The use case depends on a port. The adapter wraps `IntegrationPublisher`.
@@ -76,8 +78,8 @@ await blog.subscribe({ maxDeliveries: 10, handlers: [new ProjectPost({ posts })]
 - An additive change keeps the version. Consumer schemas accept unknown fields.
 - A breaking change is a new `Message` of the same type and the next version, with `downgrade: { to, map }` to the previous one. Add it to the same topic. One `publish` of the newest version sends every version in the topic.
 - `publish` accepts only the newest version.
-- Retire an old version after every consumer moves. Remove it from the topic and remove the downgrade that targets it.
+- Retire an old version after every consumer moves. Remove it from the topic and remove the downgrade that targets it. Until a consumer moves, its handler for the retired version receives nothing and logs nothing, and the new contract makes its `subscribe` throw.
 
 ## What the application owns
 
-Retention, backfill for a new consumer, order between redeliveries, the outbox, and topic permissions in the broker.
+Retention, backfill for a new consumer, order between redeliveries, the outbox, and topic permissions in the broker. Every handler reads every entry on its topic, so keep topics narrow, such as one per aggregate.

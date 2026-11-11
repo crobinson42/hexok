@@ -126,6 +126,58 @@ new StaticTokenAuthenticator({ tokens: [[env.REPORTS_TOKEN, { service: 'reports'
 const auth = env.AUTH_MODE === 'dev' ? new DevAuthenticator({ identity: devActor }) : sessions;
 ```
 
+## API keys and service accounts
+
+The package has no API key store. A key is a credential, so an app builds API keys and service accounts on `Authenticator` and `resolving`.
+
+A few fixed service tokens fit `StaticTokenAuthenticator`. Keys that callers create and revoke at runtime need an authenticator the app writes against its own key store.
+
+```ts
+import { createHash } from 'node:crypto';
+import { Authenticator, type AuthRefusal } from '@hexok/auth';
+import { Adapter, fail, ok, type Result } from 'hexok';
+
+class ApiKeyAuthenticator extends Adapter(Authenticator)<ApiKeyIdentity> {
+  readonly #keys: ApiKeyRepository;
+
+  constructor(keys: ApiKeyRepository) {
+    super();
+    this.#keys = keys;
+  }
+
+  override async authenticate(
+    credential: string | undefined,
+  ): Promise<Result<ApiKeyIdentity, AuthRefusal>> {
+    if (credential === undefined || credential === '') return fail('missing');
+    const hash = createHash('sha256').update(credential).digest('base64url');
+    const key = await this.#keys.byHash(hash);
+    if (key === undefined) return fail('invalid');
+    if (key.revokedAt !== undefined) return fail('ended');
+    if (key.expiresAt !== undefined && key.expiresAt <= new Date()) return fail('expired');
+    return ok({ keyId: key.id, accountId: key.accountId, scopes: key.scopes });
+  }
+}
+
+const apiKeys = resolving(new ApiKeyAuthenticator(keyRepository), async (identity) =>
+  ok({ kind: 'service' as const, accountId: identity.accountId, scopes: identity.scopes }),
+);
+```
+
+- Store a hash of each key, never the key. Show the key once, when it is created. A random key of 32 bytes or more makes a plain SHA-256 enough. A slow password hash is not needed.
+- Look the key up by its hash. Do not compare key strings.
+- A revoked key is `ended`. A key past its end is `expired`. An unknown key is `invalid`.
+- Do not use `Sessions` for API keys. A session has an idle window and an absolute end. A key that lives for months fits neither.
+- Scopes and permissions are checks on the actor, in use-case guards, the same as roles.
+
+When one route accepts both user sessions and API keys, the edge picks the authenticator. A fixed key prefix, such as `sk_`, makes the choice without a lookup. Give the actor a `kind`, so a guard can tell a service from a user.
+
+```ts
+const authenticate = (credential: string | undefined) =>
+  credential?.startsWith('sk_') ? apiKeys.authenticate(credential) : users.authenticate(credential);
+```
+
+A route that serves only users refuses a service actor in its resolver, such as with `fail('forbidden')`, or in a use-case guard.
+
 ## Helpers
 
 `bearerToken(header)` returns the token of an `Authorization: Bearer <token>` header. It returns `undefined` for no header, another scheme, or anything after the token. The scheme is case-insensitive, as RFC 6750 says.
@@ -160,6 +212,7 @@ Login, logout, and the session store go away, because the provider runs them. Th
 ## Left to the app
 
 - Where credentials are stored and how passwords are checked.
+- Issuing, storing, rotating, and revoking API keys.
 - The login and logout procedures, and rate limits on login.
 - The transport: header, cookie, or message field. A cookie needs a CSRF defense.
 - Mapping refusals to the wire, and logging them.

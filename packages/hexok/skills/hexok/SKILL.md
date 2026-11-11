@@ -97,7 +97,7 @@ Identify how a caller outside the process reaches the use case. The common surfa
 
 Use the HTTP library the application already depends on. Express, Hono, and Koa are all suitable. Add one only when the application has none.
 
-The route builds the call context, calls `execute`, and maps failures to the reply. A missing entity is a 404. `CodedError` code `VALIDATION` is a 400 and `data.issues` names the fields. A catalog conflict, such as an already published post, is a 409. The catalog does not contain status codes.
+The route builds the call context, calls `execute`, and maps failures to the reply. When the context carries an actor, the route proves the caller first and puts the app's actor on the context. A use case never receives a token or a session id. `@hexok/auth` provides the `Authenticator` port, sessions, and `resolving`, the seam from a proven identity to the app's actor. Only the route and the entry point import it. A missing entity is a 404. `CodedError` code `VALIDATION` is a 400 and `data.issues` names the fields. A catalog conflict, such as an already published post, is a 409. The catalog does not contain status codes.
 
 Construct adapters, await `start` on each, and construct use cases in the entry point (`new PublishPost({ posts, events })`). Serve traffic only after every `start` resolves. On shutdown, await `stop` in the reverse order. An adapter that holds a connection, such as the Redis adapters, follows the lifecycle in [references/adapter.md](references/adapter.md). A use case instance is long-lived. Context is an argument to `execute`, not a field set per request.
 

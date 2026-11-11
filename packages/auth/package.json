@@ -1,6 +1,6 @@
 {
   "name": "@hexok/auth",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Credential verification for hexok: an Authenticator port, sessions, and a seam that resolves the app's own actor.",
   "type": "module",
   "license": "MIT",

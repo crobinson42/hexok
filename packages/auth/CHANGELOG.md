@@ -1,5 +1,11 @@
 # @hexok/auth
 
+## 0.1.1
+
+### Patch Changes
+
+- [#29](https://github.com/crobinson42/hexok/pull/29) [`88f9c4a`](https://github.com/crobinson42/hexok/commit/88f9c4a2e39f755c687e1833f58f148abf690180) Thanks [@crobinson42](https://github.com/crobinson42)! - The README documents API keys and service accounts built on `Authenticator` and `resolving`.
+
 ## 0.1.0
 
 ### Minor Changes

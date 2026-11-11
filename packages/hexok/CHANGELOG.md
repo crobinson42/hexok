@@ -1,5 +1,11 @@
 # hexok
 
+## 2.2.6
+
+### Patch Changes
+
+- [#27](https://github.com/crobinson42/hexok/pull/27) [`f7d659f`](https://github.com/crobinson42/hexok/commit/f7d659f76589371c827b972cb98c30cedac40653) Thanks [@crobinson42](https://github.com/crobinson42)! - The skill's gateway step says how a route proves the caller and points to `@hexok/auth`.
+
 ## 2.2.5
 
 ### Patch Changes

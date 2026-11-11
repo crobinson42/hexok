@@ -1,3 +1,4 @@
+import { MemorySessionStore, OpaqueSessionToken, Sessions } from '@hexok/auth';
 import type { EmailMessage, EmailReceipt } from '@hexok/email';
 import { EmailError, EmailSender } from '@hexok/email';
 import { type Logger, MemoryLogger, NoopLogger } from '@hexok/logger';
@@ -20,11 +21,10 @@ import { createApi } from '../servers/api.js';
 import { createHttpHandler } from '../servers/http/handler.js';
 import { createApiApp } from '../servers/rpc/app.js';
 import type { apiContract } from '../servers/rpc/contract.js';
-import { Authenticator, type Caller } from './ports/auth/authenticator.js';
 import { DomainEventPublisher } from './ports/events/domain-event-publisher.js';
 import { PostRepository } from './ports/repos/post-repository.js';
 import { SubscriberRepository } from './ports/repos/subscriber-repository.js';
-import { internalCallCtx } from './use-cases/context.js';
+import { type Caller, internalCallCtx } from './use-cases/context.js';
 import { PublishPost } from './use-cases/posts/api/command/publish-post.js';
 import { SavePost } from './use-cases/posts/api/command/save-post.js';
 import { UnpublishPost } from './use-cases/posts/api/command/unpublish-post.js';
@@ -35,7 +35,6 @@ import { SubscriberPostPublishedWebhookHandler } from './use-cases/posts/event-h
 import { SubscriberPostUnpublishedWebhookHandler } from './use-cases/posts/event-handlers/subscriber-post-unpublished-webhook.js';
 import { PublishDuePosts } from './use-cases/posts/scheduled/publish-due-posts.js';
 import { SubscriberReminder } from './use-cases/posts/scheduled/subscriber-reminder.js';
-import { EndSession } from './use-cases/sessions/api/command/end-session.js';
 import {
   type CheckWebhookUrl,
   SubscribeToPosts,
@@ -44,7 +43,7 @@ import { WelcomeSubscriberHandler } from './use-cases/subscribers/event-handlers
 
 const from = { email: 'blog@localhost', name: 'Blog' };
 
-const ctx = { caller: { userId: 'ada', sessionId: 'ada-session' } };
+const ctx = { caller: { userId: 'ada' } };
 
 type PostProps = ConstructorParameters<typeof PostEntity>[0];
 
@@ -123,27 +122,6 @@ class RecordingDomainEvents extends Adapter(DomainEventPublisher) {
     event: EventInstance<typeof DomainEvents>,
   ): Promise<void> {
     this.events.push(event);
-  }
-}
-
-/** Tokens map to callers. A revoked session stops checking out. */
-class InMemoryAuthenticator extends Adapter(Authenticator) {
-  readonly #revoked = new Set<string>();
-
-  constructor(private readonly callers: ReadonlyMap<string, Caller>) {
-    super();
-  }
-
-  override async authenticate(token: string): Promise<Caller | null> {
-    const caller = this.callers.get(token);
-    if (caller === undefined || this.#revoked.has(caller.sessionId)) {
-      return null;
-    }
-    return caller;
-  }
-
-  override async revoke(caller: Caller): Promise<void> {
-    this.#revoked.add(caller.sessionId);
   }
 }
 
@@ -259,27 +237,33 @@ async function expectDomainCode(
   expect.fail(`expected ${code}`);
 }
 
-/** `ada-token` authenticates as `ada`. */
-function adaAuthenticator(): InMemoryAuthenticator {
-  return new InMemoryAuthenticator(new Map([['ada-token', ctx.caller]]));
+/** The package's in-memory sessions, the same `Sessions` HTTP runs over Redis. */
+function memorySessions(): Sessions<Caller> {
+  return new Sessions({
+    store: new MemorySessionStore<Caller>({
+      idleSeconds: 60,
+      absoluteSeconds: 600,
+    }),
+    token: new OpaqueSessionToken(),
+  });
 }
 
 /**
  * The HTTP handler over in-memory ports. The typed client calls it without a
- * socket. `apiAs(token)` sends `Authorization: Bearer <token>`. `post` sends
- * a raw body to check the wire.
+ * socket. `signIn()` opens a session for `ada` and returns its token.
+ * `apiAs(token)` sends `Authorization: Bearer <token>`. `post` sends a raw
+ * body to check the wire.
  */
 function http() {
   const publishers = recordingPublishers();
-  const authenticator = adaAuthenticator();
+  const sessions = memorySessions();
   const api = createApi({
     posts: new InMemoryPosts(),
     subscribers: new InMemorySubscribers(),
     ...publishers,
-    authenticator,
     checkWebhookUrl: acceptWebhookUrl,
   });
-  const handle = createHttpHandler(createApiApp(api), { authenticator });
+  const handle = createHttpHandler(createApiApp(api), { sessions });
   const fetch: typeof globalThis.fetch = (input, init) =>
     handle(new Request(input, init));
   const headers = (token: string | undefined): HeadersInit =>
@@ -290,6 +274,7 @@ function http() {
     );
   return {
     publishers,
+    signIn: () => sessions.open(ctx.caller),
     api: rpc(),
     apiAs: rpc,
     post: (path: string, body: string, init: { token?: string } = {}) =>
@@ -607,22 +592,6 @@ describe('PublishDuePosts', () => {
     expect(count).toBe(0);
     expect((await posts.get(saved.props.id))?.props.status).toBe('scheduled');
     expect(publishers.domainEvents.events).toHaveLength(0);
-  });
-});
-
-describe('EndSession', () => {
-  it('revokes the token', async () => {
-    const authenticator = adaAuthenticator();
-
-    await new EndSession({ authenticator }).execute(ctx, {});
-
-    expect(await authenticator.authenticate('ada-token')).toBeNull();
-  });
-
-  it('needs a signed-in caller', async () => {
-    const end = new EndSession({ authenticator: adaAuthenticator() });
-
-    await expectDomainCode('SignInRequired', () => end.execute({}, {}));
   });
 });
 
@@ -1372,17 +1341,34 @@ describe('HTTP', () => {
     expect(response.status).toBe(404);
   });
 
-  it('sessions.end revokes the token', async () => {
-    const { apiAs } = http();
+  it('reads the caller from a session token', async () => {
+    const { apiAs, signIn } = http();
+    const token = await signIn();
 
-    expect(await apiAs('ada-token').sessions.end({})).toBeNull();
+    const draft = await apiAs(token).posts.save({
+      title: 'Hello',
+      body: 'Text',
+    });
+
+    expect(draft.title).toBe('Hello');
+  });
+
+  it('sessions.end ends the session the token names', async () => {
+    const { apiAs, signIn } = http();
+    const token = await signIn();
+    const other = await signIn();
+
+    expect(await apiAs(token).sessions.end({})).toBeNull();
 
     const again = await asResult(
-      apiAs('ada-token').posts.save({ title: 'Hello', body: 'Text' }),
+      apiAs(token).posts.save({ title: 'Hello', body: 'Text' }),
     );
     if (again.ok) throw new Error('expected an error');
     expect(again.error.status).toBe(401);
     expect(again.error.code).toBe('Unauthenticated');
+    // Another sign-in of the same user keeps its own session.
+    const kept = await apiAs(other).posts.save({ title: 'Hi', body: 'Text' });
+    expect(kept.title).toBe('Hi');
   });
 
   it('answers sessions.end without a token with 401', async () => {

@@ -1,0 +1,17 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "composite": false,
+    "declaration": false,
+    "declarationMap": false,
+    "sourceMap": false
+  },
+  "references": [
+    { "path": "../hexok" },
+    { "path": "../auth" },
+    { "path": "../ioredis-lifecycle" },
+    { "path": "../test-redis" }
+  ],
+  "exclude": []
+}

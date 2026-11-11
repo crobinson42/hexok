@@ -35,6 +35,8 @@ Each port needs an implementation before the feature can run. Add an adapter for
 
 A caller outside the process needs a way to reach the use case. That way is the gateway. It might be HTTP (REST or an RPC-style path), websockets, or gRPC. The common choice is an HTTP path in an RPC shape, one path for this use case. You choose the library: Express, Hono, Koa, or similar. The gateway accepts the call, runs the use case, and returns the result.
 
+When the story needs to know who acts, the gateway proves the caller before it runs the use case. It reads the credential, such as a Bearer token, and passes the app's actor on the use case's context. The use case never sees the token. [`@hexok/auth`](/hexok/packages/auth/) provides that step: an `Authenticator` port, sessions, and a seam that turns a proven identity into the app's actor.
+
 ## Choose where handlers run
 
 Decide which process runs the handlers. They may share the API process. When a handler does heavy work, and an adapter can publish in one process and subscribe in another, give that handler a background-worker entry point. The API entry point publishes. The worker subscribes and runs the handler.

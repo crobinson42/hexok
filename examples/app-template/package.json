@@ -10,9 +10,13 @@
     "test": "vitest run",
     "type-check": "tsc --noEmit -p tsconfig.check.json",
     "lint": "biome check .",
-    "clean": "rm -rf dist *.tsbuildinfo"
+    "clean": "rm -rf dist *.tsbuildinfo",
+    "session:open": "node dist/servers/scripts/open-session.js"
   },
   "dependencies": {
+    "@hexok/auth": "*",
+    "@hexok/auth-jose": "*",
+    "@hexok/auth-redis": "*",
     "@hexok/email": "*",
     "@hexok/email-mailgun": "*",
     "@hexok/email-resend": "*",
@@ -32,6 +36,7 @@
     "@ts-pf/server": "^0.4.2",
     "@ts-pf/server-http": "^0.3.2",
     "hexok": "*",
+    "jose": "^6.2.17",
     "redis": "^6.3.0",
     "srvx": "^1.0.7",
     "zod": "^4.1.5"

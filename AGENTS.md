@@ -22,8 +22,8 @@ Docs state what a package does, requires, and guarantees, and what it leaves to 
 npm workspaces with Turbo. Node 24 (`.nvmrc`), ESM only.
 
 - `packages/hexok`: the core primitives (`Schema`, `Entity`, `Port`, `Adapter`, `Mapper`, `UseCase`, `Event`, `EventCatalog`, `EventHandler`, `Errors`, `Result`). Published as `hexok`.
-- `packages/<capability>`: a port package, such as `queue`, `broadcast`, `email`, `sms`, `logger`, `quarantine`, or `schedule-coordinator`. Published as `@hexok/<capability>`.
-- `packages/<capability>-<vendor>`: the adapter for that port, such as `queue-redis` or `email-resend`.
+- `packages/<capability>`: a port package, such as `queue`, `broadcast`, `email`, `sms`, `logger`, `quarantine`, `schedule-coordinator`, or `auth`. Published as `@hexok/<capability>`.
+- `packages/<capability>-<vendor>`: the adapter for that port, such as `queue-redis`, `email-resend`, or `auth-redis`.
 - `packages/typebox`: TypeBox to Standard Schema.
 - `packages/docs`: the Astro Starlight site at crobinson42.github.io/hexok. Private.
 - `examples/app-template`: a blog API with HTTP and worker processes on Redis. Private.

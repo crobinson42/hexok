@@ -3,7 +3,6 @@ import { z } from 'zod';
 import { publishPostInput } from '../../app/use-cases/posts/api/command/publish-post.js';
 import { savePostInput } from '../../app/use-cases/posts/api/command/save-post.js';
 import { unpublishPostInput } from '../../app/use-cases/posts/api/command/unpublish-post.js';
-import { endSessionInput } from '../../app/use-cases/sessions/api/command/end-session.js';
 import { subscribeToPostsInput } from '../../app/use-cases/subscribers/api/command/subscribe.js';
 import { postSchema } from '../../domain/schemas/post.js';
 import { subscriberSchema } from '../../domain/schemas/subscriber.js';
@@ -23,7 +22,7 @@ export const apiContract = router({
     unpublish: call.input(unpublishPostInput).output(postSchema),
   },
   sessions: {
-    end: call.input(endSessionInput).output(z.null()),
+    end: call.input(z.object({})).output(z.null()),
   },
   subscribers: {
     subscribe: call.input(subscribeToPostsInput).output(subscriberSchema),

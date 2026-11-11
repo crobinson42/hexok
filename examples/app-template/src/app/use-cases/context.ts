@@ -4,12 +4,20 @@ import {
   validate,
   validationError,
 } from 'hexok';
+import { z } from 'zod';
 import { DomainError } from '../../domain/errors/domain.js';
-import type { Caller } from '../ports/auth/authenticator.js';
+
+/**
+ * Who a signed-in call acts for. A session stores it, so its schema is the
+ * JSON form. It has no session id: signing out acts on the token at the edge.
+ */
+export const callerSchema = z.object({ userId: z.string().min(1) });
+
+export type Caller = z.infer<typeof callerSchema>;
 
 /**
  * Context for use cases under `api/`. HTTP builds this from the request and
- * the `Authenticator`. No `caller` is an anonymous request.
+ * the session the token names. No `caller` is an anonymous request.
  */
 export type ApiCtx = {
   caller?: Caller;

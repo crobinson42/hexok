@@ -21,6 +21,9 @@
     { "path": "packages/webhooks" },
     { "path": "packages/schedule-coordinator" },
     { "path": "packages/schedule-coordinator-redis" },
+    { "path": "packages/auth" },
+    { "path": "packages/auth-redis" },
+    { "path": "packages/auth-jose" },
     { "path": "examples/extend" },
     { "path": "examples/app-template" }
   ]

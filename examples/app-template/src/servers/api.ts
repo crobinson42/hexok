@@ -1,11 +1,9 @@
-import type { Authenticator } from '../app/ports/auth/authenticator.js';
 import type { DomainEventPublisher } from '../app/ports/events/domain-event-publisher.js';
 import type { PostRepository } from '../app/ports/repos/post-repository.js';
 import type { SubscriberRepository } from '../app/ports/repos/subscriber-repository.js';
 import { PublishPost } from '../app/use-cases/posts/api/command/publish-post.js';
 import { SavePost } from '../app/use-cases/posts/api/command/save-post.js';
 import { UnpublishPost } from '../app/use-cases/posts/api/command/unpublish-post.js';
-import { EndSession } from '../app/use-cases/sessions/api/command/end-session.js';
 import {
   type CheckWebhookUrl,
   SubscribeToPosts,
@@ -15,7 +13,6 @@ export type ApiPorts = {
   posts: PostRepository;
   subscribers: SubscriberRepository;
   domainEvents: DomainEventPublisher;
-  authenticator: Authenticator;
   checkWebhookUrl: CheckWebhookUrl;
 };
 
@@ -39,7 +36,6 @@ export function createApi(ports: ApiPorts) {
       domainEvents: ports.domainEvents,
       checkWebhookUrl: ports.checkWebhookUrl,
     }),
-    endSession: new EndSession({ authenticator: ports.authenticator }),
   };
 }
 

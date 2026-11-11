@@ -2,11 +2,9 @@ import type { Logger } from '@hexok/logger';
 import { MemoryQuarantine } from '@hexok/quarantine';
 import type { RedisQueue } from '@hexok/queue-redis';
 import type { RedisScheduleCoordinator } from '@hexok/schedule-coordinator-redis';
-import type { StaticTokenAuthenticator } from '../../infra/auth/static-token-authenticator.js';
 import { connectRedis } from '../../infra/clients/redis-client.js';
 import { RedisPosts } from '../../infra/repos/redis-posts.js';
 import { RedisSubscribers } from '../../infra/repos/redis-subscribers.js';
-import { createAuthenticator } from './authenticator.js';
 import { createDomainEventsQueue } from './domain-events.js';
 import { createLogger } from './logger.js';
 import { createScheduleCoordinator } from './schedule.js';
@@ -21,8 +19,6 @@ export type Runtime = {
   subscribers: RedisSubscribers;
   domainEventsQueue: RedisQueue;
   scheduleCoordinator: RedisScheduleCoordinator;
-  /** Checks bearer tokens. Only HTTP reads tokens. */
-  authenticator: StaticTokenAuthenticator;
   /** Stop the queue and coordinator, then close Redis. */
   stop(): Promise<void>;
 };
@@ -49,7 +45,6 @@ export async function createRuntime(): Promise<Runtime> {
     subscribers: new RedisSubscribers({ redis }),
     domainEventsQueue,
     scheduleCoordinator,
-    authenticator: createAuthenticator(redis),
     async stop() {
       await scheduleCoordinator.stop();
       await domainEventsQueue.stop();

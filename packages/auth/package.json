@@ -1,6 +1,6 @@
 {
   "name": "@hexok/auth",
-  "version": "0.0.0",
+  "version": "0.1.0",
   "description": "Credential verification for hexok: an Authenticator port, sessions, and a seam that resolves the app's own actor.",
   "type": "module",
   "license": "MIT",
@@ -42,6 +42,6 @@
     "clean": "rm -rf dist *.tsbuildinfo"
   },
   "dependencies": {
-    "hexok": "^2.2.5"
+    "hexok": "^2.2.6"
   }
 }

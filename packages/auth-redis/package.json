@@ -1,6 +1,6 @@
 {
   "name": "@hexok/auth-redis",
-  "version": "0.0.0",
+  "version": "0.1.0",
   "description": "Redis session store for the @hexok/auth SessionStore port.",
   "type": "module",
   "license": "MIT",
@@ -42,9 +42,9 @@
     "clean": "rm -rf dist *.tsbuildinfo"
   },
   "dependencies": {
-    "@hexok/auth": "^0.0.0",
+    "@hexok/auth": "^0.1.0",
     "@hexok/ioredis-lifecycle": "^1.0.0",
-    "hexok": "^2.2.5",
+    "hexok": "^2.2.6",
     "ioredis": "^6"
   },
   "devDependencies": {

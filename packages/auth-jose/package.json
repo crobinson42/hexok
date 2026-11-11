@@ -1,6 +1,6 @@
 {
   "name": "@hexok/auth-jose",
-  "version": "0.0.0",
+  "version": "0.1.0",
   "description": "Signed session tokens on jose for the @hexok/auth SessionToken port.",
   "type": "module",
   "license": "MIT",
@@ -43,8 +43,8 @@
     "clean": "rm -rf dist *.tsbuildinfo"
   },
   "dependencies": {
-    "@hexok/auth": "^0.0.0",
-    "hexok": "^2.2.5"
+    "@hexok/auth": "^0.1.0",
+    "hexok": "^2.2.6"
   },
   "peerDependencies": {
     "jose": "^6"

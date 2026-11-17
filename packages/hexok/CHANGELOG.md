@@ -1,5 +1,11 @@
 # hexok
 
+## 2.2.7
+
+### Patch Changes
+
+- [#31](https://github.com/crobinson42/hexok/pull/31) [`9ef8652`](https://github.com/crobinson42/hexok/commit/9ef8652b9273debd02bfa8a218e39d2d3765ca77) Thanks [@crobinson42](https://github.com/crobinson42)! - The skill documents application services: shared app-layer policy that is not a port.
+
 ## 2.2.6
 
 ### Patch Changes

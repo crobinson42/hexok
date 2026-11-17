@@ -19,7 +19,7 @@ The running shape is a person who creates a blog post and publishes it. Subscrib
 
 ## Concepts
 
-Read the reference before writing that concept. Each file is the supporting documentation for one primitive.
+Read the reference before writing that concept. Each file is the supporting documentation for one concept. Most concepts are primitives. An application service is not.
 
 | Concept | Reference | Place |
 | --- | --- | --- |
@@ -29,13 +29,14 @@ Read the reference before writing that concept. Each file is the supporting docu
 | Event | [references/event.md](references/event.md) | Domain. A fact the use case records. |
 | EventCatalog | [references/event-catalog.md](references/event-catalog.md) | Domain. The set of events, and the conversion to a wire message. |
 | UseCase | [references/use-case.md](references/use-case.md) | Application. One caller action. `UseCase.context` is in that file. |
-| Port | [references/port.md](references/port.md) | Application. The contract a use case or handler calls. |
+| Application service | [references/application-service.md](references/application-service.md) | Application. Shared policy that is not I/O. Not a primitive. |
+| Port | [references/port.md](references/port.md) | Application. The contract a use case or handler calls. An I/O seam. |
 | EventHandler | [references/event-handler.md](references/event-handler.md) | Application. Work that follows one event. |
 | Integration events | [references/integration-events.md](references/integration-events.md) | Contract between applications. Read it when another application that deploys on its own publishes or consumes the event. From `@hexok/integration-events`. |
 | Adapter | [references/adapter.md](references/adapter.md) | Interface adapter. The current implementation of one port. |
 | Mapper | [references/mapper.md](references/mapper.md) | Interface adapter. Read it when the stored document is not the domain props. |
 
-Dependencies point inward. Domain code does not import a database client, a queue, an HTTP library, or a mail SDK. Use cases and handlers depend on ports. Adapters implement ports. A gateway calls use cases.
+Dependencies point inward. Domain code does not import a database client, a queue, an HTTP library, or a mail SDK. Use cases and handlers depend on ports and, when several stories share a rule, application services. Adapters implement ports. An application service is not a port. A gateway calls use cases.
 
 ## How to build a feature
 
@@ -62,6 +63,8 @@ A blog post is an id, a title, a body, and whether it is published. The schema i
 Define each use case as one action, and the ports that action calls, when they are not already there.
 
 Saving a post is a port. Publishing an event is a different port. The use case receives both on a `deps` object in its constructor and calls them from `execute` through `this.deps`. Add a second argument, `config`, only when the composition root sets flags on that long-lived instance. It does not import a driver. Read [references/use-case.md](references/use-case.md) and [references/port.md](references/port.md).
+
+When several use cases share a load-then-rule script, such as requiring organization membership, extract an application service and put it on `deps`. Do not add a port for that script. Read [references/application-service.md](references/application-service.md).
 
 Use `UseCase(token)` when `execute` only needs the input. Use `UseCase.context<Ctx>()` when every call in the family carries the same extra facts, such as a trace id, the actor, or the caller IP. Share one family across the gateway's use cases.
 
@@ -113,7 +116,7 @@ Do not add a broker only to create a second process. Do not move the handler's w
 
 ## Conventions
 
-- A use case, an event handler, and an adapter that takes a driver receive collaborators as one `readonly` object named `deps`, including a class with a single collaborator. Keys are the collaborator names. Write the core port first in the type. Call sites may pass keys in any order. The body uses `this.deps`. Optional instance settings are a second argument, `config?`, also `readonly`. Omit `config` when there are none. New ports go on `deps`. New flags go on `config`. Do not add a third positional argument. A per-request choice stays on `execute`'s input. A value declared for a whole `UseCase.context` family stays on that factory's static spec. Entity payloads, event payloads, error-catalog factories, and port methods stay data arguments.
+- A use case, an event handler, and an adapter that takes a driver receive collaborators as one `readonly` object named `deps`, including a class with a single collaborator. Keys are the collaborator names. Write the core port first in the type. Call sites may pass keys in any order. The body uses `this.deps`. Optional instance settings are a second argument, `config?`, also `readonly`. Omit `config` when there are none. New ports and application services go on `deps`. New flags go on `config`. Do not add a third positional argument. A per-request choice stays on `execute`'s input. A value declared for a whole `UseCase.context` family stays on that factory's static spec. Entity payloads, event payloads, error-catalog factories, and port methods stay data arguments.
 - Tokens are factory arguments: `Entity('Post', PostSchema)`, `UseCase('post.publish')`, `Port('PostRepository')`, `Event('post.published', PostSchema)`, `EventCatalog('blog', { postPublished })`, `EventHandler('email.subscribers', PostPublished)`, `Errors('blog', { ... })`. A subclass does not redeclare the token.
 - `execute`, `handle`, port methods, and a mapper's `fromSource` and `toSource` are methods on the class. The compiler reports a missing one. `start`, `stop`, `parse`, and `set` already exist and may be overridden.
 - A use case throws a catalog member when the story refuses. Schema checks throw `CodedError` with code `VALIDATION`. Catch both at the gateway or the worker.
@@ -123,7 +126,7 @@ Do not add a broker only to create a second process. Do not move the handler's w
 - Publish `new PostPublished(payload)`. Compare events with `instanceof` or `event.token`. The catalog map key (`postPublished`) and the event token (`post.published`) are different strings.
 - After a successful driver write, the adapter calls `commit()` on the entity. The mapper does not commit.
 - Tests construct the use case with adapters of the same ports. A test of the story does not need a live broker.
-- Put one concept in one file. A practical layout is `domain/` (schemas, entities, errors, events), `app/` (ports, use cases, handlers), `infra/` (adapters), and `servers/` (the HTTP entry and a worker entry when step 6 splits a process).
+- Put one concept in one file. A practical layout is `domain/` (schemas, entities, errors, events), `app/` (ports, use cases, handlers, services), `infra/` (adapters), and `servers/` (the HTTP entry and a worker entry when step 6 splits a process).
 - Zod, Valibot, and ArkType are passed straight to the primitives. A TypeBox 1 schematic goes through `@hexok/typebox` (`typebox(schema)` or `typeboxDecode(schema)`) before it reaches `Schema`, `Entity`, or `Event`.
 
 ## When a primitive changes

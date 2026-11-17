@@ -37,7 +37,7 @@ class PublishPost extends UseCase('post.publish') {
 }
 ```
 
-The application constructs `PublishPost` with concrete adapters (`new PublishPost({ posts, events })`) and calls `execute` from a gateway. One action is one class and one token. Pass every port on `deps`, including a use case with one port. Put the core port first in the type. Optional flags chosen for that long-lived instance are a second argument, `config`. A value the caller sends on one request stays on `execute`'s input. A value declared for the whole context family stays on the factory's static spec. A caller who can save a draft and later publish it gets `SavePost` (`post.save`) and `PublishPost` (`post.publish`).
+The application constructs `PublishPost` with concrete adapters (`new PublishPost({ posts, events })`) and calls `execute` from a gateway. One action is one class and one token. Pass every port on `deps`, including a use case with one port. Put the core port first in the type. `deps` may also include an [application service](application-service.md) when several use cases share a load-then-rule script, such as `new SavePost({ posts, membership })`. That class is not a port. Optional flags chosen for that long-lived instance are a second argument, `config`. A value the caller sends on one request stays on `execute`'s input. A value declared for the whole context family stays on the factory's static spec. A caller who can save a draft and later publish it gets `SavePost` (`post.save`) and `PublishPost` (`post.publish`).
 
 Declare `execute` as a method. A class field, or an assignment after `super()`, is the wrong shape. The class is incomplete until `execute` exists, and the compiler reports the missing method.
 
@@ -51,7 +51,7 @@ Declare `execute` as a method. A class field, or an assignment after `super()`, 
 | --- | --- |
 | `PublishPost.token` | The name you passed in. |
 | `execute(input)` | Required. Annotate the input and the return type on the subclass. |
-| `constructor` | Ports arrive on `deps`. Optional instance settings arrive on `config`. Call `super()`. |
+| `constructor` | Ports and application services arrive on `deps`. Optional instance settings arrive on `config`. Call `super()`. |
 
 A subclass of plain `UseCase(token)` takes one argument. Adding a context argument there is a type error. Reach for the family factory instead.
 

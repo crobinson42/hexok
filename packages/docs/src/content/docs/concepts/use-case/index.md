@@ -42,7 +42,7 @@ class PublishPost extends UseCase('post.publish') {
 
 The application constructs `PublishPost` with concrete adapters, `new PublishPost({ posts, events })`, and calls `execute` from a gateway. You choose the HTTP library and assemble that object graph.
 
-Pass every port on `deps`, including a use case with one port. Put the core port first in the type. Call them through `this.deps`. Optional flags chosen for that long-lived instance are a second argument, `config`. A value the caller sends on one request stays on the input to `execute`. A value declared for a whole context family stays on that factory's static spec. Mark both objects `readonly`.
+Pass every port on `deps`, including a use case with one port. Put the core port first in the type. Call them through `this.deps`. `deps` may also include an [application service](/hexok/concepts/application-service/) when several use cases share a load-then-rule script. That class is not a port. Optional flags chosen for that long-lived instance are a second argument, `config`. A value the caller sends on one request stays on the input to `execute`. A value declared for a whole context family stays on that factory's static spec. Mark both objects `readonly`.
 
 ## API
 

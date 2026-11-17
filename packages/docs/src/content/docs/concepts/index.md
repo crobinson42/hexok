@@ -17,4 +17,6 @@ Each primitive has a short page: what it is, the problem it solves, how a featur
 | Event catalog | [EventCatalog](/hexok/concepts/event-catalog/) |
 | Event handler | [EventHandler](/hexok/concepts/event-handler/) |
 
+Reusable policy that is not I/O is an [application service](/hexok/concepts/application-service/). It is not a primitive and is not imported from `hexok`.
+
 Import them from `hexok`. A use case takes its ports in the constructor. You choose the HTTP library and assemble the object graph in your application.

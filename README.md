@@ -34,7 +34,7 @@ import { Adapter, Entity, Errors, Event, EventCatalog, EventHandler, Mapper, Por
 | `EventHandler` | `EventHandler('on.user.created', UserCreated)` | `handle` |
 | `Errors` | `Errors('domain', { BlankName: { message } })` | each key is a factory; throw the error it returns |
 
-`Result`, `CodedError`, and Standard Schema helpers ship next to the primitives. `EventInstance<typeof DomainEvents>` is the catalog's event objects. A use case publishes `new UserCreated(...)`. `EventMessage<typeof DomainEvents>` is `{ key, payload }` for an adapter. `DomainEvents.message` and `DomainEvents.parse` convert between them. Pass a catalog key as the second type argument to keep one entry. HTTP, gateways, and composition do not. A use case receives its ports in the constructor, and the application constructs that use case.
+`Result`, `CodedError`, and Standard Schema helpers ship next to the primitives. `EventInstance<typeof DomainEvents>` is the catalog's event objects. A use case publishes `new UserCreated(...)`. `EventMessage<typeof DomainEvents>` is `{ key, payload }` for an adapter. `DomainEvents.message` and `DomainEvents.parse` convert between them. Pass a catalog key as the second type argument to keep one entry. HTTP, gateways, and composition do not. A use case receives its ports in the constructor, and the application constructs that use case. Reusable policy that is not I/O is an application service the app owns. It is not a Port and not a hexok primitive.
 
 ```ts
 class DomainError extends Errors('domain', {

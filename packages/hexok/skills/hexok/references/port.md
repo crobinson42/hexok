@@ -46,6 +46,10 @@ The methods are whatever this seam needs. A repository offers `get` and `save`. 
 
 Search for an existing port before adding one. A second seam is a second `Port(...)` call, even when the method names match.
 
+## What is not a port
+
+A port is a job with more than one implementation: memory in a test, Redis in the API, Resend for mail. Shared policy that has one correct implementation is an [application service](application-service.md). Requiring organization membership loads a user and runs `User.requireMember`. That script belongs in `app/`. `Port('Membership')` lets an adapter skip the entity. Do not put that check on the request context either.
+
 ## API
 
 `Port(token)` returns an abstract class. `token` is a string literal.

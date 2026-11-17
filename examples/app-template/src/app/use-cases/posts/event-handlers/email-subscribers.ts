@@ -25,7 +25,9 @@ export class EmailSubscribersHandler extends EventHandler(
 
   async handle(event: PostPublishedEvent): Promise<void> {
     if (!event.payload.emailSubscribers) return;
-    const listed = await this.deps.subscribers.list();
+    const listed = await this.deps.subscribers.listByOrganization(
+      event.payload.organizationId,
+    );
     for (const subscriber of listed) {
       await this.#send(subscriber, {
         subject: 'New post',

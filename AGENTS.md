@@ -21,7 +21,7 @@ Docs state what a package does, requires, and guarantees, and what it leaves to 
 
 npm workspaces with Turbo. Node 24 (`.nvmrc`), ESM only.
 
-- `packages/hexok`: the core primitives (`Schema`, `Entity`, `Port`, `Adapter`, `Mapper`, `UseCase`, `Event`, `EventCatalog`, `EventHandler`, `Errors`, `Result`). Published as `hexok`.
+- `packages/hexok`: the core primitives (`Schema`, `Entity`, `Port`, `Adapter`, `Mapper`, `UseCase`, `Event`, `EventCatalog`, `EventHandler`, `Errors`, `Result`). Published as `hexok`. Application services are app code, not a primitive and not a port package. A request for `Service()` on hexok hits the scope gate.
 - `packages/<capability>`: a port package, such as `queue`, `broadcast`, `email`, `sms`, `logger`, `quarantine`, `schedule-coordinator`, or `auth`. Published as `@hexok/<capability>`.
 - `packages/<capability>-<vendor>`: the adapter for that port, such as `queue-redis`, `email-resend`, or `auth-redis`.
 - `packages/typebox`: TypeBox to Standard Schema.
@@ -103,7 +103,7 @@ A change to a hexok primitive's public behavior usually touches more than `src`:
 
 A published package other than `hexok` does not get a concept page. Its README is the docs page. The docs `dev` and `build` scripts copy it to `packages/docs/src/content/docs/packages/`. Those files are generated and gitignored. Do not edit them. The copy fails when a published package has no README.
 
-The skill ships inside the `hexok` npm package (`files` includes `skills`), so a stale reference reaches users.
+The skill ships inside the `hexok` npm package (`files` includes `skills`), so a stale reference reaches users. Application services are documented in `packages/hexok/skills/hexok/references/application-service.md` and the matching concept page. They are not a hexok primitive.
 
 ## Commits
 

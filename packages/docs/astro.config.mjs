@@ -43,6 +43,10 @@ export default defineConfig({
             },
             { label: 'Port', slug: 'concepts/port' },
             {
+              label: 'Application service',
+              slug: 'concepts/application-service',
+            },
+            {
               label: 'Adapter',
               items: [
                 { label: 'Adapter', slug: 'concepts/adapter' },

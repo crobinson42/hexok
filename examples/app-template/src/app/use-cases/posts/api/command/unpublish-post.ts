@@ -5,6 +5,7 @@ import { DomainError } from '../../../../../domain/errors/domain.js';
 import { PostUnpublishedEvent } from '../../../../../domain/events/post-unpublished.js';
 import type { DomainEventPublisher } from '../../../../ports/events/domain-event-publisher.js';
 import type { PostRepository } from '../../../../ports/repos/post-repository.js';
+import type { Membership } from '../../../../services/membership.js';
 import { ApiUseCase } from '../../../context.js';
 
 export const unpublishPostInput = z.object({
@@ -19,6 +20,7 @@ export class UnpublishPost extends ApiUseCase('post.unpublish', {
   constructor(
     private readonly deps: {
       posts: PostRepository;
+      membership: Membership;
       domainEvents: DomainEventPublisher;
     },
   ) {
@@ -26,13 +28,17 @@ export class UnpublishPost extends ApiUseCase('post.unpublish', {
   }
 
   async execute(
-    _ctx: UseCase.Ctx<typeof ApiUseCase>,
+    ctx: UseCase.Ctx<typeof ApiUseCase>,
     input: UnpublishPostInput,
   ): Promise<PostEntity> {
     const post = await this.deps.posts.get(input.id);
     if (post === null) {
       throw DomainError.PostNotFound({ id: input.id });
     }
+    await this.deps.membership.requireOrgMember(
+      ctx.caller.userId,
+      post.props.organizationId,
+    );
     if (post.props.status === 'scheduled') {
       post.cancelSchedule();
       await this.deps.posts.save(post);
@@ -43,6 +49,7 @@ export class UnpublishPost extends ApiUseCase('post.unpublish', {
     await this.deps.domainEvents.publish(
       new PostUnpublishedEvent({
         postId: post.props.id,
+        organizationId: post.props.organizationId,
         title: post.props.title,
       }),
     );

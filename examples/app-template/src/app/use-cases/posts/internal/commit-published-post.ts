@@ -35,6 +35,7 @@ export class CommitPublishedPost extends InternalUseCase(
     await this.deps.domainEvents.publish(
       new PostPublishedEvent({
         postId: post.props.id,
+        organizationId: post.props.organizationId,
         title: post.props.title,
         emailSubscribers: input.emailSubscribers,
       }),

@@ -17,7 +17,7 @@ The schema runs when the post is created from typed props, when unknown input is
 
 ## How it's used
 
-Publishing is a method. It refuses a blank title with a [catalog error](/hexok/concepts/error/), then updates the draft.
+Publishing is a method. It refuses a blank title with a [catalog error](/hexok/concepts/error/), then updates the draft. When several use cases share that load-then-rule script, an [application service](/hexok/concepts/application-service/) calls the entity method. The rule stays on the entity.
 
 ```ts
 class Post extends Entity('Post', PostSchema) {

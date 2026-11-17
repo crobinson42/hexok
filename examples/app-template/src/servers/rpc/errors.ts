@@ -22,7 +22,13 @@ const statuses = {
   WebhookRequiresUrl: 400,
   WebhookUrlRejected: 400,
   Unauthenticated: 401,
+  InvalidCredentials: 401,
   SignInRequired: 401,
+  UserNotFound: 404,
+  OrganizationNotFound: 404,
+  UserAlreadyExists: 409,
+  AlreadyMember: 409,
+  NotAMember: 403,
   InternalCallerRequired: null,
 } as const satisfies Record<DomainCode, number | null>;
 

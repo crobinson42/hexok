@@ -2,10 +2,7 @@ import { type WebhookEndpoint, WebhookEndpoints } from '@hexok/webhooks';
 import { Adapter } from 'hexok';
 import type { SubscriberRepository } from '../../app/ports/repos/subscriber-repository.js';
 import type { SubscriberEntity } from '../../domain/entities/subscriber.js';
-import {
-  BLOG_ORGANIZATION,
-  isSubscriberWebhookEvent,
-} from '../../domain/events/webhook-events.js';
+import { isSubscriberWebhookEvent } from '../../domain/events/webhook-events.js';
 import type { MemoryWebhookEndpoints } from './memory-webhook-endpoints.js';
 
 /**
@@ -31,13 +28,11 @@ export class BlogWebhookEndpoints extends Adapter(WebhookEndpoints) {
       organizationId,
       eventType,
     );
-    if (
-      organizationId !== BLOG_ORGANIZATION ||
-      !isSubscriberWebhookEvent(eventType)
-    ) {
+    if (!isSubscriberWebhookEvent(eventType)) {
       return product;
     }
-    const listed = await this.deps.subscribers.list();
+    const listed =
+      await this.deps.subscribers.listByOrganization(organizationId);
     const subscribers = listed.flatMap((subscriber) => {
       const endpoint = endpointOf(subscriber);
       return endpoint === null ? [] : [endpoint];
@@ -51,18 +46,23 @@ export class BlogWebhookEndpoints extends Adapter(WebhookEndpoints) {
   ): Promise<WebhookEndpoint | null> {
     const product = await this.deps.product.get(organizationId, endpointId);
     if (product !== null) return product;
-    if (organizationId !== BLOG_ORGANIZATION) return null;
     const subscriber = await this.deps.subscribers.getById(endpointId);
-    return subscriber === null ? null : endpointOf(subscriber);
+    if (
+      subscriber === null ||
+      subscriber.props.organizationId !== organizationId
+    ) {
+      return null;
+    }
+    return endpointOf(subscriber);
   }
 
   /** The hooks call this when an endpoint answers 410. */
   async disable(organizationId: string, endpointId: string): Promise<void> {
     this.deps.product.disable(organizationId, endpointId);
-    if (organizationId !== BLOG_ORGANIZATION) return;
     const subscriber = await this.deps.subscribers.getById(endpointId);
     if (
       subscriber === null ||
+      subscriber.props.organizationId !== organizationId ||
       !subscriber.props.channels.includes('webhook') ||
       subscriber.props.webhookDisabled === true
     ) {

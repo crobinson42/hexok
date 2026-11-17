@@ -32,7 +32,28 @@ export const domainErrorDefs = {
     }),
   },
   Unauthenticated: { message: 'The token is not valid' },
+  InvalidCredentials: { message: 'The credentials are not valid' },
   SignInRequired: { message: 'This call needs a signed-in caller' },
+  UserNotFound: {
+    message: 'User was not found',
+    data: z.object({ id: z.string() }),
+  },
+  UserAlreadyExists: {
+    message: 'User already exists',
+    data: z.object({ id: z.string() }),
+  },
+  OrganizationNotFound: {
+    message: 'Organization was not found',
+    data: z.object({ id: z.string() }),
+  },
+  AlreadyMember: {
+    message: 'User is already a member of this organization',
+    data: z.object({ userId: z.string(), organizationId: z.string() }),
+  },
+  NotAMember: {
+    message: 'Caller is not a member of this organization',
+    data: z.object({ userId: z.string(), organizationId: z.string() }),
+  },
 } satisfies ErrorMap;
 
 export class DomainError extends Errors('domain', domainErrorDefs) {}

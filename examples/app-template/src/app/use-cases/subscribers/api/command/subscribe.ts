@@ -11,11 +11,13 @@ import {
   notificationChannels,
 } from '../../../../../domain/schemas/subscriber.js';
 import type { DomainEventPublisher } from '../../../../ports/events/domain-event-publisher.js';
+import type { OrganizationRepository } from '../../../../ports/repos/organization-repository.js';
 import type { SubscriberRepository } from '../../../../ports/repos/subscriber-repository.js';
-import { ApiUseCase } from '../../../context.js';
+import { PublicApiUseCase } from '../../../context.js';
 
 /** Omitted `channels` means email. Channel rules are checked in `execute`. */
 export const subscribeToPostsInput = z.object({
+  organizationId: z.string().min(1),
   email: z.string().email(),
   phone: z.string().optional(),
   url: z.string().optional(),
@@ -27,12 +29,13 @@ export type SubscribeToPostsInput = z.infer<typeof subscribeToPostsInput>;
 /** The worker's URL check. HTTP does not start the sender. */
 export type CheckWebhookUrl = (url: string) => Promise<void>;
 
-export class SubscribeToPosts extends ApiUseCase('subscriber.subscribe', {
+export class SubscribeToPosts extends PublicApiUseCase('subscriber.subscribe', {
   input: subscribeToPostsInput,
 }) {
   constructor(
     private readonly deps: {
       subscribers: SubscriberRepository;
+      organizations: OrganizationRepository;
       domainEvents: DomainEventPublisher;
       checkWebhookUrl: CheckWebhookUrl;
     },
@@ -41,10 +44,19 @@ export class SubscribeToPosts extends ApiUseCase('subscriber.subscribe', {
   }
 
   async execute(
-    _ctx: UseCase.Ctx<typeof ApiUseCase>,
+    _ctx: UseCase.Ctx<typeof PublicApiUseCase>,
     input: SubscribeToPostsInput,
   ): Promise<SubscriberEntity> {
-    const existing = await this.deps.subscribers.getByEmail(input.email);
+    const organization = await this.deps.organizations.get(
+      input.organizationId,
+    );
+    if (organization === null) {
+      throw DomainError.OrganizationNotFound({ id: input.organizationId });
+    }
+    const existing = await this.deps.subscribers.getByEmail(
+      input.organizationId,
+      input.email,
+    );
     if (existing !== null) {
       return existing;
     }
@@ -59,6 +71,7 @@ export class SubscribeToPosts extends ApiUseCase('subscriber.subscribe', {
     }
     const subscriber = SubscriberEntity.create({
       id: randomUUID(),
+      organizationId: input.organizationId,
       email: input.email,
       channels,
       ...(phone === undefined || phone === '' ? {} : { phone }),
@@ -70,6 +83,7 @@ export class SubscribeToPosts extends ApiUseCase('subscriber.subscribe', {
     await this.deps.domainEvents.publish(
       new SubscriberJoinedEvent({
         subscriberId: subscriber.props.id,
+        organizationId: subscriber.props.organizationId,
         email: subscriber.props.email,
         channels: [...subscriber.props.channels],
         ...(subscriber.props.phone === undefined

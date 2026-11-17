@@ -3,10 +3,8 @@ import { RedisQueue } from '@hexok/queue-redis';
 import { Webhooks } from '@hexok/webhooks';
 import type { EventInstance } from 'hexok';
 import type { SubscriberRepository } from '../../app/ports/repos/subscriber-repository.js';
-import {
-  BLOG_ORGANIZATION,
-  WebhookEvents,
-} from '../../domain/events/webhook-events.js';
+import { WebhookEvents } from '../../domain/events/webhook-events.js';
+import { demoOrganization } from '../../infra/auth/demo-tenancy.js';
 import { BlogWebhookEndpoints } from '../../infra/webhooks/blog-webhook-endpoints.js';
 import { MemoryWebhookEndpoints } from '../../infra/webhooks/memory-webhook-endpoints.js';
 import { requiredEnvVar } from './env.js';
@@ -46,7 +44,7 @@ export function createWebhooks(runtime: {
   const url = process.env.WEBHOOK_URL;
   if (url !== undefined && url !== '') {
     product.add(
-      BLOG_ORGANIZATION,
+      demoOrganization.id,
       { id: 'env', url, secrets: [requiredEnvVar('WEBHOOK_SECRET')] },
       ['post.published'],
     );

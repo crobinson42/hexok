@@ -3,8 +3,10 @@ import { MemoryQuarantine } from '@hexok/quarantine';
 import type { RedisQueue } from '@hexok/queue-redis';
 import type { RedisScheduleCoordinator } from '@hexok/schedule-coordinator-redis';
 import { connectRedis } from '../../infra/clients/redis-client.js';
+import { RedisOrganizations } from '../../infra/repos/redis-organizations.js';
 import { RedisPosts } from '../../infra/repos/redis-posts.js';
 import { RedisSubscribers } from '../../infra/repos/redis-subscribers.js';
+import { RedisUsers } from '../../infra/repos/redis-users.js';
 import { createDomainEventsQueue } from './domain-events.js';
 import { createLogger } from './logger.js';
 import { createScheduleCoordinator } from './schedule.js';
@@ -17,6 +19,8 @@ export type Runtime = {
   quarantine: MemoryQuarantine;
   posts: RedisPosts;
   subscribers: RedisSubscribers;
+  users: RedisUsers;
+  organizations: RedisOrganizations;
   domainEventsQueue: RedisQueue;
   scheduleCoordinator: RedisScheduleCoordinator;
   /** Stop the queue and coordinator, then close Redis. */
@@ -43,6 +47,8 @@ export async function createRuntime(): Promise<Runtime> {
     quarantine,
     posts: new RedisPosts({ redis }),
     subscribers: new RedisSubscribers({ redis }),
+    users: new RedisUsers({ redis }),
+    organizations: new RedisOrganizations({ redis }),
     domainEventsQueue,
     scheduleCoordinator,
     async stop() {

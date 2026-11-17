@@ -16,7 +16,7 @@ The schema runs when the post is created from typed props, when unknown input is
 
 ## How to use it
 
-Publishing is a method on the entity. The use case loads the post, calls the method, and saves. The method refuses a blank title with a catalog error, then updates the draft.
+Publishing is a method on the entity. The use case loads the post, calls the method, and saves. The method refuses a blank title with a catalog error, then updates the draft. When several use cases share that load-then-rule script, an [application service](application-service.md) calls the entity method. The rule stays on the entity.
 
 ```ts
 class Post extends Entity('Post', PostSchema) {

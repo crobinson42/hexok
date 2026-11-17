@@ -24,7 +24,9 @@ export class EmailUnpublishedHandler extends EventHandler(
   }
 
   async handle(event: PostUnpublishedEvent): Promise<void> {
-    const listed = await this.deps.subscribers.list();
+    const listed = await this.deps.subscribers.listByOrganization(
+      event.payload.organizationId,
+    );
     for (const subscriber of listed) {
       await this.#send(subscriber, {
         subject: 'Post removed',

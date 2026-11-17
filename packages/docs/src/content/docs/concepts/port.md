@@ -47,6 +47,8 @@ class PublishPost extends UseCase('post.publish') {
 
 The methods are whatever this seam needs. A repository might offer `get` and `save`. A publisher might offer only `publish`. A mail port might offer `send`. The use case depends on the port class. The composition root passes adapters on `deps`: `new PublishPost({ posts, events })`.
 
+A port is a job with more than one implementation. Shared policy that has one correct implementation is an [application service](/hexok/concepts/application-service/). Requiring organization membership is that kind of script. `Port('Membership')` lets an adapter skip the entity.
+
 ## API
 
 `Port(token)` returns an abstract class. `token` is a string literal.

@@ -3,6 +3,7 @@ import { z } from 'zod';
 
 export const postUnpublishedSchema = z.object({
   postId: z.string().min(1),
+  organizationId: z.string().min(1),
   title: z.string().min(1),
 });
 

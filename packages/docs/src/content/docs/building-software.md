@@ -17,7 +17,7 @@ The story names what you store. Creating and publishing a post means persisting 
 
 Write the use case as the story itself: create the post and publish it. Saving the post is a port, a dependency the use case calls. When that use case or port already exists, use it.
 
-Pass every port in one constructor argument named `deps`, including a use case with a single port. Write the core port first. The story calls those ports through `this.deps`. When the composition root chooses a setting for that long-lived instance, pass a second argument, `config`. A choice on one request stays on the input to `execute`. A value shared by a context family stays on that family's static spec.
+Pass every port in one constructor argument named `deps`, including a use case with a single port. Write the core port first. The story calls those ports through `this.deps`. When several use cases share a load-then-rule script, such as requiring organization membership, put an [application service](/hexok/concepts/application-service/) on `deps`. That class lives in the application. It is not a port. When the composition root chooses a setting for that long-lived instance, pass a second argument, `config`. A choice on one request stays on the input to `execute`. A value shared by a context family stays on that family's static spec.
 
 ## Publish side effects
 

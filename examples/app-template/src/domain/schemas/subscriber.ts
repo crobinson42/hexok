@@ -9,6 +9,7 @@ export type NotificationChannel = z.infer<typeof notificationChannelSchema>;
 
 export const subscriberSchema = z.object({
   id: z.string().min(1),
+  organizationId: z.string().min(1),
   email: z.string().email(),
   phone: z.string().min(1).optional(),
   channels: z.array(notificationChannelSchema).min(1).readonly(),

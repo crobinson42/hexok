@@ -16,6 +16,7 @@ import {
 
 const payload = {
   postId: 'post-1',
+  organizationId: 'hexok',
   title: 'Hello',
   emailSubscribers: true,
 };

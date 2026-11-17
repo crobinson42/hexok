@@ -2,9 +2,8 @@ import { NoopLogger } from '@hexok/logger';
 import { createSessions } from '../runtime/sessions.js';
 
 /**
- * Signs a user in for local development and prints the token. The template
- * has no login procedure: a real app checks the credentials it owns, then
- * calls `sessions.open`.
+ * Signs a user in for local development and prints the token. This skips
+ * the password check. `auth/login` is the procedure that checks it.
  *
  * npm run session:open -w @hexok/app-template -- ada
  */
@@ -21,7 +20,7 @@ const { sessions, store } = createSessions({
 });
 await store.start();
 try {
-  console.log(await sessions.open({ userId }));
+  console.log(await sessions.toJwt({ userId }));
 } finally {
   await store.stop();
 }

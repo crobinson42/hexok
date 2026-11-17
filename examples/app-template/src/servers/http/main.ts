@@ -1,4 +1,9 @@
 import { serve } from 'srvx';
+import { seedDemoTenancy } from '../../infra/auth/demo-tenancy.js';
+import {
+  demoUsers,
+  StaticCredentials,
+} from '../../infra/auth/static-credentials.js';
 import { createApi } from '../api.js';
 import { createApiApp } from '../rpc/app.js';
 import { createPublishers } from '../runtime/domain-events.js';
@@ -24,17 +29,24 @@ onShutdown(runtime.logger, async () => {
 });
 await runtime.domainEventsQueue.start();
 await sessionStore.start();
+await seedDemoTenancy({
+  users: runtime.users,
+  organizations: runtime.organizations,
+});
 
 const api = createApi({
   posts: runtime.posts,
   subscribers: runtime.subscribers,
+  users: runtime.users,
+  organizations: runtime.organizations,
+  credentials: new StaticCredentials(demoUsers),
   ...createPublishers(runtime),
   checkWebhookUrl: createWebhookUrlChecker(runtime),
 });
 
 const server = serve({
   port: Number(process.env.PORT ?? 3000),
-  fetch: createHttpHandler(createApiApp(api), {
+  fetch: createHttpHandler(createApiApp(api, sessions), {
     sessions,
     logger: runtime.logger,
   }),

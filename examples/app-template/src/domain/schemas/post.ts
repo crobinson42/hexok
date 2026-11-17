@@ -3,6 +3,7 @@ import { z } from 'zod';
 
 export const postSchema = z.object({
   id: z.string().min(1),
+  organizationId: z.string().min(1),
   title: z.string().min(1),
   body: z.string(),
   status: z.enum(['draft', 'scheduled', 'published']),

@@ -4,10 +4,7 @@ import type { Logger } from '@hexok/logger';
 import { SmsError, type SmsSender } from '@hexok/sms';
 import { EventHandler } from 'hexok';
 import { SubscriberJoinedEvent } from '../../../../domain/events/subscriber-joined.js';
-import {
-  BLOG_ORGANIZATION,
-  SubscriberWelcomeWebhook,
-} from '../../../../domain/events/webhook-events.js';
+import { SubscriberWelcomeWebhook } from '../../../../domain/events/webhook-events.js';
 import type { WebhookPublisher } from '../../../ports/events/webhook-publisher.js';
 
 export class WelcomeSubscriberHandler extends EventHandler(
@@ -60,7 +57,7 @@ export class WelcomeSubscriberHandler extends EventHandler(
     }
     if (!event.payload.channels.includes('webhook')) return;
     await this.deps.webhooks.publish({
-      organizationId: BLOG_ORGANIZATION,
+      organizationId: event.payload.organizationId,
       eventId: `${SubscriberWelcomeWebhook.token}:${event.payload.subscriberId}`,
       endpointIds: [event.payload.subscriberId],
       event: new SubscriberWelcomeWebhook({

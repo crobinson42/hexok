@@ -4,6 +4,7 @@ import type { PostEntity } from '../../../../../domain/entities/post.js';
 import { DomainError } from '../../../../../domain/errors/domain.js';
 import type { DomainEventPublisher } from '../../../../ports/events/domain-event-publisher.js';
 import type { PostRepository } from '../../../../ports/repos/post-repository.js';
+import type { Membership } from '../../../../services/membership.js';
 import { ApiUseCase, internalCallCtx } from '../../../context.js';
 import { CommitPublishedPost } from '../../internal/commit-published-post.js';
 
@@ -24,6 +25,7 @@ export class PublishPost extends ApiUseCase('post.publish', {
   constructor(
     private readonly deps: {
       posts: PostRepository;
+      membership: Membership;
       domainEvents: DomainEventPublisher;
     },
   ) {
@@ -32,16 +34,20 @@ export class PublishPost extends ApiUseCase('post.publish', {
   }
 
   async execute(
-    _ctx: UseCase.Ctx<typeof ApiUseCase>,
+    ctx: UseCase.Ctx<typeof ApiUseCase>,
     input: PublishPostInput,
   ): Promise<PostEntity> {
+    const post = await this.deps.posts.get(input.id);
+    if (post === null) {
+      throw DomainError.PostNotFound({ id: input.id });
+    }
+    await this.deps.membership.requireOrgMember(
+      ctx.caller.userId,
+      post.props.organizationId,
+    );
     const publishAt = input.publishAt;
     const emailSubscribers = input.emailSubscribers === true;
     if (publishAt !== undefined && isFuture(publishAt)) {
-      const post = await this.deps.posts.get(input.id);
-      if (post === null) {
-        throw DomainError.PostNotFound({ id: input.id });
-      }
       post.schedule({ publishAt, emailSubscribers });
       await this.deps.posts.save(post);
       return post;

@@ -16,11 +16,19 @@ export const callerSchema = z.object({ userId: z.string().min(1) });
 export type Caller = z.infer<typeof callerSchema>;
 
 /**
- * Context for use cases under `api/`. HTTP builds this from the request and
- * the session the token names. No `caller` is an anonymous request.
+ * Context for `PublicApiUseCase`. HTTP builds this from the request. No
+ * `caller` is an anonymous request.
+ */
+export type PublicApiCtx = {
+  caller?: Caller;
+};
+
+/**
+ * Context for `ApiUseCase`. The family guard requires `caller`. `execute`
+ * treats it as present.
  */
 export type ApiCtx = {
-  caller?: Caller;
+  caller: Caller;
 };
 
 /** Each API use case declares the schema of its `execute` input. */
@@ -49,10 +57,19 @@ function validInputGuard({
   }
 }
 
-/** `caller` is optional. A use case that needs one checks it in `execute`. */
-export const ApiUseCase = UseCase.context<ApiCtx, ApiSpec>().guard(
+function requireCaller({ ctx }: { ctx: ApiCtx }): void {
+  if (ctx.caller === undefined) throw DomainError.SignInRequired();
+}
+
+/** Login and subscribe. `caller` is optional. */
+export const PublicApiUseCase = UseCase.context<PublicApiCtx, ApiSpec>().guard(
   validInputGuard,
 );
+
+/** Post writes, logout, and who-am-i. The guard requires `caller`. */
+export const ApiUseCase = UseCase.context<ApiCtx, ApiSpec>()
+  .guard(validInputGuard)
+  .guard(requireCaller);
 
 /**
  * Private to this module. In-project callers receive it from `internalCallCtx`.

@@ -2,19 +2,25 @@ import { Adapter } from 'hexok';
 import { describe, expect, it } from 'vitest';
 import { SubscriberRepository } from '../../app/ports/repos/subscriber-repository.js';
 import { SubscriberEntity } from '../../domain/entities/subscriber.js';
-import {
-  BLOG_ORGANIZATION,
-  SubscriberPostPublishedWebhook,
-} from '../../domain/events/webhook-events.js';
+import { SubscriberPostPublishedWebhook } from '../../domain/events/webhook-events.js';
+import { demoOrganization } from '../auth/demo-tenancy.js';
 import { BlogWebhookEndpoints } from './blog-webhook-endpoints.js';
 import { MemoryWebhookEndpoints } from './memory-webhook-endpoints.js';
 
 class Rows extends Adapter(SubscriberRepository) {
   readonly #rows = new Map<string, SubscriberEntity>();
 
-  override async getByEmail(email: string): Promise<SubscriberEntity | null> {
+  override async getByEmail(
+    organizationId: string,
+    email: string,
+  ): Promise<SubscriberEntity | null> {
     for (const row of this.#rows.values()) {
-      if (row.props.email === email) return row;
+      if (
+        row.props.organizationId === organizationId &&
+        row.props.email === email
+      ) {
+        return row;
+      }
     }
     return null;
   }
@@ -25,6 +31,14 @@ class Rows extends Adapter(SubscriberRepository) {
 
   override async list(): Promise<readonly SubscriberEntity[]> {
     return [...this.#rows.values()];
+  }
+
+  override async listByOrganization(
+    organizationId: string,
+  ): Promise<readonly SubscriberEntity[]> {
+    return [...this.#rows.values()].filter(
+      (row) => row.props.organizationId === organizationId,
+    );
   }
 
   override async save(subscriber: SubscriberEntity): Promise<void> {
@@ -41,11 +55,12 @@ describe('BlogWebhookEndpoints', () => {
       url: 'https://product.example/in',
       secrets: ['whsec_env'],
     };
-    product.add(BLOG_ORGANIZATION, env, ['post.published']);
+    product.add(demoOrganization.id, env, ['post.published']);
     const subscribers = new Rows();
     await subscribers.save(
       SubscriberEntity.create({
         id: 'sub-1',
+        organizationId: demoOrganization.id,
         email: 'ada@ex.com',
         channels: ['webhook'],
         webhookUrl: 'https://ada.example/hooks',
@@ -55,11 +70,11 @@ describe('BlogWebhookEndpoints', () => {
     const endpoints = new BlogWebhookEndpoints({ product, subscribers });
 
     expect(
-      await endpoints.subscribed(BLOG_ORGANIZATION, 'post.published'),
+      await endpoints.subscribed(demoOrganization.id, 'post.published'),
     ).toEqual([env]);
     expect(
       await endpoints.subscribed(
-        BLOG_ORGANIZATION,
+        demoOrganization.id,
         SubscriberPostPublishedWebhook.token,
       ),
     ).toEqual([
@@ -69,11 +84,14 @@ describe('BlogWebhookEndpoints', () => {
         secrets: ['whsec_ada'],
       },
     ]);
-    expect(await endpoints.get(BLOG_ORGANIZATION, 'sub-1')).toEqual({
+    expect(await endpoints.get(demoOrganization.id, 'sub-1')).toEqual({
       id: 'sub-1',
       url: 'https://ada.example/hooks',
       secrets: ['whsec_ada'],
     });
+    expect(
+      await endpoints.subscribed('other', SubscriberPostPublishedWebhook.token),
+    ).toEqual([]);
   });
 
   it('returns null from get after a 410, and omits the subscriber from subscribed', async () => {
@@ -81,6 +99,7 @@ describe('BlogWebhookEndpoints', () => {
     await subscribers.save(
       SubscriberEntity.create({
         id: 'sub-1',
+        organizationId: demoOrganization.id,
         email: 'ada@ex.com',
         channels: ['webhook'],
         webhookUrl: 'https://ada.example/hooks',
@@ -92,12 +111,12 @@ describe('BlogWebhookEndpoints', () => {
       subscribers,
     });
 
-    await endpoints.disable(BLOG_ORGANIZATION, 'sub-1');
+    await endpoints.disable(demoOrganization.id, 'sub-1');
 
-    expect(await endpoints.get(BLOG_ORGANIZATION, 'sub-1')).toBeNull();
+    expect(await endpoints.get(demoOrganization.id, 'sub-1')).toBeNull();
     expect(
       await endpoints.subscribed(
-        BLOG_ORGANIZATION,
+        demoOrganization.id,
         SubscriberPostPublishedWebhook.token,
       ),
     ).toEqual([]);

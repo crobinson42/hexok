@@ -5,6 +5,7 @@ import { PostEntity } from './post.js';
 function draftPost(): PostEntity {
   return PostEntity.create({
     id: 'post-1',
+    organizationId: 'hexok',
     title: 'Hello',
     body: 'Text',
     status: 'draft',

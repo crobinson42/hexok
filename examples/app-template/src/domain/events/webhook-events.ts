@@ -1,9 +1,6 @@
 import { Event, EventCatalog } from 'hexok';
 import { z } from 'zod';
 
-/** The blog has one organization. A multi-tenant product passes the tenant that owns the post. */
-export const BLOG_ORGANIZATION = 'blog';
-
 /** What a customer's endpoint receives when a post goes live. */
 export class PostPublishedWebhook extends Event(
   'post.published',

@@ -9,6 +9,7 @@ export type { IntegrationEnvelope, IntegrationMeta } from './envelope.js';
 export {
   type Downgrade,
   Message,
+  type MessageClass,
   type MessageConstructor,
   type MessageInstance,
   type MessageOptions,

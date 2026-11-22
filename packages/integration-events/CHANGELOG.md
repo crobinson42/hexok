@@ -1,5 +1,11 @@
 # @hexok/integration-events
 
+## 0.2.2
+
+### Patch Changes
+
+- [#33](https://github.com/crobinson42/hexok/pull/33) [`ec51bd1`](https://github.com/crobinson42/hexok/commit/ec51bd188f5db76147d69b24e7e37ebe7100c87f) Thanks [@crobinson42](https://github.com/crobinson42)! - Export `MessageClass`, the type `Message` returns. An app that emits declarations can now export a `Message` or `Contract` class.
+
 ## 0.2.1
 
 ### Patch Changes

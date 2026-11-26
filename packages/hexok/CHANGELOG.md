@@ -1,5 +1,11 @@
 # hexok
 
+## 2.2.8
+
+### Patch Changes
+
+- [#35](https://github.com/crobinson42/hexok/pull/35) [`8d72f35`](https://github.com/crobinson42/hexok/commit/8d72f3584561f002966cbc2183aa488e9aab03fe) Thanks [@crobinson42](https://github.com/crobinson42)! - `UseCase.context` factories type-check their statics without intersecting them with the spec again. A spec with a wide property type, such as a Zod schema, no longer costs thousands of type instantiations for each call.
+
 ## 2.2.7
 
 ### Patch Changes

@@ -306,7 +306,9 @@ function buildContext<Ctx, Spec = NoStatics>(options?: {
     const S extends [keyof Spec] extends [never] ? NoStatics : Spec,
   >(
     token: Token,
-    ...args: [keyof Spec] extends [never] ? [] : [statics: ReservedOk<S> & Spec]
+    // `S extends Spec` enforces the spec. Intersecting with `Spec` again makes
+    // TypeScript build each property's intersection, which is costly for wide types.
+    ...args: [keyof Spec] extends [never] ? [] : [statics: S & ReservedOk<S>]
   ) {
     // Conditional rest tuple: index 0 is the statics bag, or absent.
     const statics = bagOf(args as readonly unknown[]);

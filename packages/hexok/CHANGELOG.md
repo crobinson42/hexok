@@ -1,5 +1,11 @@
 # hexok
 
+## 2.2.9
+
+### Patch Changes
+
+- [#37](https://github.com/crobinson42/hexok/pull/37) [`6781e48`](https://github.com/crobinson42/hexok/commit/6781e488d102d3a9b857ee7b79319145b19e314c) Thanks [@crobinson42](https://github.com/crobinson42)! - The `hexok` README says the npm package ships the agent skill at `node_modules/hexok/skills/hexok`. The `@hexok/ioredis-lifecycle` README says an application's own Redis adapter may import it.
+
 ## 2.2.8
 
 ### Patch Changes

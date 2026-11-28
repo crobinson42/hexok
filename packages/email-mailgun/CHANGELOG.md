@@ -1,5 +1,16 @@
 # @hexok/email-mailgun
 
+## 0.3.0
+
+### Minor Changes
+
+- [#39](https://github.com/crobinson42/hexok/pull/39) [`01cf954`](https://github.com/crobinson42/hexok/commit/01cf9540c9b937398411ebf3f6793f4ef3c66448) Thanks [@crobinson42](https://github.com/crobinson42)! - `EmailMessage` takes `headers`, such as `In-Reply-To`, `References`, or `Auto-Submitted`. `assertEmailMessage` throws the new `EmailError.InvalidHeader` for a malformed name, a value with a line break or NUL, a repeated name, or a field the message already models. The Resend adapter sends `headers` as the SDK's `headers`. The Mailgun adapter sends them as `h:` fields. Quarantine parks headers except for a `sensitive` message.
+
+### Patch Changes
+
+- Updated dependencies [[`01cf954`](https://github.com/crobinson42/hexok/commit/01cf9540c9b937398411ebf3f6793f4ef3c66448)]:
+  - @hexok/email@0.3.0
+
 ## 0.2.2
 
 ### Patch Changes

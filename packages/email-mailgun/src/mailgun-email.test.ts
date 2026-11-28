@@ -96,6 +96,50 @@ describe('MailgunEmailSender', () => {
     expect(first.data['v:idempotencyKey']).not.toBe('nope');
   });
 
+  it('sends headers as h: fields and parks them unless the message is sensitive', async () => {
+    const headers = {
+      'In-Reply-To': '<a@example.com>',
+      'Auto-Submitted': 'auto-replied',
+    };
+    let sent: Record<string, unknown> = {};
+    const client: MailgunLike = {
+      messages: {
+        async create(_domain, data) {
+          sent = data;
+          return { id: '<1>' };
+        },
+      },
+    };
+    await new MailgunEmailSender({ client, domain: 'mg.example' }).send({
+      ...message,
+      headers,
+    });
+    expect(sent['h:In-Reply-To']).toBe('<a@example.com>');
+    expect(sent['h:Auto-Submitted']).toBe('auto-replied');
+
+    const parked: ParkInput[] = [];
+    const quarantine = {
+      async park(input: ParkInput) {
+        parked.push(input);
+        return { id: 'q1' };
+      },
+    };
+    for (const item of [
+      { ...message, headers },
+      { ...message, headers, sensitive: true },
+    ]) {
+      await expect(
+        new MailgunEmailSender({
+          client: failing(503),
+          domain: 'mg.example',
+          quarantine,
+        }).send(item),
+      ).rejects.toMatchObject({ code: 'Unavailable' });
+    }
+    expect(parked[0]?.payload).toMatchObject({ headers });
+    expect(parked[1]?.payload).not.toHaveProperty('headers');
+  });
+
   it('does not retry and maps status codes', async () => {
     let calls = 0;
     const client: MailgunLike = {

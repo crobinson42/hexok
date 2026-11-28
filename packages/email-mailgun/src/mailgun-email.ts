@@ -96,6 +96,11 @@ export class MailgunEmailSender extends Adapter(EmailSender) {
         contentType: attachment.contentType,
       }));
     }
+    if (message.headers) {
+      for (const [name, value] of Object.entries(message.headers)) {
+        data[`h:${name}`] = value;
+      }
+    }
     if (this.#sandbox) data['o:testmode'] = 'yes';
     if (message.idempotencyKey) {
       data['v:idempotencyKey'] = message.idempotencyKey;

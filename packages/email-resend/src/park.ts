@@ -87,6 +87,7 @@ function messagePayload(message: EmailMessage): Record<string, unknown> {
   if (message.text) payload.text = message.text;
   if (message.html) payload.html = message.html;
   if (message.tags) payload.tags = { ...message.tags };
+  if (message.headers) payload.headers = { ...message.headers };
   if (message.idempotencyKey) payload.idempotencyKey = message.idempotencyKey;
   return payload;
 }

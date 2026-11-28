@@ -150,6 +150,52 @@ describe('ResendEmailSender', () => {
     expect(options).toEqual({ idempotencyKey: 'key-1' });
   });
 
+  it('passes headers through and parks them unless the message is sensitive', async () => {
+    let payload: unknown;
+    const headers = {
+      'In-Reply-To': '<a@example.com>',
+      'Auto-Submitted': 'auto-replied',
+    };
+    const client: ResendLike = {
+      emails: {
+        async send(body) {
+          payload = body;
+          return { data: { id: 'email_h' }, error: null };
+        },
+      },
+    };
+    await new ResendEmailSender({ client }).send({ ...base, headers });
+    expect(payload).toMatchObject({ headers });
+
+    const parked: ParkInput[] = [];
+    const quarantine = {
+      async park(input: ParkInput) {
+        parked.push(input);
+        return { id: 'q1' };
+      },
+    };
+    const retry = {
+      retries: 0,
+      minTimeout: 0,
+      maxTimeout: 0,
+      randomize: false,
+    };
+    for (const message of [
+      { ...base, headers },
+      { ...secret, headers },
+    ]) {
+      await expect(
+        new ResendEmailSender({
+          client: failing(503, 'application_error'),
+          quarantine,
+          retry,
+        }).send(message),
+      ).rejects.toMatchObject({ code: 'Unavailable' });
+    }
+    expect(parked[0]?.payload).toMatchObject({ headers });
+    expect(parked[1]?.payload).not.toHaveProperty('headers');
+  });
+
   it('sends attachments', async () => {
     let payload: unknown;
     const client: ResendLike = {

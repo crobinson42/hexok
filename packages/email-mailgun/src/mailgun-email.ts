@@ -27,9 +27,19 @@ export interface MailgunEmailSenderConfig {
   readonly exposeProviderErrors?: boolean;
 }
 
+/** RFC 5322 specials. A display name with one must be a quoted-string. */
+const SPECIALS = /[()<>[\]:;@\\,."]/;
+
+function displayName(name: string): string {
+  if (!SPECIALS.test(name)) return name;
+  return `"${name.replace(/["\\]/g, '\\$&')}"`;
+}
+
 function formatFrom(message: EmailMessage): string {
   const name = message.from.name;
-  return name ? `${name} <${message.from.email}>` : message.from.email;
+  return name
+    ? `${displayName(name)} <${message.from.email}>`
+    : message.from.email;
 }
 
 function statusOf(error: unknown): number | undefined {

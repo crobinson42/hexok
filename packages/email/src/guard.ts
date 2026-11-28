@@ -46,6 +46,9 @@ function assertHeaders(
 
 export function assertEmailMessage(message: EmailMessage): void {
   if (blanks(message.to)) throw EmailError.InvalidRecipient();
+  if (message.from.name !== undefined && UNSAFE_VALUE.test(message.from.name)) {
+    throw EmailError.InvalidHeader();
+  }
   const text = message.text?.trim() ?? '';
   const html = message.html?.trim() ?? '';
   if (text === '' && html === '') throw EmailError.InvalidMessage();

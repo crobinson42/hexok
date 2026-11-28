@@ -196,6 +196,32 @@ describe('ResendEmailSender', () => {
     expect(parked[1]?.payload).not.toHaveProperty('headers');
   });
 
+  it.each([
+    [
+      'Ada Lovelace via Acme Support',
+      'Ada Lovelace via Acme Support <from@example.com>',
+    ],
+    ['Ada, PhD via Acme', '"Ada, PhD via Acme" <from@example.com>'],
+    ['Acme Inc.', '"Acme Inc." <from@example.com>'],
+    ['ops@acme <bot>', '"ops@acme <bot>" <from@example.com>'],
+    ['Say "hi" \\ bye', '"Say \\"hi\\" \\\\ bye" <from@example.com>'],
+  ])('formats the display name %j', async (name, expected) => {
+    let payload: unknown;
+    const client: ResendLike = {
+      emails: {
+        async send(body) {
+          payload = body;
+          return { data: { id: 'email_n' }, error: null };
+        },
+      },
+    };
+    await new ResendEmailSender({ client }).send({
+      ...base,
+      from: { email: 'from@example.com', name },
+    });
+    expect(payload).toMatchObject({ from: expected });
+  });
+
   it('sends attachments', async () => {
     let payload: unknown;
     const client: ResendLike = {

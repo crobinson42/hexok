@@ -22,6 +22,13 @@ export interface EmailMessage {
   readonly html?: string;
   readonly attachments?: readonly EmailAttachment[];
   readonly tags?: Readonly<Record<string, string>>;
+  /**
+   * Extra header fields, such as `In-Reply-To`, `References`, or `Auto-Submitted`.
+   * Fields the message already models are refused: `From`, `To`, `Cc`, `Bcc`,
+   * `Reply-To`, `Subject`, and the MIME fields `Content-Type`,
+   * `Content-Transfer-Encoding`, and `MIME-Version`.
+   */
+  readonly headers?: Readonly<Record<string, string>>;
   readonly idempotencyKey?: string;
   /** Keeps recipients, subject, and body out of quarantine and logs. Use it for one-time codes and reset links. */
   readonly sensitive?: boolean;
@@ -34,6 +41,7 @@ export interface EmailReceipt {
 export class EmailError extends Errors('email', {
   InvalidRecipient: { message: 'No recipient' },
   InvalidMessage: { message: 'Email needs text or html' },
+  InvalidHeader: { message: 'Email header is not allowed' },
   Rejected: { message: 'Email was rejected' },
   RateLimited: { message: 'Email provider rate limited the send' },
   Unavailable: { message: 'Email provider is unavailable' },

@@ -28,6 +28,7 @@ interface ResendEmailFields {
     contentType?: string;
   }>;
   tags?: Array<{ name: string; value: string }>;
+  headers?: Record<string, string>;
 }
 
 type ResendEmailBody =
@@ -182,6 +183,7 @@ export class ResendEmailSender extends Adapter(EmailSender) {
         value,
       }));
     }
+    if (message.headers) payload.headers = { ...message.headers };
     const expose = this.#exposeProviderErrors && !message.sensitive;
     const options = message.idempotencyKey
       ? { idempotencyKey: message.idempotencyKey }

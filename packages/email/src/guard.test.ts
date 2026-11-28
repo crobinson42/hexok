@@ -61,4 +61,15 @@ describe('assertEmailMessage headers', () => {
       EmailError.InvalidHeader(),
     );
   });
+
+  it.each(['Ada\r\nBcc: x@example.com', 'Ada\nLovelace', 'Ada\0'])(
+    'rejects a from name with a line break or NUL: %j',
+    (name) => {
+      expect(() =>
+        assertEmailMessage(
+          message({ from: { email: 'from@example.com', name } }),
+        ),
+      ).toThrow(EmailError.InvalidHeader());
+    },
+  );
 });

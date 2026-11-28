@@ -4,7 +4,7 @@ Mailgun adapter for `@hexok/email`. Install with `npm i @hexok/email-mailgun`. `
 
 The adapter class is closed. Its fields and helpers are private. Wrap it in your own adapter of the port when you need extra logic.
 
-`headers` is sent as `h:` fields, such as `h:In-Reply-To`. There is no retry. Sandbox sets `o:testmode` to `yes` and omits the key otherwise. `idempotencyKey` is stored only as `v:idempotencyKey`. That is not provider dedupe, so a retry can double-send. An optional `quarantine` sink parks `Unavailable` and `RateLimited`. `Rejected` is not parked. This package does not depend on `@hexok/quarantine`.
+`from` is the message from. A display name with an RFC 5322 special, such as `,`, `.`, `@`, or `<`, is sent as a quoted-string with `"` and `\` escaped. `headers` is sent as `h:` fields, such as `h:In-Reply-To`. There is no retry. Sandbox sets `o:testmode` to `yes` and omits the key otherwise. `idempotencyKey` is stored only as `v:idempotencyKey`. That is not provider dedupe, so a retry can double-send. An optional `quarantine` sink parks `Unavailable` and `RateLimited`. `Rejected` is not parked. This package does not depend on `@hexok/quarantine`.
 
 Errors are safe by default. A provider failure logs `email: mailgun send failed` with only the status and attempt. `Rejected` carries its default message, because Mailgun's error text can hold the recipient address. A failed park logs only the error name. Set `exposeProviderErrors: true` to put Mailgun's error text in `Rejected` and log raw provider and park errors. A `sensitive` message never exposes them.
 

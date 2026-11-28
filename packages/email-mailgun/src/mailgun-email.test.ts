@@ -140,6 +140,32 @@ describe('MailgunEmailSender', () => {
     expect(parked[1]?.payload).not.toHaveProperty('headers');
   });
 
+  it.each([
+    [
+      'Ada Lovelace via Acme Support',
+      'Ada Lovelace via Acme Support <from@example.com>',
+    ],
+    ['Ada, PhD via Acme', '"Ada, PhD via Acme" <from@example.com>'],
+    ['Acme Inc.', '"Acme Inc." <from@example.com>'],
+    ['ops@acme <bot>', '"ops@acme <bot>" <from@example.com>'],
+    ['Say "hi" \\ bye', '"Say \\"hi\\" \\\\ bye" <from@example.com>'],
+  ])('formats the display name %j', async (name, expected) => {
+    let sent: Record<string, unknown> = {};
+    const client: MailgunLike = {
+      messages: {
+        async create(_domain, data) {
+          sent = data;
+          return { id: '<1>' };
+        },
+      },
+    };
+    await new MailgunEmailSender({ client, domain: 'mg.example' }).send({
+      ...message,
+      from: { email: 'from@example.com', name },
+    });
+    expect(sent.from).toBe(expected);
+  });
+
   it('does not retry and maps status codes', async () => {
     let calls = 0;
     const client: MailgunLike = {

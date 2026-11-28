@@ -1,6 +1,6 @@
 {
   "name": "@hexok/email",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "description": "Email port and EmailError catalog for hexok.",
   "type": "module",
   "license": "MIT",

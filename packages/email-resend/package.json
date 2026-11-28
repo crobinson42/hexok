@@ -1,6 +1,6 @@
 {
   "name": "@hexok/email-resend",
-  "version": "1.1.0",
+  "version": "1.1.1",
   "description": "Resend adapter for the hexok EmailSender port.",
   "type": "module",
   "license": "MIT",
@@ -44,7 +44,7 @@
     "clean": "rm -rf dist *.tsbuildinfo"
   },
   "dependencies": {
-    "@hexok/email": "^0.3.0",
+    "@hexok/email": "^0.3.1",
     "hexok": "^2.2.3",
     "p-retry": "^8.0.1"
   },

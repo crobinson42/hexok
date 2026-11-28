@@ -1,5 +1,11 @@
 # @hexok/email
 
+## 0.3.1
+
+### Patch Changes
+
+- [#41](https://github.com/crobinson42/hexok/pull/41) [`d9b7ca7`](https://github.com/crobinson42/hexok/commit/d9b7ca7fd1e5292eb725b59ccbb4f78f21fef40e) Thanks [@crobinson42](https://github.com/crobinson42)! - The Resend and Mailgun adapters send a `from.name` with an RFC 5322 special, such as `,`, `.`, `@`, or `<`, as a quoted-string with `"` and `\` escaped. Before, such a name broke or misparsed the From header. `assertEmailMessage` throws `InvalidHeader` for a `from.name` with a line break or NUL.
+
 ## 0.3.0
 
 ### Minor Changes
